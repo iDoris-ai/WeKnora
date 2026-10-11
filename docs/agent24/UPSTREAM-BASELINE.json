@@ -1,0 +1,26 @@
+{
+  "kind": "initial_snapshot",
+  "recorded_on": "2026-10-11",
+  "fork": "iDoris-ai/WeKnora",
+  "upstream": "Tencent/WeKnora",
+  "release": {
+    "tag": "v0.8.2",
+    "commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
+    "mirror_branch": "upstream-release"
+  },
+  "development": {
+    "source_branch": "main",
+    "commit": "231a5c0b15b817bb13ee3a876c3fbaf337cb4d5e",
+    "mirror_branch": "upstream-main"
+  },
+  "product": {
+    "branch": "a24/develop",
+    "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97"
+  },
+  "sync_policy": {
+    "mirror_update": "fast-forward-only",
+    "product_update": "reviewed-release-merge-pr",
+    "auto_merge": false,
+    "interval_hours": 6
+  }
+}
