@@ -29,17 +29,16 @@ end
 # ** 任意字符；* 不跨 /；? 前一字符零或一次；+ 前一字符一或多次；[...] 字符集；其余按字面。
 # 平台语义有疑问的写法按 wide 取舍：wide 为 true 时取较宽的解释（用于"可能匹配"，宁可多拦），
 # 为 false 时取较窄的解释（用于"一定匹配"的排除）。cheat sheet 里 '**/README.md' 匹配 README.md，
-# 即开头或中间的 **/ 可以匹配零层目录；结尾的 /** 能否匹配零层没写，同样按 wide 取舍。
+# 即 **/ 可以匹配零层目录；其它与 ** 相邻的 /（结尾的 /**、***/、/**/** 等）文档没写，
+# wide 下一律当作可省略。大小写是否敏感文档也没写，wide 下不区分大小写。
 def glob_to_regex(pattern, wide:)
   out = +""
   quantified = false # 上一个原子是否已带量词；叠加量词（*+、?+、++ 等）在 Ruby 里另有含义，按无法识别处理
   i = 0
   while i < pattern.length
     c = pattern[i]
-    if wide && pattern[i, 3] == "**/"
-      out << "(?:.*/)?"; i += 3; quantified = true
-    elsif wide && pattern[i, 3] == "/**" && i + 3 == pattern.length
-      out << "(?:/.*)?"; i += 3; quantified = true
+    if wide && c == "/" && ((i >= 2 && pattern[i - 2, 2] == "**") || pattern[i + 1, 2] == "**")
+      out << "/?"; i += 1; quantified = true
     elsif c == "*" && pattern[i + 1] == "*"
       out << ".*"; i += 2; quantified = true
     elsif c == "*"
@@ -58,7 +57,7 @@ def glob_to_regex(pattern, wide:)
       out << Regexp.escape(c); i += 1; quantified = false
     end
   end
-  Regexp.new("\\A#{out}\\z")
+  Regexp.new("\\A#{out}\\z", wide ? Regexp::IGNORECASE : 0)
 rescue RegexpError
   raise Unknown, pattern
 end
@@ -79,7 +78,8 @@ end
 
 # YAML 里 Psych 与 GitHub 可能读出不同结果的结构，出现就按无法识别处理：多个文档（safe_load 只读第一个）、
 # 同一映射里的重复键（safe_load 取最后一个；"on" 与裸 on 原文相同，也算重复）、
-# 非普通标量的键（复杂键、别名、带标签）。
+# 非普通标量的键（复杂键、别名、带标签），以及合并键 <<（Psych 会合并，GitHub 不支持；
+# 按反转义后的键值判断，"<<"、"\x3c\x3c" 等任何写法都算）。
 KEY_SCANNER = Psych::ScalarScanner.new(Psych::ClassLoader::Restricted.new([], []))
 def reject_ambiguous_yaml!(raw)
   docs = Psych.parse_stream(raw).children
@@ -90,6 +90,7 @@ def reject_ambiguous_yaml!(raw)
       raw_keys = []; resolved = []
       node.children.each_slice(2) do |key, _|
         raise Unknown, "映射键不是普通标量" unless key.is_a?(Psych::Nodes::Scalar) && key.tag.nil?
+        raise Unknown, "含 YAML 合并键 <<" if key.value == "<<"
         raw_keys << key.value
         resolved << (key.quoted ? key.value : KEY_SCANNER.tokenize(key.value))
       end
@@ -153,9 +154,6 @@ ARGV.each_slice(2) do |commit, branch|
     begin
       raw = git("cat-file", "blob", meta.split(" ")[2])
       raise Unknown, "内容不是合法 UTF-8" unless raw.valid_encoding?
-      # Psych 处理合并键 << 的优先级与规范相反，可能把分支过滤解析错；块式与 flow 映射里
-      # 出现就按无法识别处理（宁可误拦 run 脚本里恰好写了 <<: 的文件）
-      raise Unknown, "含 YAML 合并键 <<" if raw.match?(/<<["']?\s*:/)
       reject_ambiguous_yaml!(raw)
       doc = YAML.safe_load(raw, aliases: true)
       raise Unknown, "顶层不是映射" unless doc.is_a?(Hash)

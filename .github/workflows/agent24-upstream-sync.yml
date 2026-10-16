@@ -141,22 +141,31 @@ jobs:
           PR 一旦打开，任何人打标签、指派、评论都会运行合并提交里未经评审的上游工作流，
           拿到写权限令牌和本仓库可见的 secret。请评审人按顺序执行：
 
-          1. 暂停同步工作流，并确认没有未完成的运行（含排队中的；输出须为空）：
+          1. 暂停同步工作流，并确认没有未完成的运行（含排队中的；第二条命令的输出须为空）：
+             ~~~
              gh workflow disable agent24-upstream-sync.yml -R iDoris-ai/WeKnora
              gh run list -R iDoris-ai/WeKnora -w agent24-upstream-sync.yml --json databaseId,status --jq '.[] | select(.status != "completed")'
+             ~~~
           2. 确认镜像仍指向本 issue 写的提交（输出的 SHA 须等于 ${release_sha}；不一致就以本 issue 最新内容为准重来）：
+             ~~~
              git ls-remote https://github.com/iDoris-ai/WeKnora.git refs/heads/upstream-release
+             ~~~
           3. 评审上游对工作流与 action 的改动：
+             ~~~
              git fetch origin && git diff origin/a24/develop...${release_sha} -- .github/
+             ~~~
              重点看会被 pull_request 类事件运行的工作流：job 未声明 permissions 时继承工作流级 permissions，
-             两级都未声明才取本仓库默认的写权限；
-             显式申请写权限、引用 secret、调用新的外部 action 都要逐个确认。确认无害前不要开 PR。
-          4. 开同步 PR（CI 随即以评审人身份运行），并核对 head：
-             gh pr create -R iDoris-ai/WeKnora --base a24/develop --head upstream-release \\
-               --title "chore(upstream): 同步正式版 ${release_tag}" --body "同步正式版 ${release_tag}（${release_sha}），见本仓库 issue #<本 issue 编号>"
+             两级都未声明才取本仓库默认的写权限；显式申请写权限、引用 secret、调用新的外部 action 都要逐个确认。
+             确认无害前不要开 PR。
+          4. 开同步 PR（CI 随即以评审人身份运行），并核对 head（headRefOid 须等于 ${release_sha}）：
+             ~~~
+             gh pr create -R iDoris-ai/WeKnora --base a24/develop --head upstream-release --title "chore(upstream): 同步正式版 ${release_tag}" --body "同步正式版 ${release_tag}（${release_sha}），见本仓库 issue #<本 issue 编号>"
              gh pr view <PR 编号> -R iDoris-ai/WeKnora --json headRefOid
-          5. 恢复同步工作流：gh workflow enable agent24-upstream-sync.yml -R iDoris-ai/WeKnora
-             以 upstream-release 为 head 的 PR 打开期间，同步工作流不会推进 upstream-release。
+             ~~~
+          5. 恢复同步工作流（以 upstream-release 为 head 的 PR 打开期间，同步工作流不会推进 upstream-release）：
+             ~~~
+             gh workflow enable agent24-upstream-sync.yml -R iDoris-ai/WeKnora
+             ~~~
 
           PR 只提议正常 merge upstream-release 到 a24/develop；禁止 reset、强推和整树覆盖。评审须核对
           Agent24 适配、身份/权限、取消、引用、数据迁移和恢复，以及补丁清单；冲突逐项解决，保留
