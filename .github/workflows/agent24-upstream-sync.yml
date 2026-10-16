@@ -52,6 +52,11 @@ jobs:
           fetch-depth: 0
           # git push 用 App 令牌；gh 命令另用下面的 GH_TOKEN（内置 GITHUB_TOKEN）
           token: ${{ steps.app-token.outputs.token }}
+      # 守卫在 runner 的 Ruby 上自测：测试脚本来自已评审的 a24/develop，不读上游内容。
+      # 任何用例失败就停止，不推镜像。
+      - name: Self-test mirror trigger guard
+        shell: bash
+        run: bash .github/scripts/agent24-mirror-trigger-guard-test.sh
       - name: Fast-forward mirrors and propose release integration
         env:
           GH_TOKEN: ${{ github.token }}

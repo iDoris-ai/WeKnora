@@ -75,6 +75,8 @@ run 1 $M "全名 refs/heads/*"       w.yml $'on:\n  push:\n    branches: ["refs/
 run 1 $M "全名 */*/upstream-main"  w.yml $'on:\n  push:\n    branches: ["*/*/upstream-main"]\njobs: {}'
 run 1 upstream-release "全名 refs/heads/upstream-release" w.yml $'on:\n  push:\n    branches: ["refs/heads/upstream-release"]\njobs: {}'
 run 1 $M "带标签的值（解码后为 pull_request）" w.yml $'on: !!binary cHVsbF9yZXF1ZXN0\njobs: {}'
+run 1 $M "集合上的标签 !!seq"      w.yml $'on:\n  push:\n    branches: !!seq [main]\njobs: {}'
+run 1 $M "集合上的标签 !!map"      w.yml $'on:\n  push: !!map {branches: [main]}\njobs: {}'
 run 1 $M "带标签的序列项（解码后为 main）" w.yml $'on:\n  push:\n    branches: [!!binary bWFpbg==]\njobs: {}'
 run 0 $M "方括号 [a-z]* 不匹配"     w.yml $'on:\n  push:\n    branches: ["release-[0-9]*"]\njobs: {}'
 run 1 $M "branches: [] 空列表"       w.yml $'on:\n  push:\n    branches: []\njobs: {}'
