@@ -63,8 +63,10 @@ rescue RegexpError
 end
 
 # 返回 true 表示该模式可能匹配 branch；无法识别的模式按"匹配"处理。
+# GitHub 是否拿 refs/heads/<name> 全名去匹配，文档没写；按宽解释，短名和全名任一匹配都算。
 def may_match?(pattern, branch)
-  branch.match?(glob_to_regex(pattern, wide: true))
+  re = glob_to_regex(pattern, wide: true)
+  [branch, "refs/heads/#{branch}"].any? { |b| b.match?(re) }
 rescue Unknown
   true
 end
@@ -78,7 +80,8 @@ end
 
 # YAML 里 Psych 与 GitHub 可能读出不同结果的结构，出现就按无法识别处理：多个文档（safe_load 只读第一个）、
 # 同一映射里的重复键（safe_load 取最后一个；"on" 与裸 on 原文相同，也算重复）、
-# 非普通标量的键（复杂键、别名、带标签），以及合并键 <<（Psych 会合并，GitHub 不支持；
+# 非普通标量的键（复杂键、别名、带标签）、带标签的任何节点（如 !!binary 的值，Psych 会解码，
+# GitHub 的解析器直接报错），以及合并键 <<（Psych 会合并，GitHub 不支持；
 # 按反转义后的键值判断，"<<"、"\x3c\x3c" 等任何写法都算）。
 KEY_SCANNER = Psych::ScalarScanner.new(Psych::ClassLoader::Restricted.new([], []))
 def reject_ambiguous_yaml!(raw)
@@ -86,6 +89,7 @@ def reject_ambiguous_yaml!(raw)
   raise Unknown, "含多个 YAML 文档" if docs.length > 1
   docs.each do |doc|
     doc.each do |node|
+      raise Unknown, "含带标签的节点" if node.respond_to?(:tag) && node.tag && !node.is_a?(Psych::Nodes::Document)
       next unless node.is_a?(Psych::Nodes::Mapping)
       raw_keys = []; resolved = []
       node.children.each_slice(2) do |key, _|

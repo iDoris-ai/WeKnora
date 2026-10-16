@@ -42,9 +42,9 @@ gh workflow run agent24-upstream-sync.yml -R iDoris-ai/WeKnora --ref a24/develop
 
 **推镜像前的守卫。** 用 App 令牌推送会产生 push 事件，运行被推送提交里的工作流定义。推送前由 `.github/scripts/agent24-mirror-trigger-guard.rb` 检查本次要推送的目标提交里的全部工作流（`.yml`/`.yaml`，不区分大小写），下列任一情况都失败停止、不推送：
 
-- `push` 触发会匹配到镜像分支名：无分支过滤、只有 `paths` 过滤、`branches` 为空列表或其模式可能匹配，或 `branches-ignore` 没有确定排除它。模式按 GitHub 过滤语法解析 `*`、`**`、`?`、`+`、`[...]`（方括号只认字母数字与范围）。`**/` 可以匹配零层目录（cheat sheet 里 `**/README.md` 匹配 `README.md`）；其它与 `**` 相邻的 `/`（结尾的 `/**`、`***/`、`/**/**` 等）和大小写是否敏感，文档都没写。这些在 `branches` 里按较宽的解释（`/` 可省略、不区分大小写，即会匹配），在 `branches-ignore` 里按较窄的解释（不算排除）；叠加量词、其它方括号内容、`\` 等无法识别的写法，在 `branches` 里按匹配、在 `branches-ignore` 里按不匹配处理。`branches` 里的 `!` 否定一律忽略（只会多拦）；`branches-ignore` 里只要出现 `!` 开头的模式，就按会触发处理；
+- `push` 触发会匹配到镜像分支名：无分支过滤、只有 `paths` 过滤、`branches` 为空列表或其模式可能匹配，或 `branches-ignore` 没有确定排除它。模式按 GitHub 过滤语法解析 `*`、`**`、`?`、`+`、`[...]`（方括号只认字母数字与范围）。`**/` 可以匹配零层目录（cheat sheet 里 `**/README.md` 匹配 `README.md`）；其它与 `**` 相邻的 `/`（结尾的 `/**`、`***/`、`/**/**` 等）和大小写是否敏感，文档都没写。分支过滤是拿短名还是 `refs/heads/<name>` 全名去匹配，文档也没写。这些在 `branches` 里按较宽的解释（`/` 可省略、不区分大小写、短名和全名任一匹配都算，即会匹配），在 `branches-ignore` 里按较窄的解释（不算排除）；叠加量词、其它方括号内容、`\` 等无法识别的写法，在 `branches` 里按匹配、在 `branches-ignore` 里按不匹配处理。`branches` 里的 `!` 否定一律忽略（只会多拦）；`branches-ignore` 里只要出现 `!` 开头的模式，就按会触发处理；
 - 出现 `create` 触发；
-- 文件名或内容不是合法 UTF-8、无法解析、出现 YAML 合并键 `<<`（按反转义后的键值判断，`"<<"`、`"\x3c\x3c"` 等任何写法都算；Psych 会合并而 GitHub 不支持，读法不同就拦）、含多个 YAML 文档、同一映射里有重复键（含 `on` 与 `"on"`、`on` 与 `true` 这类解析后相同的键）或非普通标量的键、工作流文件不是普通文件（目录、子模块、符号链接）、`.github` 或 `.github/workflows` 不是普通目录，或结构无法识别。
+- 文件名或内容不是合法 UTF-8、无法解析、出现 YAML 合并键 `<<`（按反转义后的键值判断，`"<<"`、`"\x3c\x3c"` 等任何写法都算；Psych 会合并而 GitHub 不支持，读法不同就拦）、含多个 YAML 文档、同一映射里有重复键（含 `on` 与 `"on"`、`on` 与 `true` 这类解析后相同的键）或非普通标量的键、任何带标签的节点（如 `!!binary`）、工作流文件不是普通文件（目录、子模块、符号链接）、`.github` 或 `.github/workflows` 不是普通目录，或结构无法识别。
 
 今天上游 main 与 v0.8.3 都能通过。触发时先确认上游改动的意图，再决定是否手动推送或调整守卫。修改守卫后运行 `bash .github/scripts/agent24-mirror-trigger-guard-test.sh`，全部用例须为 PASS。`schedule`、`workflow_run`、`pull_request_target` 等事件使用默认分支 `a24/develop` 上已评审的定义，不在检查范围内。
 
