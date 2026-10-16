@@ -28,7 +28,8 @@ class Unknown < StandardError; end
 def git(*args)
   out, status = Open3.capture2("git", *args)
   raise "git #{args.join(' ')} failed" unless status.success?
-  out
+  # 不依赖运行环境的 locale：git 输出按 UTF-8 处理，非法字节在后续解析时报错并按有风险处理
+  out.force_encoding(Encoding::UTF_8)
 end
 
 # GitHub 过滤模式（workflow-syntax 的 Filter pattern cheat sheet）转正则：
@@ -142,6 +143,10 @@ ARGV.each_slice(2) do |commit, branch|
   entries = git("ls-tree", "-z", "#{commit}:.github/workflows").split("\0")
   entries.each do |entry|
     meta, name = entry.split("\t", 2)
+    unless name&.valid_encoding?
+      problems << "#{commit[0, 10]} .github/workflows 下有无法识别的文件名，按有风险处理"
+      next
+    end
     next unless name.end_with?(".yml", ".yaml")
     path = ".github/workflows/#{name}"
     tag = "#{commit[0, 10]} #{path}"

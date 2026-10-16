@@ -9,7 +9,9 @@ fail=0
 run() { # 期望退出码 分支 用例名 文件名 内容
   rm -rf .github; mkdir -p .github/workflows; printf '%s\n' "$5" > ".github/workflows/$4"
   git add -A; git -c user.name=t -c user.email=t@t commit -qm x --allow-empty
-  ruby "$G" "$(git rev-parse HEAD)" "$2" >/dev/null 2>&1; rc=$?
+  out=$(ruby "$G" "$(git rev-parse HEAD)" "$2" 2>&1); rc=$?
+  # 期望拦下的用例必须是守卫自己检出（输出 ::error::），不能是崩溃；期望放行的必须输出 ok
+  if [ "$1" = 1 ]; then grep -q '^::error::' <<<"$out" && ! grep -q 'Error)' <<<"$out" || rc=crash; else grep -q '^mirror trigger guard: ok$' <<<"$out" || rc=crash; fi
   if [ "$rc" = "$1" ]; then echo "PASS $3"; else echo "FAIL $3 (exp=$1 got=$rc)"; fail=1; fi
   git rm -rq --cached . >/dev/null 2>&1
 }
@@ -48,7 +50,7 @@ run 0 $M "ignore upstream-*"        w.yml $'on:\n  push:\n    branches-ignore: [
 run 0 $M "镜像 main 的 PR 工作流不查" w.yml $'on: pull_request\njobs:\n  a:\n    runs-on: x'
 # 没有 .github/workflows 目录：放行
 rm -rf .github; echo x > README; git add -A; git -c user.name=t -c user.email=t@t commit -qm x
-if ruby "$G" "$(git rev-parse HEAD)" "$M" >/dev/null 2>&1; then echo "PASS 无工作流目录"; else echo "FAIL 无工作流目录"; fail=1; fi
+if ruby "$G" "$(git rev-parse HEAD)" "$M" 2>&1 | grep -q '^mirror trigger guard: ok$'; then echo "PASS 无工作流目录"; else echo "FAIL 无工作流目录"; fail=1; fi
 git rm -rq --cached . >/dev/null 2>&1; rm -f README
 # 目标提交不存在：失败
 if ruby "$G" 0000000000000000000000000000000000000000 "$M" >/dev/null 2>&1; then echo "FAIL 提交不存在"; fail=1; else echo "PASS 提交不存在"; fi
