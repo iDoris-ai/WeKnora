@@ -3,8 +3,8 @@
 # 在临时 git 仓库里逐例提交一个工作流文件，断言守卫的退出码。
 set -uo pipefail
 G="$(cd "$(dirname "$0")" && pwd)/agent24-mirror-trigger-guard.rb"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-cd "$T" && git init -q
+T=$(mktemp -d) || exit 1; trap 'rm -rf "$T"' EXIT
+cd "$T" || exit 1; git init -q || exit 1
 fail=0
 run() { # 期望退出码 分支 用例名 文件名 内容
   rm -rf .github; mkdir -p .github/workflows; printf '%s\n' "$5" > ".github/workflows/$4"
