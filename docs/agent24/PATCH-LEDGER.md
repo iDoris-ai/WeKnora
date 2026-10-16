@@ -10,7 +10,7 @@
 
 **重新评估**（不是必须先升级的时点）：上游发布影响 v0.8.2 的安全公告时，或到 2026-11-15 时，重新评估是否提前升级（David 负责；见 `upgrade_before.reevaluate_by` 与 `review_triggers`）。
 
-**留守期间的受测栈约束**：在 `.env` 里设 `WEKNORA_VERSION=v0.8.2`（`.env.example` 默认 latest，而 Docker Hub 的 `latest` 已等于 v0.8.3），用 `docker compose up -d --no-build` 起栈，5 个默认服务的镜像都与登记的 digest 比对、不一致就停；不用 `start_all.sh`（`--no-pull` 也不行）；从 `3e8b0bf` 本地构建时改记源码 SHA、image ID、应用自报版本和构建参数；只用默认服务、`STORAGE_TYPE=local`，不启用 profile；误跑过 latest 的数据卷丢弃重建；`APP_PORT` 绑 `127.0.0.1:8080`，frontend 只需绑 `127.0.0.1`、端口任意；Lite 与标准栈的结果不互相替代。详见评估文档。
+**留守期间的受测栈约束**：在 `.env` 里设 `WEKNORA_VERSION=v0.8.2`（`.env.example` 默认 latest，而 Docker Hub 的 `latest` 已等于 v0.8.3），用 `docker compose up -d --no-build` 起栈，5 个默认服务的镜像都与登记的 digest 比对、不一致就停；不用 `start_all.sh`（`--no-pull` 也不行）；从 `3e8b0bf` 本地构建时按评估文档的命令显式传版本参数、打 `v0.8.2-local` 标签，postgres、redis 仍比对 digest，本地构建的 app、ui、docreader 改记源码 SHA、image ID、应用自报版本和构建参数；只用默认服务、`STORAGE_TYPE=local`，不启用 profile；误跑过 latest 的数据卷丢弃重建；`APP_PORT` 绑 `127.0.0.1:8080`，frontend 只需绑 `127.0.0.1`、端口任意；Lite 与标准栈的结果不互相替代。详见评估文档。
 
 升级做法：届时最新正式版不是 v0.8.3 时先补差异评估；按 #9 的五步开同步 PR；按评估的「若升级的必做清单」做备份与恢复演练、Go 与前端回归、契约回归（KB-CT-02b 完成前以新 SHA 上重跑 PR② 探测并重核矩阵代替）、LICENSE 核对；最后更新本表与基线文件。凡会改动命名空间之外路径的 WeKnora 任务，建卡时都以“基线已升级”为前置；这条规则要写进 Agent24#1001、#1002、#1003 正文的进入条件（截至 2026-10-17 只在 #1001 的一条评论里，WeKnora#11 跟进）。同步通道不通时等它修好，不绕过；不通超过 7 天时上报 David 与 jason。
 
