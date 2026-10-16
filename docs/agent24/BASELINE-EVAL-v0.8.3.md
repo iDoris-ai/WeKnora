@@ -2,13 +2,13 @@
 
 - **任务**：iDoris-ai/WeKnora#4（KB-C0-02）；依据任务方案 v2.1 的 D7 与 §5。
 - **对比对象**：`v0.8.2` = `3e8b0bfc80b845b2d4b2ed683994748741450a97`（2026-09-24）；`v0.8.3` = `3e22822c1d2397be730c458c7539d0eb8c113a24`（2026-10-14 发布）。下文简写 `3e8b0bf`、`3e22822`。
-- **fork 现状**：`origin/a24/develop` = `3c0f1e2`（含刚合入的 #6）。它相对 v0.8.2 只改了 9 个文件：`docs/agent24/` 6 个，`.github/` 下 Agent24 自己的同步工作流和守卫 3 个（`git diff --name-only 3e8b0bf origin/a24/develop`）。产品代码与 v0.8.2 逐字节相同。同步现状：评估时 `upstream-release` 还停在 `3e8b0bf`，#6 合入后的工作流尚未运行。2026-10-16 配好 App 凭据后首次手动运行成功（run 38924672104），`upstream-release` 前进到 `3e22822`（v0.8.3），并开出同步 issue #9；#3 还要观察两次定时运行。
+- **fork 现状**（截至 2026-10-16 UTC）：`origin/a24/develop` = `e5da6de`。它相对 v0.8.2 改了 10 个文件：`docs/agent24/` 7 个（含 #7 合入的 `CAPABILITY-MATRIX.md`），`.github/` 下 Agent24 自己的同步工作流和守卫 3 个（`git diff --name-only 3e8b0bf origin/a24/develop`）。产品代码与 v0.8.2 逐字节相同。同步现状：评估开始时 `upstream-release` 还停在 `3e8b0bf`；配好 App 凭据后，手动运行（run 38924672104）与一次定时运行（16:46 UTC）都成功，`upstream-release` 已前进到 `3e22822`（v0.8.3），同步 issue 为 #9；#3 还差 1 次定时运行。
 - **方法**：只看两个 tag 的源码树差异（`git diff 3e8b0bf 3e22822`）。本地 clone 是浅克隆，看不到中间历史，所以 release 说明和 `CHANGELOG.md` 只用来定位改动，结论以源码为准。下文 `v0.8.3:路径:行` 指 v0.8.3 树里的行号。
 - **规模**：1576 个文件，+142102/−16333 行。其中 Go 非测试代码 490 个文件（+33392，不含 swagger 生成物 `docs/docs.go`；含则 491 个、+35784），前端 281 个文件，迁移 32 个文件，docreader 30 个文件（含 4 个 proto 生成物）。上游自己的发布核对写明，这次核对“不是对 282 个提交重新进行完整安全审计”（`v0.8.3:docs/release-v0.8.3-audit.md:9`），并且“未运行全量 Go/前端业务回归或实际数据库升级”（同文件 `:77`）。
 
 ## 结论
 
-**先把 v0.8.2 登记为当前产品基线，暂不升 v0.8.3。** 两种选择都不涉及新费用、新外部出口、许可证或范围变化（MinIO 换发布者只在启用 minio profile 时才相关，见必做清单第 5 条），按 D7 由工程决定，**不升级为用户决策，也不需要在 Agent24 #994 登记**（详见文末“是否升级为用户决策”）。理由见“结论与理由”。
+**先把 v0.8.2 登记为当前产品基线，暂不升 v0.8.3。** 两种选择都不涉及新费用、新外部出口、许可证或范围变化（MinIO 换发布者只在启用 minio profile 时才相关，见必做清单第 5 条），按 D7 由工程决定，**不升级为用户决策，不在 Agent24 #994 作为决策登记**；只在 #994 补了一条 rerank 出口的事实说明（详见文末“是否升级为用户决策”）。理由见“结论与理由”。
 
 ## 1. 数据库迁移
 
@@ -78,7 +78,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 - hybrid-search 请求新增可选的 `rerank` 对象（`v0.8.3:internal/types/search.go:279`；`v0.8.3:internal/types/rerank.go:11-15`）。不传时行为与 v0.8.2 相同；传了且没有显式写 `"enabled": false` 时就会调用租户配置的 rerank 模型，响应里多一个 `meta`（`v0.8.3:internal/handler/knowledgebase.go:345-399`）。
 - `SearchResult` 新增 `source_locators`、`matched_images` 两个字段，都是 omitempty（`v0.8.3:internal/types/search.go:199`、`:233`）。
 - app 与 docreader 之间的 gRPC 契约新增 `SourceBlock` 和 `source_blocks = 6`（`v0.8.3:docreader/proto/docreader.proto:48`、`:63`、`:73`），是 `source_locators` 的来源。线路上向后兼容；两个镜像版本不配套时只是拿不到原文定位。
-- `/knowledge-search` 请求新增 `match_count`、两个阈值、两个检索开关和 `rerank`；响应总是带 `meta`（`v0.8.3:internal/handler/session/qa.go:917`；`git diff 3e8b0bf 3e22822 -- internal/handler/session/qa.go`）。
+- `/knowledge-search` 请求新增 `match_count`、两个阈值、两个检索开关和 `rerank`；响应总是带 `meta`（请求选项在 `v0.8.3:internal/handler/session/qa.go:917`，`meta` 在 `:951`；`git diff 3e8b0bf 3e22822 -- internal/handler/session/qa.go`）。
 - `PUT /knowledge-bases/:id` 可以修改 `vlm_config`，只有 owner 空间或 admin 共享可以改（`git diff 3e8b0bf 3e22822 -- internal/handler/knowledgebase.go`）。
 - 对话接口允许只传图片或文件、不带文字。
 - 上传接口对格式错误的 `.json` 文件直接返回 400（`git diff 3e8b0bf 3e22822 -- internal/handler/knowledge.go` 中 `CreateKnowledgeFromFile` 的新 hunk）。
@@ -99,7 +99,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 
 ## 6. 对能力矩阵结论的影响
 
-矩阵（WeKnora PR #7，受测 SHA `4b363d15` = v0.8.2 的产品代码）引用的核心文件在 v0.8.3 **一个字节都没改**：`internal/middleware/{auth,api_key_gate,rbac,kb_access}.go`、`internal/types/tenant_api_key.go`、`internal/application/access/knowledgebase.go`、`internal/router/files.go`、`internal/handler/{chunk,tenant,knowledge_download}.go`、`internal/filetransport/response.go`、`internal/logger/logger.go`、`internal/application/service/{tenant_member,kbshare}.go`、`internal/types/{audit_log,principal}.go`、`internal/router/static.go`、`cmd/server/listen.go`、`config/config.yaml`、`.env.lite.example`、`.github/workflows/release-lite.yml`。验证方法：`git diff --shortstat 3e8b0bf 3e22822 -- <上述路径>`，每一项输出都为空。
+能力矩阵（`docs/agent24/CAPABILITY-MATRIX.md`，#7 已合入；受测 SHA `4b363d15` = v0.8.2 的产品代码）引用的核心文件在 v0.8.3 **一个字节都没改**：`internal/middleware/{auth,api_key_gate,rbac,kb_access}.go`、`internal/types/tenant_api_key.go`、`internal/application/access/knowledgebase.go`、`internal/router/files.go`、`internal/handler/{chunk,tenant,knowledge_download}.go`、`internal/filetransport/response.go`、`internal/logger/logger.go`、`internal/application/service/{tenant_member,kbshare}.go`、`internal/types/{audit_log,principal}.go`、`internal/router/static.go`、`cmd/server/listen.go`、`config/config.yaml`、`.env.lite.example`、`.github/workflows/release-lite.yml`。验证方法：`git diff --shortstat 3e8b0bf 3e22822 -- <上述路径>`，每一项输出都为空。
 
 | # | 能力 | v0.8.3 是否改变结论 | 说明与证据 |
 |---|---|---|---|
@@ -120,7 +120,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 | 15 | 无头 Lite 默认监听 | 不变 | `config.yaml`、`listen.go` 没改；`JWT_SECRET` 为空时仍在启动时随机生成（`v0.8.3:internal/application/service/user.go:81-94`）。持久化 JWT secret 的改动只在 Wails 桌面版（`git diff 3e8b0bf 3e22822 -- cmd/desktop/signing_key.go`）；Lite 本机技能也只在桌面版（`v0.8.3:internal/application/service/tenant_skill_host.go:22-28`） |
 | 16 | auto-setup | 不变 | `handler/auth.go` 只有 Register 这一个 hunk |
 
-**影响**：16 项结论没有一项因 v0.8.3 失效，也没有一个缺口被上游补上。如果升级，PR #7 要换受测 SHA，并重新核对上表“结论不变，细节有变”和“文字要改”两类里引用的行号；PR② 的探测要在新 SHA 上跑。
+**影响**：16 项结论没有一项因 v0.8.3 失效，也没有一个缺口被上游补上。如果升级，能力矩阵要换受测 SHA，并重新核对上表“结论不变，细节有变”和“文字要改”两类里引用的行号；PR② 的探测要在新 SHA 上跑。
 
 ## 7. `.github/` 的改动与守卫
 
@@ -137,27 +137,27 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 **先把 v0.8.2 登记为当前产品基线；升 v0.8.3 作为一次普通的上游同步，等条件满足后再做。**
 
 1. **同步通道还在观察期，升级的前置步骤都没做。** 截至 2026-10-16 16:46 UTC，#3 修复后手动运行 1 次、定时运行 1 次成功，还差 1 次定时运行；按 #4 步骤 3，升级还要走同步 PR 的五步评审和回归，这些都还没做。留在 v0.8.2 则按步骤 2 可以直接登记，不依赖 #3。
-2. **D7 要求探测用固定 SHA。** 能力矩阵 PR #7 已经评审了 5 轮，PR② 的探测还没开始。现在换 SHA 就得重新核对行号，而且按方案 §3，升级 PR 要额外占一个名额，排期顺延。需要说明：按下面的触发条件，升级会发生在第一个产品补丁之前，所以换 SHA、重跑探测这些返工只是**延后，并没有省掉**；换来的是 #7 和 PR② 能按固定 SHA 落地，以及届时可以直接跳到更新的正式版。
+2. **D7 要求探测用固定 SHA。** 能力矩阵已按固定 SHA `4b363d15` 合入（#7）；PR② 的探测还没开始，同样要在固定 SHA 上做。现在换 SHA，矩阵就得重核行号，而且按方案 §3，升级 PR 要额外占一个名额，排期顺延。需要说明：按下面的时点，升级会发生在第一个产品补丁之前，所以换 SHA、重跑探测这些返工只是**延后，并没有省掉**；换来的是 PR② 能按固定 SHA 落地，以及届时可以直接跳到更新的正式版。
 3. **升级换不来当前需要的东西。**（这一条和下一条说的是“不必急着升”，不是“不升”：按下面的时点，升级终将发生。） 第 6 节的 16 项结论全部不变；KB-C1 要补的缺口（允许列表、权威主体、日志政策、deadline/错误分类、修订、Lite 托管）在 v0.8.3 里一个都没变。v0.8.3 带来的好处（rerank 选项、source_locators、`invite_register`、令牌修复）都不是 KB-CT-01/02 和首个只读切片的前提。
 4. **升级的成本和不可逆性是实打实的。** 迁移 115（扩展升级）和 116/035（改写数据）都不能回退；ParadeDB 大版本升级，MinIO 换了发布者；改动规模 1576 个文件，而上游自己既没跑全量回归、也没演练数据库升级（`docs/release-v0.8.3-audit.md:77`）。我们要先补上 Go、前端和契约回归，契约回归此时还没有可跑的 schema 测试（KB-CT-02b 未做）。
 
 **反方理由（如实记录）**：现在 fork 没有产品补丁、没有真实数据，与上游改动的文件也没有交集，这是升级成本最低的时候。之后 KB-C1-01（路由）、KB-OBS-01（`logger.go`）、KB-C1-01c（hybrid-search 的 handler、service 和 `types/search.go`）落下的补丁，恰好都在 v0.8.3 改动过的文件里，再吸收上游时会有冲突要手工解决。
 
 **所以登记时一并写明必须先升级的时点**（`UPSTREAM-BASELINE.json` 的 `current_baseline.upgrade_before` 与 PATCH-LEDGER 开头写法一致）：
-1. 开始第一个产品补丁的 task 分支之前（不是写完再判断，免得在 v0.8.2 上白写）。产品补丁指改动或新增上游代码路径的工作；fork 自有命名空间（`docs/agent24/、scripts/agent24/、.github/scripts/agent24-*、.github/workflows/agent24-*`，例如 PR② 的探测脚本放在 `scripts/agent24/probe/`）内的改动不算。v0.8.3 改了 1576 个文件，几乎必然相交。开工前按计划改动的路径清单判断；开 PR 时再用下面的命令复核，它需要补丁分支已经存在： `comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort)` 非空。
-2. 导入任何非测试资料、或让开发者以外的人访问任何实例之前：v0.8.2 在鉴权前无上限读取请求体（`3e8b0bf:internal/middleware/logger.go:105`，Logger 挂在 Auth 之前），而无头 Lite 默认监听 `0.0.0.0`（能力矩阵第 15 项）。
+1. 开始第一个产品补丁的 task 分支之前（不是写完再判断，免得在 v0.8.2 上白写）。产品补丁指改动或新增 fork 自有命名空间（`docs/agent24/`、`scripts/agent24/`、`.github/scripts/agent24-*`、`.github/workflows/agent24-*`，例如 PR② 的探测脚本放在 `scripts/agent24/probe/`）之外路径的任何工作，**不论是否与上游改动相交**。开工前按计划改动的路径清单判断；开 PR 时用 `git diff --name-only origin/a24/develop...<补丁分支> | grep -v -E '^(docs/agent24/|scripts/agent24/|\.github/(scripts|workflows)/agent24-)'` 复核，**输出非空就停下**：先按下面的做法完成升级并合入 a24/develop，再 rebase 补丁分支。`comm -12` 与上游改动文件取交集只作辅助参考，不作判据。
+2. 导入任何非测试资料、或让开发者以外的人访问任何实例之前：v0.8.2 在鉴权前把 json、form、`text/` 类 POST/PUT/PATCH 请求的请求体整体无上限读入内存（`3e8b0bf:internal/middleware/logger.go:105`，Logger 挂在 Auth 之前），而无头 Lite 默认监听 `0.0.0.0`（能力矩阵第 15 项）。
 3. 任何对外制品出货之前。
 4. 需要启用 `minio`、`langfuse` 或 `full` compose profile 时（见第 2 节 MinIO 一行）。不用不入库的本地 override 绕开，免得受测环境与登记不一致。
 5. 上游发布影响 v0.8.2 的安全公告时，或到 2026-11-15（距本次评估满 30 天）时，重新评估。由 David 负责关注上游的 Release 与 Security Advisories。
 
 **留守期间的受测栈约束**（PR② 的探测与任何产品验证都要遵守）：
-- **应用镜像必须钉版本。** v0.8.2 的 compose 用 `wechatopenai/weknora-{ui,app,sandbox,docreader}:${WEKNORA_VERSION:-latest}`（`3e8b0bf:docker-compose.yml:3`、`:37`、`:396`、`:408`），而 Docker Hub 上 `weknora-app:latest` 与 `:v0.8.3` 的 digest 相同（`sha256:b5f96b13…`，2026-10-16 实测；`:v0.8.2` 为 `sha256:bc8a5347…`）。不设 `WEKNORA_VERSION` 就会在 v0.8.2 的 compose 里跑 v0.8.3 的代码，而且不报错。所以必须设 `WEKNORA_VERSION=v0.8.2`（或从 `3e8b0bf` 本地构建），并在证据里记录 `docker image inspect` 的 digest 与应用自报的版本。
+- **应用镜像必须钉版本。** v0.8.2 的 compose 用 `wechatopenai/weknora-{ui,app,sandbox,docreader}:${WEKNORA_VERSION:-latest}`（`3e8b0bf:docker-compose.yml:3`、`:37`、`:396`、`:408`），而且 `.env.example` 本身就写着 `WEKNORA_VERSION=latest`（`3e8b0bf:.env.example:34`），照常 `cp .env.example .env` 也会拉 latest。Docker Hub 上 app、ui、docreader 三个镜像的 `latest` 都已等于 v0.8.3（2026-10-16 实测）。所以必须在 `.env` 里改成 `WEKNORA_VERSION=v0.8.2`（或从 `3e8b0bf` 本地构建），起栈后用 `docker image inspect` 的 RepoDigests 与下面登记的 digest 比对，**不一致就停**；证据记录 digest 与应用自报的版本。不用 `scripts/start_all.sh`，它默认 `up --pull always`（`3e8b0bf:scripts/start_all.sh:387`），要用就带 `--no-pull` 并先完成 digest 比对。
 - **只用默认服务**（`frontend`、`app`、`docreader`、`postgres`、`redis`），不启用任何 profile；显式写出 `STORAGE_TYPE=local`。三个应用镜像的 v0.8.2 digest（2026-10-16 查得）：app `sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc`、ui `sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f`、docreader `sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a`。
-- **误跑过 latest 的数据卷一律丢弃重建。** v0.8.3 会把库迁移到 111–118（115、116 不可回退），而 v0.8.2 启动时迁移失败只记警告、照常启动（`3e8b0bf:internal/container/container.go:898-904`），会在不匹配的 schema 上悄悄运行。证据里同时记录 `schema_migrations` 的版本，v0.8.2 应为 110。结论不覆盖 MinIO/S3 系后端；例如 local 后端签名链接有效期与 MinIO 不同，不能外推。
+- **误跑过 latest 的数据卷一律丢弃重建。** v0.8.3 会把库迁移到 111–118，新表、新列和 116 改写的数据都不可回退（115 只在新 ParadeDB 镜像上才升级扩展，在 v0.8.2 的旧镜像上是空操作），而 v0.8.2 启动时迁移失败只记警告、照常启动（`3e8b0bf:internal/container/container.go:898-904`），会在不匹配的 schema 上悄悄运行。证据里同时记录 `schema_migrations` 的版本，v0.8.2 应为 110。结论不覆盖 MinIO/S3 系后端；例如 local 后端签名链接有效期与 MinIO 不同，不能外推。
 - **Lite 与标准栈不能互相替代。** Lite 走 SQLite 迁移与另一套默认配置，用它跑的结果不能算作标准栈证据，反之亦然。
 - **实例只绑定本机或隔离网络**（见时点 2）。默认 compose 把 `${APP_PORT:-8080}:8080`、`${FRONTEND_PORT:-80}:80` 映射到所有网卡（`3e8b0bf:docker-compose.yml:16`、`:46`），所以要设 `APP_PORT=127.0.0.1:8080`、`FRONTEND_PORT=127.0.0.1:80`，并在证据里记录 `docker port` 的输出。
 
-为了让这些时点真正生效，这条门槛已登记到 Agent24#1001（WS2 epic）的进入条件：第一批产品补丁任务（KB-C1-01、KB-C1-01b-a、KB-C1-01c、KB-OBS-01）建卡时要写入“基线已升级（#9 已吸收）”这一依赖。KB-CT-02b 在 WeKnora 侧的 Go 测试放在 `scripts/agent24/` 下，不放 `internal/`，所以不算产品补丁。同步通道（#3）不通时等它修好，不绕过；不通超过 7 天时上报 David 与 jason。KB-C1-01c 与 KB-CT-02a 的修订、定位设计应以 v0.8.3 的 `source_locators` 与 `SourceBlock` 为准，避免重做上游已有的东西。
+为了让这些时点真正生效，这条门槛已登记到 Agent24#1001（WS2 epic）的进入条件：建卡时要写入“基线已升级（#9 已吸收）”这一依赖。KB-CT-02b 在 WeKnora 侧的 Go 测试放在 `scripts/agent24/` 下，不放 `internal/`，所以不算产品补丁。门槛按规则执行，不只限于点名的任务：凡是 Target repo 为 WeKnora、会改动命名空间之外路径的任务（例如 KB-C1-01、KB-C1-01b-a、KB-C1-01c、KB-C1-03、KB-OBS-01、KB-SVC-POLICY-01、KB-C2-01、KB-C2-02），建卡时都要写入这条依赖。受测栈约束同样写进 WeKnora#5（PR②）的验收。同步通道（#3）不通时等它修好，不绕过；不通超过 7 天时上报 David 与 jason。KB-C1-01c 与 KB-CT-02a 的修订、定位设计应以 v0.8.3 的 `source_locators` 与 `SourceBlock` 为准，避免重做上游已有的东西。
 
 做法：届时最新正式版不是 v0.8.3 时，先补一份 v0.8.2 到该版本的差异评估；按同步 issue 的五步开同步 PR；再按下面的“若升级的必做清单”执行。
 
@@ -168,7 +168,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 - **留在 v0.8.2（本结论）**：代码、依赖、配置都不变，四项都不涉及。**不升级为用户决策，不在 #994 登记**，按 #4 步骤 2 直接登记即可。
 - **如果改选升到 v0.8.3**，逐项判断如下，结论同样是**不必升级为用户决策**（MinIO 来源只在启用 minio profile 时才需要请用户确认，见必做清单第 5 条）：
   - 费用：没有默认开启的新付费调用。KB 描述的 max_tokens 从 800 提到 2048 只是上限，属于既有功能；图片向量召回、rerank 都要显式开启。
-  - 出口：Go 代码里新出现的外部主机只有模型和连接器厂商目录的默认地址（Pinecone、Cohere、MiniMax 等），只在用户配置了该厂商时才会用到；前端 pdf.js 的 worker 随包分发；文档链接要用户点击才访问。**边界情况**：hybrid-search 新增的 `rerank` 选项，让持有 retrieve key 的调用方可以触发调用租户已配置的 rerank 服务，把 query 和候选正文发给它。`/knowledge-search` 在 v0.8.2 已经有这条路径。它属于 #994 正在讨论的“允许哪些模型服务、费用上限”范围，不是新的决策点。升级时应在 #994 补一条事实说明，并在 KB-C1-01 的允许列表里明确禁用或放行 `rerank` 字段。
+  - 出口：Go 代码里新出现的外部主机只有模型和连接器厂商目录的默认地址（Pinecone、Cohere、MiniMax 等），只在用户配置了该厂商时才会用到；前端 pdf.js 的 worker 随包分发；文档链接要用户点击才访问。**边界情况**：hybrid-search 新增的 `rerank` 选项，让持有 retrieve key 的调用方可以触发调用租户已配置的 rerank 服务，把 query 和候选正文发给它。`/knowledge-search` 在 v0.8.2 已经有这条路径。它属于 #994 正在讨论的“允许哪些模型服务、费用上限”范围，不是新的决策点；事实说明已补进 #994（2026-10-16 UTC），升级时由 KB-C1-01 的允许列表明确禁用或放行 `rerank` 字段。
   - 许可证：项目仍是 MIT；新增依赖分别是 Apache-2.0、MIT、BSD-3；ParadeDB 和 MinIO 仍是 AGPL-3.0。`LICENSE` 里第三方声明的缩减属于合规义务（自建 Lite 制品时自己核全声明），不是许可证变化。
   - 范围：升级不改变 Knowledge 的产品范围。新功能（画廊、多模态、跨库 Wiki、MCP assertion）在集成模式下由允许列表默认拒绝。
 
@@ -176,10 +176,10 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 
 1. 先确认 #3 的同步工作流成功；按 FORK-MAINTENANCE 的五步暂停同步、核对镜像 SHA、审 `.github/`（重点是 `helm.yml` 和 `azure/setup-helm@v4`），然后再开同步 PR。
 2. 测试库先做一致性备份，再演练升级和恢复（ParadeDB v0.25.11 加迁移 111–118；Lite 用 SQLite 031–036）；按上游的 `website-docs/01-getting-started/06-paradedb-upgrade.md` 操作，**不要**对新镜像执行旧的 0.22.6 升级命令。
-3. 跑 Go（`go test ./...`）和前端回归。契约回归：KB-CT-02b 完成后跑 schema 与夹具测试；在此之前以第 4 条的“新 SHA 上重跑 PR② 探测并重核能力矩阵”代替。
+3. 升级前先在当前基线上跑一遍 Go（`go test ./...`）和前端测试，记下失败清单；升级后再跑，对照区分回归与原有失败。契约回归：KB-CT-02b 完成后跑 schema 与夹具测试；在此之前以第 4 条的“新 SHA 上重跑 PR② 探测并重核能力矩阵”代替。
 4. 把能力矩阵换成新 SHA，至少重新核对第 3、8 项及行号会漂移的文件：`logger.go`、`knowledgebase.go`、`knowledgebase_search*.go`、`qa.go`、`types/search.go`、`config.go`、`user.go`、`router.go`、`routes_knowledge.go`、`routes_auth_tenant.go`；在新 SHA 上重跑 PR② 的探测；允许列表补上第 4 节列出的新路由和 `rerank` 字段。
-5. MinIO 镜像换了发布者（`pgsty/minio`），属于供应链来源变化，不在 D7 的四项（费用、出口、许可证、范围）之内。由工程决定：不启用 `minio` profile（默认 `STORAGE_TYPE=local`）时不需要处理；真要启用时（时点 4），再请用户确认沿用 `pgsty/minio` 还是在 fork 的 compose 里覆盖，结果写进 PATCH-LEDGER。
-6. rerank 出口的事实说明已在 2026-10-17 补进 Agent24 #994（v0.8.2 的 `/knowledge-search` 已有这条路径，v0.8.3 又加到 hybrid-search）；升级时由 KB-C1-01 的允许列表对 `rerank` 字段表态。
+5. MinIO 镜像换了发布者（`pgsty/minio`），属于供应链来源变化，不在 D7 的四项（费用、出口、许可证、范围）之内。由工程决定：不启用 `minio` profile（默认 `STORAGE_TYPE=local`）时不需要处理；真要启用时（时点 4），再请用户（David）确认沿用 `pgsty/minio` 还是在 fork 的 compose 里覆盖，结果写进 PATCH-LEDGER。
+6. rerank 出口的事实说明已在 2026-10-16 UTC 补进 Agent24 #994（v0.8.2 的 `/knowledge-search` 已有这条路径，v0.8.3 又加到 hybrid-search）；升级时由 KB-C1-01 的允许列表对 `rerank` 字段表态。
 7. fork 按 D6 自建 Lite 制品时，app 与 docreader 配套构建（`SourceBlock` 契约）。
 8. 核对 `LICENSE`：同步会把 fork 的 LICENSE 换成上游缩短后的版本，并丢掉指向 `THIRD_PARTY_NOTICES.md` 的那一句；合并时恢复这条指引，或在 PATCH-LEDGER 写明接受上游写法。
 9. KB-LITE-01b 若已在 v0.8.2 上测过体积、内存和启动时间，升级后重新测量。
