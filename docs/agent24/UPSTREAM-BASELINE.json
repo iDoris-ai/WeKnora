@@ -1,26 +1,53 @@
 {
-  "kind": "initial_snapshot",
-  "recorded_on": "2026-10-11",
-  "fork": "iDoris-ai/WeKnora",
-  "upstream": "Tencent/WeKnora",
-  "release": {
-    "tag": "v0.8.2",
-    "commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
-    "mirror_branch": "upstream-release"
+  "initial_snapshot": {
+    "kind": "initial_snapshot",
+    "recorded_on": "2026-10-11",
+    "fork": "iDoris-ai/WeKnora",
+    "upstream": "Tencent/WeKnora",
+    "release": {
+      "tag": "v0.8.2",
+      "commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
+      "mirror_branch": "upstream-release"
+    },
+    "development": {
+      "source_branch": "main",
+      "commit": "231a5c0b15b817bb13ee3a876c3fbaf337cb4d5e",
+      "mirror_branch": "upstream-main"
+    },
+    "product": {
+      "branch": "a24/develop",
+      "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97"
+    },
+    "sync_policy": {
+      "mirror_update": "fast-forward-only",
+      "product_update": "reviewed-release-merge-pr",
+      "auto_merge": false,
+      "interval_hours": 6
+    }
   },
-  "development": {
-    "source_branch": "main",
-    "commit": "231a5c0b15b817bb13ee3a876c3fbaf337cb4d5e",
-    "mirror_branch": "upstream-main"
-  },
-  "product": {
-    "branch": "a24/develop",
-    "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97"
-  },
-  "sync_policy": {
-    "mirror_update": "fast-forward-only",
-    "product_update": "reviewed-release-merge-pr",
-    "auto_merge": false,
-    "interval_hours": 6
+  "current_baseline": {
+    "kind": "product_baseline",
+    "decided_on": "2026-10-16",
+    "decision": "iDoris-ai/WeKnora#4 (KB-C0-02)",
+    "evaluation": "docs/agent24/BASELINE-EVAL-v0.8.3.md",
+    "release": {
+      "tag": "v0.8.2",
+      "commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97"
+    },
+    "product": {
+      "branch": "a24/develop",
+      "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
+      "product_patches": "none"
+    },
+    "latest_upstream_release_not_absorbed": {
+      "tag": "v0.8.3",
+      "commit": "3e22822c1d2397be730c458c7539d0eb8c113a24",
+      "sync_issue": "iDoris-ai/WeKnora#9"
+    },
+    "next_review_trigger": [
+      "在第一个改动 v0.8.3 也改过的文件的产品补丁 PR 开出之前（路由 internal/router/routes_*.go、internal/middleware/logger.go、internal/handler/knowledgebase.go、internal/application/service/knowledgebase_search*.go、internal/types/search.go 等），先按同步 issue 的五步合入同步 PR，吸收当时最新的正式版",
+      "在任何对外制品（Lite 包、镜像）出货之前，先吸收最新正式版",
+      "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级"
+    ]
   }
 }
