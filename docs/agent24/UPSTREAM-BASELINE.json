@@ -61,7 +61,7 @@
         "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go 与前端回归（升级前先在当前基线记录失败清单）、契约回归（KB-CT-02b 完成之前，以新 SHA 上重跑 PR② 探测并重核能力矩阵代替）、LICENSE 核对、KB-LITE-01b 重新测量",
         "更新本文件与 PATCH-LEDGER"
       ],
-      "gate": "凡 Target repo 为 WeKnora、会改动命名空间之外路径的任务，建卡时写入“基线已升级（#9 已吸收）”依赖；要写进 Agent24#1001（KB-C1-01、C1-01b-a、C1-01b-b、C1-01c、C1-03、OBS-01、SVC-POLICY-01 等）、#1002（KB-C2-01、C2-02）、#1003（KB-LITE-01a，按规则判断 LITE-01b）正文的进入条件，时点 2 挂 #1001 真实数据验收，时点 3 挂 #1003 出货验收（截至 2026-10-17 只在 #1001 的一条评论里，WeKnora#11 跟进）；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
+      "gate": "凡 Target repo 为 WeKnora、会改动命名空间之外路径的任务，建卡时写入“基线已升级（#9 已吸收）”依赖；已于 2026-10-17 写进 Agent24#1001（KB-C1-01、C1-01b-a、C1-01b-b、C1-01c、C1-03、OBS-01、SVC-POLICY-01 等）、#1002（KB-C2-01、C2-02）、#1003（KB-LITE-01a，按规则判断 LITE-01b）正文的进入条件，时点 2 挂 #1001 真实数据验收，时点 3 挂 #1003 出货验收（WeKnora#11；以三个 epic 正文为准）；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
       "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason",
       "review_triggers": [
         "上游发布影响 v0.8.2 的安全公告时",
@@ -74,7 +74,7 @@
     "test_stack_constraints": [
       "在 .env 里设 WEKNORA_VERSION=v0.8.2（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 都已等于 v0.8.3），用 docker compose up -d --no-build 起栈；起栈后 5 个默认服务的 RepoDigests 都与 v0_8_2_image_digests 比对，不一致就停",
       "不用 scripts/start_all.sh，含 --no-pull：默认 up --pull always；--no-pull 走 up --build -d，用当前 checkout 重建并覆盖 v0.8.2 tag（本地构建的镜像 digest 不会等于登记值），还设 START_OLLAMA=true 在宿主机拉起 Ollama",
-      "从 3e8b0bf 本地构建（只在拉不到官方镜像时）：在 3e8b0bf 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.2-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.2-local；命令见评估文档。postgres、redis 仍按登记 digest 比对；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据）、实际构建参数",
+      "从 3e8b0bf 本地构建（只在拉不到官方镜像时）：在 3e8b0bf 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.2-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.2-local；命令见评估文档。postgres、redis 仍按登记 digest 比对；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
       "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local",
       "误跑过 latest 的数据卷丢弃重建；证据记录 schema_migrations 版本（v0.8.2 为 110）",
       "APP_PORT=127.0.0.1:8080；frontend 只需绑 127.0.0.1，端口任意（如 FRONTEND_PORT=127.0.0.1:18080；探测只访问 app，不影响结论），证据记录 docker port 输出",
