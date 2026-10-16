@@ -3,8 +3,8 @@
 # 在临时 git 仓库里逐例提交一个工作流文件，断言守卫的退出码。
 set -uo pipefail
 G="$(cd "$(dirname "$0")" && pwd)/agent24-mirror-trigger-guard.rb"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-cd "$T" && git init -q
+T=$(mktemp -d) || exit 1; trap 'rm -rf "$T"' EXIT
+cd "$T" || exit 1; git init -q || exit 1
 fail=0
 run() { # 期望退出码 分支 用例名 文件名 内容
   rm -rf .github; mkdir -p .github/workflows; printf '%s\n' "$5" > ".github/workflows/$4"
@@ -75,6 +75,8 @@ run 1 $M "全名 refs/heads/*"       w.yml $'on:\n  push:\n    branches: ["refs/
 run 1 $M "全名 */*/upstream-main"  w.yml $'on:\n  push:\n    branches: ["*/*/upstream-main"]\njobs: {}'
 run 1 upstream-release "全名 refs/heads/upstream-release" w.yml $'on:\n  push:\n    branches: ["refs/heads/upstream-release"]\njobs: {}'
 run 1 $M "带标签的值（解码后为 pull_request）" w.yml $'on: !!binary cHVsbF9yZXF1ZXN0\njobs: {}'
+run 1 $M "集合上的标签 !!seq"      w.yml $'on:\n  push:\n    branches: !!seq [main]\njobs: {}'
+run 1 $M "集合上的标签 !!map"      w.yml $'on:\n  push: !!map {branches: [main]}\njobs: {}'
 run 1 $M "带标签的序列项（解码后为 main）" w.yml $'on:\n  push:\n    branches: [!!binary bWFpbg==]\njobs: {}'
 run 0 $M "方括号 [a-z]* 不匹配"     w.yml $'on:\n  push:\n    branches: ["release-[0-9]*"]\njobs: {}'
 run 1 $M "branches: [] 空列表"       w.yml $'on:\n  push:\n    branches: []\njobs: {}'

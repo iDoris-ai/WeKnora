@@ -46,7 +46,7 @@ gh workflow run agent24-upstream-sync.yml -R iDoris-ai/WeKnora --ref a24/develop
 - 出现 `create` 触发；
 - 文件名或内容不是合法 UTF-8、无法解析、出现 YAML 合并键 `<<`（按反转义后的键值判断，`"<<"`、`"\x3c\x3c"` 等任何写法都算；Psych 会合并而 GitHub 不支持，读法不同就拦）、含多个 YAML 文档、同一映射里有重复键（含 `on` 与 `"on"`、`on` 与 `true` 这类解析后相同的键）或非普通标量的键、任何带标签的节点（如 `!!binary`）、工作流文件不是普通文件（目录、子模块、符号链接）、`.github` 或 `.github/workflows` 不是普通目录，或结构无法识别。
 
-今天上游 main 与 v0.8.3 都能通过。触发时先确认上游改动的意图，再决定是否手动推送或调整守卫。修改守卫后运行 `bash .github/scripts/agent24-mirror-trigger-guard-test.sh`，全部用例须为 PASS。`schedule`、`workflow_run`、`pull_request_target` 等事件使用默认分支 `a24/develop` 上已评审的定义，不在检查范围内。
+今天上游 main 与 v0.8.3 都能通过。触发时先确认上游改动的意图，再决定是否手动推送或调整守卫。修改守卫后运行 `bash .github/scripts/agent24-mirror-trigger-guard-test.sh`，全部用例须为 PASS。同步工作流每次运行都会先在 runner 上跑这个测试脚本（Self-test 步骤），任何用例失败就停止，不推镜像。`schedule`、`workflow_run`、`pull_request_target` 等事件使用默认分支 `a24/develop` 上已评审的定义，不在检查范围内。
 
 ## 防止覆盖我们的 feature
 
