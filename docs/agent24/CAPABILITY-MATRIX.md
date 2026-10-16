@@ -60,7 +60,7 @@
   - 沙箱环境变量与技能凭据（`internal/application/service/user_env.go:81-92`、`user_env_resolver.go:79-80`）；
   - 工具执行的 UserID（`internal/agent/act.go:530-537`）；
   - 用量日志行里的 `principal=`（`internal/models/api/usage_log.go:39-44`）。
-- **缺口**：主体不受权威绑定。拿到租户 HMAC（signed_token）、只是持有 key（direct），或者是租户 Owner（服务端签发），就能冒充任意 sub，读写它的会话、记忆、MCP 令牌和沙箱凭据。没有 jti 消费和单主体撤销；没有 principal 级审计，key 的操作还可能记到真人名下。
+- **缺口**：主体不受权威绑定。拿到租户 HMAC（signed_token）、只是持有 key（direct），或者是租户 Owner（服务端签发），就能冒充任意 sub，读写它的会话、记忆、MCP 令牌和沙箱凭据。没有 jti 消费和单主体撤销；没有 principal 级审计，key 的操作还可能记到真人名下。配置 HMAC 时它的明文还会落进访问日志（见第 13 项）。
 - **任务**：KB-C1-03（依赖 #992）、KB-CT-02a §1 信任边界、§10 审计最小字段。
 - **证据文件**：`docs/agent24/probe-evidence/4b363d15/02-signed-token.json`（待 PR② 产出）
 
@@ -174,10 +174,11 @@
   - 对 POST/PUT/PATCH 读取 json、form、text 类请求体（`internal/middleware/logger.go:96-102`、`:179-182`），截断到 10KB（`:20`、`:114-124`）；JSON 和 text 类响应体也捕获，同样截断（`:221-233`）。两者以 `request_body`、`response_body` 写入（`:252-258`）。
   - 跳过的只有：`/assets/` 和 wiki stats 整条不记（`:168-172`），local-browser 流量（`/api/v1/local-browser/` 前缀、`/api/v1/me/browser`、`*/local-browser` 后缀）请求体和响应体都不记（`:176-177`、`:180`、`:190-192`），SSE 响应体不记（`:223-224`）。
   - 脱敏只覆盖 password、token、key 这类字段名（`:45-56`）。所以 chunk 正文（GET 响应）、search query（POST 请求体）、经 preview 下发的 text 类原件，都会落日志。
+  - 脱敏正则要求整个字段名等于列表中的某一项（两侧都有引号，`:45-50`），所以 `PUT /tenants/:id/api-principal-config` 请求体里的 `hmac_secret`（`internal/handler/tenant.go:112`；`internal/router/routes_auth_tenant.go:102`）匹配不上：**租户 HMAC 明文会进访问日志的 `request_body`**。这正是第 2 项里“持有就能冒充任意主体”的那个根秘密。
   - 另外 handler 和服务层还单独记录 query 全文（`internal/handler/knowledgebase.go:346`、`internal/handler/session/qa.go:897`、`internal/application/service/knowledgebase_search.go:142-143`）。
   - 配置了 Langfuse 凭据就自动启用追踪（`internal/tracing/langfuse/config.go:79-84`）：retrieve span 的输入带 `query_text`（`internal/application/service/knowledgebase_search.go:233-236`），命中带 160 字正文预览（`internal/tracing/langfuse/retrieval_obs.go:163`、`:258`）。默认不启用，但它是 query 和正文外流的另一个出口。
 - **缺口**：没有关闭正文记录的开关。访问日志按状态码分级：5xx 用 Error、4xx 用 Warn、其余用 Info（`logger.go:263-270`）。`LOG_LEVEL=warn` 时 2xx 不输出，但 4xx/5xx 仍带正文；`LOG_LEVEL=error` 时只剩 5xx。`LOG_LEVEL` 未设置或无效时就是 debug（`internal/logger/logger.go:337-338`），Lite 的示例配置也是 debug（`.env.lite.example:8`）。
-- **任务**：KB-OBS-01（哨兵秘密负例）。
+- **任务**：KB-OBS-01（哨兵秘密负例，须覆盖 `hmac_secret`）、KB-C1-03（HMAC 的配置与轮换不得经过记录正文的路径）。
 - **证据文件**：`docs/agent24/probe-evidence/4b363d15/13-log-body.txt`（待 PR② 产出，只含哨兵串）
 
 ### 14. RBAC 能否配成放行
