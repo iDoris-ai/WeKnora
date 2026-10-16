@@ -64,15 +64,24 @@ jobs:
             --jq 'select(.draft == false and .prerelease == false) | .tag_name')
           test -n "$release_tag"
           git check-ref-format "refs/tags/$release_tag"
+          # tag 名来自上游（不可信），会写进评审人照抄执行的命令；只接受版本号形式，
+          # 排除 $、反引号、引号等 shell 元字符。不符就停止，交给人处理。
+          tag_re='^v[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z.]+)?$'
+          if ! [[ "$release_tag" =~ $tag_re ]]; then
+            echo "::error::上游正式版 tag 不是预期的版本号形式，已停止：$(printf '%q' "$release_tag")"
+            exit 1
+          fi
           git fetch --no-tags upstream "refs/tags/$release_tag"
           release_sha=$(git rev-parse 'FETCH_HEAD^{commit}')
+          # 守卫检查的和推送的必须是同一个提交：先解析成 SHA，两处都用它
+          main_sha=$(git rev-parse 'refs/remotes/upstream/main^{commit}')
           git fetch --no-tags origin \
             refs/heads/upstream-main:refs/remotes/origin/upstream-main \
             refs/heads/upstream-release:refs/remotes/origin/upstream-release \
             refs/heads/a24/develop:refs/remotes/origin/a24/develop
 
           # Verify both histories before changing either mirror. Never force push.
-          git merge-base --is-ancestor origin/upstream-main upstream/main
+          git merge-base --is-ancestor origin/upstream-main "$main_sha"
           git merge-base --is-ancestor origin/upstream-release "$release_sha"
 
           # 本仓库里以镜像分支为 head 的 PR 打开期间，用 App 令牌推进它会以 App 身份触发 synchronize，
@@ -87,8 +96,8 @@ jobs:
           release_pr=$(same_repo_pr upstream-release)
           targets=(); refspecs=()
           if [ -z "$main_pr" ]; then
-            targets+=("$(git rev-parse upstream/main)" upstream-main)
-            refspecs+=(refs/remotes/upstream/main:refs/heads/upstream-main)
+            targets+=("$main_sha" upstream-main)
+            refspecs+=("$main_sha:refs/heads/upstream-main")
           else
             echo "::warning::PR #${main_pr} 以 upstream-main 为 head，本次不推进 upstream-main。镜像分支不应作为 PR 的 head。"
           fi
@@ -103,7 +112,7 @@ jobs:
             git push --atomic origin "${refspecs[@]}"
           fi
           {
-            echo "Upstream main: $(git rev-parse upstream/main)${main_pr:+（未推进：PR #${main_pr} 以它为 head）}"
+            echo "Upstream main: ${main_sha}${main_pr:+（未推进：PR #${main_pr} 以它为 head）}"
             echo "Stable release: $release_tag ($release_sha)${release_pr:+（未推进：以它为 head 的 PR #${release_pr} 仍打开）}"
             echo "Product branch: unchanged; updates require a reviewed merge."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -139,7 +148,8 @@ jobs:
              git ls-remote https://github.com/iDoris-ai/WeKnora.git refs/heads/upstream-release
           3. 评审上游对工作流与 action 的改动：
              git fetch origin && git diff origin/a24/develop...${release_sha} -- .github/
-             重点看会被 pull_request 类事件运行的工作流：未声明 permissions 的 job 会取本仓库默认的写权限；
+             重点看会被 pull_request 类事件运行的工作流：job 未声明 permissions 时继承工作流级 permissions，
+             两级都未声明才取本仓库默认的写权限；
              显式申请写权限、引用 secret、调用新的外部 action 都要逐个确认。确认无害前不要开 PR。
           4. 开同步 PR（CI 随即以评审人身份运行），并核对 head：
              gh pr create -R iDoris-ai/WeKnora --base a24/develop --head upstream-release \\

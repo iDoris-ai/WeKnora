@@ -27,13 +27,20 @@ end
 
 # GitHub 过滤模式（workflow-syntax 的 Filter pattern cheat sheet）转正则：
 # ** 任意字符；* 不跨 /；? 前一字符零或一次；+ 前一字符一或多次；[...] 字符集；其余按字面。
-def glob_to_regex(pattern)
+# 平台语义有疑问的写法按 wide 取舍：wide 为 true 时取较宽的解释（用于"可能匹配"，宁可多拦），
+# 为 false 时取较窄的解释（用于"一定匹配"的排除）。cheat sheet 里 '**/README.md' 匹配 README.md，
+# 即开头或中间的 **/ 可以匹配零层目录；结尾的 /** 能否匹配零层没写，同样按 wide 取舍。
+def glob_to_regex(pattern, wide:)
   out = +""
   quantified = false # 上一个原子是否已带量词；叠加量词（*+、?+、++ 等）在 Ruby 里另有含义，按无法识别处理
   i = 0
   while i < pattern.length
     c = pattern[i]
-    if c == "*" && pattern[i + 1] == "*"
+    if wide && pattern[i, 3] == "**/"
+      out << "(?:.*/)?"; i += 3; quantified = true
+    elsif wide && pattern[i, 3] == "/**" && i + 3 == pattern.length
+      out << "(?:/.*)?"; i += 3; quantified = true
+    elsif c == "*" && pattern[i + 1] == "*"
       out << ".*"; i += 2; quantified = true
     elsif c == "*"
       out << "[^/]*"; i += 1; quantified = true
@@ -58,16 +65,37 @@ end
 
 # 返回 true 表示该模式可能匹配 branch；无法识别的模式按"匹配"处理。
 def may_match?(pattern, branch)
-  branch.match?(glob_to_regex(pattern))
+  branch.match?(glob_to_regex(pattern, wide: true))
 rescue Unknown
   true
 end
 
 # 返回 true 表示该模式一定匹配 branch（用于 branches-ignore 排除）；无法识别的按"不匹配"处理。
 def surely_matches?(pattern, branch)
-  branch.match?(glob_to_regex(pattern))
+  branch.match?(glob_to_regex(pattern, wide: false))
 rescue Unknown
   false
+end
+
+# YAML 里 Psych 与 GitHub 可能读出不同结果的结构，出现就按无法识别处理：多个文档（safe_load 只读第一个）、
+# 同一映射里的重复键（safe_load 取最后一个；"on" 与裸 on 原文相同，也算重复）、
+# 非普通标量的键（复杂键、别名、带标签）。
+KEY_SCANNER = Psych::ScalarScanner.new(Psych::ClassLoader::Restricted.new([], []))
+def reject_ambiguous_yaml!(raw)
+  docs = Psych.parse_stream(raw).children
+  raise Unknown, "含多个 YAML 文档" if docs.length > 1
+  docs.each do |doc|
+    doc.each do |node|
+      next unless node.is_a?(Psych::Nodes::Mapping)
+      raw_keys = []; resolved = []
+      node.children.each_slice(2) do |key, _|
+        raise Unknown, "映射键不是普通标量" unless key.is_a?(Psych::Nodes::Scalar) && key.tag.nil?
+        raw_keys << key.value
+        resolved << (key.quoted ? key.value : KEY_SCANNER.tokenize(key.value))
+      end
+      raise Unknown, "映射里有重复键" if raw_keys.uniq.length != raw_keys.length || resolved.uniq.length != resolved.length
+    end
+  end
 end
 
 def branch_push_triggers?(cfg, branch)
@@ -128,6 +156,7 @@ ARGV.each_slice(2) do |commit, branch|
       # Psych 处理合并键 << 的优先级与规范相反，可能把分支过滤解析错；块式与 flow 映射里
       # 出现就按无法识别处理（宁可误拦 run 脚本里恰好写了 <<: 的文件）
       raise Unknown, "含 YAML 合并键 <<" if raw.match?(/<<["']?\s*:/)
+      reject_ambiguous_yaml!(raw)
       doc = YAML.safe_load(raw, aliases: true)
       raise Unknown, "顶层不是映射" unless doc.is_a?(Hash)
       on = doc.key?("on") ? doc["on"] : doc[true] # YAML 1.1 把 on 解析成 true
