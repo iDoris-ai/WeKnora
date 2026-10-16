@@ -65,6 +65,15 @@ git add -A; git -c user.name=t -c user.email=t@t commit -qm x
 out=$(ruby "$G" "$(git rev-parse HEAD)" "$M" 2>&1)
 if grep -q '^::error::.*符号链接' <<<"$out"; then echo "PASS 符号链接"; else echo "FAIL 符号链接"; fail=1; fi
 git rm -rq --cached . >/dev/null 2>&1
+# .github/workflows 或 .github 本身是符号链接：拦下
+for d in .github/workflows .github; do
+  rm -rf .github elsewhere; mkdir -p elsewhere/workflows; printf 'on: push\njobs: {}\n' > elsewhere/workflows/w.yml
+  mkdir -p "$(dirname "$d")"; [ "$d" = .github ] && ln -s elsewhere .github || ln -s ../elsewhere/workflows .github/workflows
+  git add -A; git -c user.name=t -c user.email=t@t commit -qm x
+  out=$(ruby "$G" "$(git rev-parse HEAD)" "$M" 2>&1)
+  if grep -q '^::error::.*不是普通目录' <<<"$out"; then echo "PASS $d 是符号链接"; else echo "FAIL $d 是符号链接"; fail=1; fi
+  git rm -rq --cached . >/dev/null 2>&1; rm -rf .github elsewhere
+done
 # 目标提交不存在：失败
 if ruby "$G" 0000000000000000000000000000000000000000 "$M" >/dev/null 2>&1; then echo "FAIL 提交不存在"; fail=1; else echo "PASS 提交不存在"; fi
 exit $fail

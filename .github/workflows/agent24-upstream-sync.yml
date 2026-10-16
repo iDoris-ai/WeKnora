@@ -75,12 +75,14 @@ jobs:
 
           # 本仓库里以镜像分支为 head 的 PR 打开期间，用 App 令牌推进它会以 App 身份触发 synchronize，
           # 自动运行未评审的上游 PR 工作流。所以哪条镜像有这样的 PR，本次就不推进哪条。
-          # 跨仓 PR（fork 里恰好同名的分支）不受影响，排除在外。
-          open_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
-            --json number,headRefName,isCrossRepository \
-            --jq '[.[] | select(.isCrossRepository | not)] | map("\(.headRefName)=\(.number)") | .[]')
-          main_pr=$(printf '%s\n' "$open_prs" | sed -n 's/^upstream-main=//p' | head -n1)
-          release_pr=$(printf '%s\n' "$open_prs" | sed -n 's/^upstream-release=//p' | head -n1)
+          # 跨仓 PR（fork 里恰好同名的分支）不受影响，排除在外。按分支名精确查询，不受 PR 总数影响。
+          same_repo_pr() {
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$1" --state open --limit 1000 \
+              --json number,headRefName,isCrossRepository \
+              --jq "[.[] | select((.isCrossRepository | not) and .headRefName == \"$1\")][0].number // empty"
+          }
+          main_pr=$(same_repo_pr upstream-main)
+          release_pr=$(same_repo_pr upstream-release)
           targets=(); refspecs=()
           if [ -z "$main_pr" ]; then
             targets+=("$(git rev-parse upstream/main)" upstream-main)
@@ -100,7 +102,7 @@ jobs:
           fi
           {
             echo "Upstream main: $(git rev-parse upstream/main)${main_pr:+（未推进：PR #${main_pr} 以它为 head）}"
-            echo "Stable release: $release_tag ($release_sha)${release_pr:+（未推进：同步 PR #${release_pr} 仍打开）}"
+            echo "Stable release: $release_tag ($release_sha)${release_pr:+（未推进：以它为 head 的 PR #${release_pr} 仍打开）}"
             echo "Product branch: unchanged; updates require a reviewed merge."
           } >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$release_pr" ]; then
@@ -120,15 +122,15 @@ jobs:
           冲突必须逐项解决；保留 docs/agent24 与二次开发 feature，不以 ours/theirs 批量掩盖。
 
           **CI 尚未运行。** 本 PR 由内置 GITHUB_TOKEN 创建，不会自动运行上游的工作流。评审人按顺序执行：
-          1. 暂停同步工作流，并确认没有进行中的运行：
+          1. 暂停同步工作流，并确认没有未完成的运行（含排队中的；输出须为空）：
              gh workflow disable agent24-upstream-sync.yml -R iDoris-ai/WeKnora
-             gh run list -R iDoris-ai/WeKnora -w agent24-upstream-sync.yml -s in_progress
+             gh run list -R iDoris-ai/WeKnora -w agent24-upstream-sync.yml --json databaseId,status --jq '.[] | select(.status != "completed")'
           2. 评审上游对工作流与 action 的改动：
              git fetch origin && git diff origin/a24/develop...${release_sha} -- .github/
              重点看新增或改动的 pull_request 工作流：未声明 permissions 的 job 会取本仓库默认的写权限；
              显式申请写权限、引用 secret、调用新的外部 action 都要逐个确认。
           3. 确认本 PR 当前 head 仍是 ${release_sha}（gh pr view <编号> -R iDoris-ai/WeKnora --json headRefOid），
-             再关闭并重新打开本 PR，以评审人身份触发适用检查。
+             再关闭并重新打开本 PR，以评审人身份触发适用检查；重开后再核对一次 head，不一致就停下重新评审。
           4. 恢复同步工作流：gh workflow enable agent24-upstream-sync.yml -R iDoris-ai/WeKnora
           检查实际运行并通过后才能合并。本 PR 打开期间同步工作流不会推进 upstream-release。
           本工作流不批准或合并 PR，也不把上游开发版自动送进产品分支。

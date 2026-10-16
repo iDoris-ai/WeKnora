@@ -95,6 +95,15 @@ problems = []
 raise "need <commit> <branch> pairs" if ARGV.empty? || ARGV.length.odd?
 ARGV.each_slice(2) do |commit, branch|
   git("cat-file", "-e", "#{commit}^{commit}") # 目标提交必须存在
+  # .github 或 .github/workflows 存在但不是目录（例如符号链接）：无法确认，按有风险处理
+  bad_dir = %w[.github .github/workflows].find do |d|
+    type, st = Open3.capture2e("git", "cat-file", "-t", "#{commit}:#{d}")
+    st.success? && type.strip != "tree"
+  end
+  if bad_dir
+    problems << "#{commit[0, 10]} #{bad_dir} 不是普通目录（可能是符号链接），按有风险处理"
+    next
+  end
   # 没有 .github/workflows 目录：不会触发任何工作流
   _, wf_status = Open3.capture2e("git", "cat-file", "-e", "#{commit}:.github/workflows")
   next unless wf_status.success?
