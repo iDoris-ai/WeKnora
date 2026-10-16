@@ -3,7 +3,7 @@
 | 编号 | 范围与目的 | 路径 | 上游升级处置 / 验证 |
 |---|---|---|---|
 | A24-BOOT-01 | 产品规划、分支维护和初始基线 | `docs/agent24/` | 保留独立命名空间；上游更新后核对文档证据与实施状态 |
-| A24-BOOT-02 | 两条纯镜像定时快进、正式版同步 PR | `.github/workflows/agent24-upstream-sync.yml` | 检查权限、镜像 SHA 和幂等；不自动批准/合并，不发布产品 |
+| A24-BOOT-02 | 两条纯镜像定时快进；有新正式版时开或更新同步 issue，由评审人审完 `.github/` 后自己开同步 PR；推镜像用组织 App 短期令牌，推送前守卫拦截会被镜像推送激活的上游工作流 | `.github/workflows/agent24-upstream-sync.yml`、`.github/scripts/agent24-mirror-trigger-guard.rb`、`.github/scripts/agent24-mirror-trigger-guard-test.sh`；外部依赖：组织 App「iDoris WeKnora Sync」、Environment `upstream-sync`（见 FORK-MAINTENANCE.md「同步凭据」） | 检查权限、镜像 SHA 和幂等；不自动批准/合并，不发布产品。上游 `.github/` 冲突时保留这三个文件；改守卫后跑 `bash .github/scripts/agent24-mirror-trigger-guard-test.sh`，全部 PASS，并用守卫检查当前上游 main 与最新正式版 |
 | A24-DESIGN-01 | 唯一主对话与知识服务职责、KB-C0–C4 验收设计 | `docs/agent24/ADR-001-SINGLE-CONVERSATION.md`、总体方案 | 用户已确认产品方向，工程接口待评审；上游升级检查无第二聊天、授权与原知识能力回归；本次仅文档 |
 | A24-DESIGN-02 | 默认一站式知识库，隐藏普通用户的技术配置成本 | `docs/agent24/TODO-B-ONE-STOP-KNOWLEDGE.md` | 对照 #1 的初始化/隔离/费用验收；先固定配置，调优后续；本次仅文档 |
 

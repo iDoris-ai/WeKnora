@@ -5,9 +5,15 @@ on:
     - cron: '23 */6 * * *'
   workflow_dispatch:
 
+# 只有推镜像用组织 App「iDoris WeKnora Sync」的 1 小时安装令牌：内置 GITHUB_TOKEN 无法获得
+# workflows 权限，推不动改了 .github/workflows/ 的上游提交。
+# 工作流不开同步 PR：PR 一旦打开，任何人打标签、指派、评论都会运行合并提交里未评审的上游工作流。
+# 发现新正式版时只用内置 GITHUB_TOKEN 开或更新一个 issue，由评审人审完 .github/ 后自己开 PR。
+# 凭据设置、评审步骤与轮换见 docs/agent24/FORK-MAINTENANCE.md。
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
+  issues: write
 
 concurrency:
   group: agent24-upstream-sync
@@ -17,11 +23,35 @@ jobs:
   sync:
     if: github.repository == 'iDoris-ai/WeKnora'
     runs-on: ubuntu-latest
+    # App 私钥与 Client ID 只存在这个 Environment，部署分支策略只允许 a24/develop。
+    # 镜像推送触发的上游工作流跑在别的 ref 上，读不到它们。
+    environment: upstream-sync
     steps:
+      - name: Require sync App credentials
+        env:
+          CLIENT_ID: ${{ vars.WEKNORA_SYNC_APP_CLIENT_ID }}
+          HAS_KEY: ${{ secrets.WEKNORA_SYNC_APP_PRIVATE_KEY != '' }}
+        shell: bash
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ "$HAS_KEY" != "true" ]; then
+            echo "::error::缺少 vars.WEKNORA_SYNC_APP_CLIENT_ID 或 secrets.WEKNORA_SYNC_APP_PRIVATE_KEY，见 docs/agent24/FORK-MAINTENANCE.md"
+            exit 1
+          fi
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.WEKNORA_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WEKNORA_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: WeKnora
+          permission-contents: write
+          permission-workflows: write
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: a24/develop
           fetch-depth: 0
+          # git push 用 App 令牌；gh 命令另用下面的 GH_TOKEN（内置 GITHUB_TOKEN）
+          token: ${{ steps.app-token.outputs.token }}
       - name: Fast-forward mirrors and propose release integration
         env:
           GH_TOKEN: ${{ github.token }}
@@ -34,47 +64,117 @@ jobs:
             --jq 'select(.draft == false and .prerelease == false) | .tag_name')
           test -n "$release_tag"
           git check-ref-format "refs/tags/$release_tag"
+          # tag 名来自上游（不可信），会写进评审人照抄执行的命令；只接受版本号形式，
+          # 排除 $、反引号、引号等 shell 元字符。不符就停止，交给人处理。
+          tag_re='^v[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z.]+)?$'
+          if ! [[ "$release_tag" =~ $tag_re ]]; then
+            echo "::error::上游正式版 tag 不是预期的版本号形式，已停止：$(printf '%q' "$release_tag")"
+            exit 1
+          fi
           git fetch --no-tags upstream "refs/tags/$release_tag"
           release_sha=$(git rev-parse 'FETCH_HEAD^{commit}')
+          # 守卫检查的和推送的必须是同一个提交：先解析成 SHA，两处都用它
+          main_sha=$(git rev-parse 'refs/remotes/upstream/main^{commit}')
           git fetch --no-tags origin \
             refs/heads/upstream-main:refs/remotes/origin/upstream-main \
             refs/heads/upstream-release:refs/remotes/origin/upstream-release \
             refs/heads/a24/develop:refs/remotes/origin/a24/develop
 
           # Verify both histories before changing either mirror. Never force push.
-          git merge-base --is-ancestor origin/upstream-main upstream/main
+          git merge-base --is-ancestor origin/upstream-main "$main_sha"
           git merge-base --is-ancestor origin/upstream-release "$release_sha"
-          git push --atomic origin \
-            refs/remotes/upstream/main:refs/heads/upstream-main \
-            "$release_sha:refs/heads/upstream-release"
+
+          # 本仓库里以镜像分支为 head 的 PR 打开期间，用 App 令牌推进它会以 App 身份触发 synchronize，
+          # 自动运行未评审的上游 PR 工作流。所以哪条镜像有这样的 PR，本次就不推进哪条。
+          # 跨仓 PR（fork 里恰好同名的分支）不受影响，排除在外。按分支名精确查询，不受 PR 总数影响。
+          same_repo_pr() {
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$1" --state open --limit 1000 \
+              --json number,headRefName,isCrossRepository \
+              --jq "[.[] | select((.isCrossRepository | not) and .headRefName == \"$1\")][0].number // empty"
+          }
+          main_pr=$(same_repo_pr upstream-main)
+          release_pr=$(same_repo_pr upstream-release)
+          targets=(); refspecs=()
+          if [ -z "$main_pr" ]; then
+            targets+=("$main_sha" upstream-main)
+            refspecs+=("$main_sha:refs/heads/upstream-main")
+          else
+            echo "::warning::PR #${main_pr} 以 upstream-main 为 head，本次不推进 upstream-main。镜像分支不应作为 PR 的 head。"
+          fi
+          if [ -z "$release_pr" ]; then
+            targets+=("$release_sha" upstream-release)
+            refspecs+=("$release_sha:refs/heads/upstream-release")
+          fi
+          if [ ${#refspecs[@]} -gt 0 ]; then
+            # 用 App 令牌推送会触发被推送提交里的 push 工作流（上游代码，未经评审）；
+            # 有任何会被镜像推送激活的触发就停止，交给人处理。
+            ruby .github/scripts/agent24-mirror-trigger-guard.rb "${targets[@]}"
+            git push --atomic origin "${refspecs[@]}"
+          fi
           {
-            echo "Upstream main: $(git rev-parse upstream/main)"
-            echo "Stable release: $release_tag ($release_sha)"
+            echo "Upstream main: ${main_sha}${main_pr:+（未推进：PR #${main_pr} 以它为 head）}"
+            echo "Stable release: $release_tag ($release_sha)${release_pr:+（未推进：以它为 head 的 PR #${release_pr} 仍打开）}"
             echo "Product branch: unchanged; updates require a reviewed merge."
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$release_pr" ]; then
+            exit 0
+          fi
+
+          # 工作流自己开的同步 issue：按创建者 github-actions[bot] 过滤，防止他人用同样标题的 issue 冒充；
+          # 该接口也返回 PR，排除掉。
+          sync_issue=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&creator=github-actions%5Bbot%5D&per_page=100" \
+            --jq '[.[] | select((has("pull_request") | not) and (.title | startswith("[upstream-sync] ")))][0].number // empty')
 
           if git merge-base --is-ancestor "$release_sha" origin/a24/develop; then
             echo "Product branch already contains this release." >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "$sync_issue" ]; then
+              gh issue close "$sync_issue" --repo "$GITHUB_REPOSITORY" \
+                --comment "a24/develop 已包含上游正式版 ${release_tag}（${release_sha}），关闭。"
+            fi
             exit 0
           fi
-          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" \
-            --base a24/develop --head upstream-release --state open \
-            --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            echo "Existing release integration PR: #$existing" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          cat > /tmp/upstream-sync-pr.md <<EOF
-          上游正式版：$release_tag
-          固定提交：$release_sha
+          cat > /tmp/upstream-sync-issue.md <<EOF
+          上游正式版：${release_tag}
+          固定提交：${release_sha}
 
-          本 PR 仅提议将 upstream-release 正常 merge 到 a24/develop；禁止 reset、强推和整树覆盖。
-          评审须核对 Agent24 适配、身份/权限、取消、引用、数据迁移和恢复，以及补丁清单。
-          冲突必须逐项解决；保留 docs/agent24 与二次开发 feature，不以 ours/theirs 批量掩盖。
-          机器人创建的 PR 不保证自动触发 GitHub CI：请显式运行适用检查，再审查/合并。
-          本工作流不批准或合并 PR，也不把上游开发版自动送进产品分支。
+          upstream-release 镜像已指向该提交，a24/develop 尚未包含。同步工作流**不会**自动开 PR：
+          PR 一旦打开，任何人打标签、指派、评论都会运行合并提交里未经评审的上游工作流，
+          拿到写权限令牌和本仓库可见的 secret。请评审人按顺序执行：
+
+          1. 暂停同步工作流，并确认没有未完成的运行（含排队中的；第二条命令的输出须为空）：
+             ~~~
+             gh workflow disable agent24-upstream-sync.yml -R iDoris-ai/WeKnora
+             gh run list -R iDoris-ai/WeKnora -w agent24-upstream-sync.yml --json databaseId,status --jq '.[] | select(.status != "completed")'
+             ~~~
+          2. 确认镜像仍指向本 issue 写的提交（输出的 SHA 须等于 ${release_sha}；不一致就以本 issue 最新内容为准重来）：
+             ~~~
+             git ls-remote https://github.com/iDoris-ai/WeKnora.git refs/heads/upstream-release
+             ~~~
+          3. 评审上游对工作流与 action 的改动：
+             ~~~
+             git fetch origin && git diff origin/a24/develop...${release_sha} -- .github/
+             ~~~
+             重点看会被 pull_request 类事件运行的工作流：job 未声明 permissions 时继承工作流级 permissions，
+             两级都未声明才取本仓库默认的写权限；显式申请写权限、引用 secret、调用新的外部 action 都要逐个确认。
+             确认无害前不要开 PR。
+          4. 开同步 PR（CI 随即以评审人身份运行），并核对 head（headRefOid 须等于 ${release_sha}）：
+             ~~~
+             gh pr create -R iDoris-ai/WeKnora --base a24/develop --head upstream-release --title "chore(upstream): 同步正式版 ${release_tag}" --body "同步正式版 ${release_tag}（${release_sha}），见本仓库 issue #<本 issue 编号>"
+             gh pr view <PR 编号> -R iDoris-ai/WeKnora --json headRefOid
+             ~~~
+          5. 恢复同步工作流（以 upstream-release 为 head 的 PR 打开期间，同步工作流不会推进 upstream-release）：
+             ~~~
+             gh workflow enable agent24-upstream-sync.yml -R iDoris-ai/WeKnora
+             ~~~
+
+          PR 只提议正常 merge upstream-release 到 a24/develop；禁止 reset、强推和整树覆盖。评审须核对
+          Agent24 适配、身份/权限、取消、引用、数据迁移和恢复，以及补丁清单；冲突逐项解决，保留
+          docs/agent24 与二次开发 feature。适用检查实际运行并通过后才能合并。合并后同步工作流会关闭本 issue。
           EOF
-          gh pr create --repo "$GITHUB_REPOSITORY" \
-            --base a24/develop --head upstream-release \
-            --title "chore(upstream): 同步正式版 $release_tag" \
-            --body-file /tmp/upstream-sync-pr.md
+          title="[upstream-sync] 同步正式版 ${release_tag}"
+          if [ -n "$sync_issue" ]; then
+            gh issue edit "$sync_issue" --repo "$GITHUB_REPOSITORY" --title "$title" --body-file /tmp/upstream-sync-issue.md
+            echo "Sync issue updated: #${sync_issue}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file /tmp/upstream-sync-issue.md
+          fi
