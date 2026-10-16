@@ -50,26 +50,36 @@
     "upgrade_before": {
       "definition": "产品补丁 = 改动或新增上游代码路径的工作；fork 自有命名空间（docs/agent24/、scripts/agent24/、.github/scripts/agent24-*、.github/workflows/agent24-*）内的新增与修改不算",
       "triggers": [
-        "开始第一个产品补丁的 task 分支之前（不是写完再判断；v0.8.3 改了 1576 个文件，相交几乎必然。辅助判据：comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort)）",
+        "开始第一个产品补丁的 task 分支之前（不是写完再判断；v0.8.3 改了 1576 个文件，相交几乎必然。开工前按计划改动的路径清单判断；开 PR 时用此命令复核：comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort)）",
         "导入任何非测试资料、或让开发者以外的人访问任何实例之前（v0.8.2 在鉴权前无上限读取部分请求体；ParadeDB 新镜像带的 pgvector 0.8.4 修了 HNSW 缓冲区溢出与 vacuum 索引损坏）",
         "任何对外制品（Lite 包、镜像）出货之前",
         "需要启用 minio、langfuse 或 full compose profile 时（v0.8.2 钉的 quay.io MinIO 镜像已不能匿名拉取）",
-        "上游发布影响 v0.8.2 的安全公告时，或距上次评估满 30 天时，重新评估"
+        "上游发布影响 v0.8.2 的安全公告时，或到 reevaluate_by 时，重新评估"
       ],
       "procedure": [
         "届时最新正式版不是 v0.8.3 时，先补一份 v0.8.2 到该版本的差异评估",
         "按同步 issue 的五步开同步 PR",
-        "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go 与前端回归、契约回归（KB-CT-02b 完成之前，以新 SHA 上重跑 PR② 探测并重核能力矩阵代替）、LICENSE 核对",
+        "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go 与前端回归、契约回归（KB-CT-02b 完成之前，以新 SHA 上重跑 PR② 探测并重核能力矩阵代替）、LICENSE 核对、KB-LITE-01b 重新测量",
         "更新本文件与 PATCH-LEDGER"
       ],
-      "gate": "KB-C1-01、KB-C1-01b-a、KB-C1-01c、KB-OBS-01 等第一批产品补丁任务以“基线已升级（#9 已吸收）”为前置",
-      "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason"
+      "gate": "已登记到 Agent24#1001 进入条件：KB-C1-01、KB-C1-01b-a、KB-C1-01c、KB-OBS-01 建卡时写入“基线已升级（#9 已吸收）”依赖；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
+      "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason",
+      "reevaluate_by": "2026-11-15",
+      "owner": "David（stoptheworld-java）"
     },
     "test_stack_constraints": [
-      "WEKNORA_VERSION=v0.8.2（Docker Hub 的 weknora-app:latest 与 v0.8.3 的 digest 相同，2026-10-16 实测），或从 3e8b0bf 本地构建；证据记录镜像 digest 与应用自报版本",
-      "只用默认服务（ui、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local",
-      "Lite 与标准栈的结果不互相替代",
-      "实例只绑定本机或隔离网络"
+      "WEKNORA_VERSION=v0.8.2（Docker Hub 的 latest 与 v0.8.3 的 digest 相同，2026-10-16 实测），或从 3e8b0bf 本地构建；证据记录镜像 digest 与应用自报版本",
+      {
+        "v0.8.2_image_digests_as_of_2026-10-16": {
+          "app": "sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc",
+          "ui": "sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f",
+          "docreader": "sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a"
+        }
+      },
+      "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local",
+      "误跑过 latest 的数据卷丢弃重建；证据记录 schema_migrations 版本（v0.8.2 为 110）",
+      "APP_PORT=127.0.0.1:8080、FRONTEND_PORT=127.0.0.1:80，证据记录 docker port 输出",
+      "Lite 与标准栈的结果不互相替代"
     ]
   }
 }
