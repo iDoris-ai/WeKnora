@@ -3,8 +3,8 @@
 # 工作流定义（上游代码，未经评审）。任一工作流会被推送到镜像分支激活（push/create），
 # 或内容无法识别，就失败停止，交给人处理。
 #
-# 同步 PR 由内置 GITHUB_TOKEN 创建，不会自动运行上游工作流，不在这里检查；
-# 它的评审步骤见 docs/agent24/FORK-MAINTENANCE.md。
+# 同步工作流不开 PR（只开或更新同步 issue），PR 类事件不在这里检查；
+# 评审人开同步 PR 前的步骤见 docs/agent24/FORK-MAINTENANCE.md。
 #
 # 用法：ruby agent24-mirror-trigger-guard.rb <commit> <branch> [<commit> <branch> ...]
 # 只读 git 对象，不检出、不执行上游代码。
