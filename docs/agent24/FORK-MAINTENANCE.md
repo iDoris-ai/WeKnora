@@ -10,7 +10,7 @@
 | `upstream-main` | 与上游开发分支 `main` 的 commit 一致 | 纯镜像；不添加产品改动 |
 | `a24/develop` | 从正式 Release 起步的二次开发集成分支；本仓库默认分支 | 保存 Agent24 文档、适配和 feature；通过正常 merge 吸收正式版 |
 
-初始正式版为 `v0.8.2`；完整初始 SHA 见 `UPSTREAM-BASELINE.json`。该文件是初始化快照，不是实时状态。研究方案里的旧 main SHA 保留为当时证据，不能混称产品发布基线。
+初始正式版为 `v0.8.2`；完整初始 SHA 见 `UPSTREAM-BASELINE.json` 的 `initial_snapshot`。当前产品基线与必须先升级的时点见同一文件的 `current_baseline`（`upgrade_before`）和 PATCH-LEDGER 开头；镜像的实时状态以 `git ls-remote` 为准。研究方案里的旧 main SHA 保留为当时证据，不能混称产品发布基线。
 
 ## 同步规则
 
@@ -57,7 +57,8 @@ UI 在 fork 的 Vue 前端开发；Agent24 只放宿主壳、受限 IPC、provid
 ## 首个提交与范围
 
 - `WEKNORA-INTEGRATION-PROPOSAL.md`：当前总体方案及分发、切换、Sidecar/界面嵌入补充。
-- `FORK-MAINTENANCE.md` / `UPSTREAM-BASELINE.json`：分支职责、更新与初始证据。
+- `FORK-MAINTENANCE.md` / `UPSTREAM-BASELINE.json`：分支职责、更新、初始证据与当前基线。
+- `BASELINE-EVAL-v0.8.3.md`：v0.8.2 与 v0.8.3 的差异评估和基线决定。
 - `PATCH-LEDGER.md`：补丁/扩展登记起点。
 - `agent24-upstream-sync.yml`：定时镜像快进，并在有新正式版时开或更新同步 issue；不是产品 feature。
 

@@ -1,26 +1,85 @@
 {
-  "kind": "initial_snapshot",
-  "recorded_on": "2026-10-11",
-  "fork": "iDoris-ai/WeKnora",
-  "upstream": "Tencent/WeKnora",
-  "release": {
-    "tag": "v0.8.2",
-    "commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
-    "mirror_branch": "upstream-release"
+  "initial_snapshot": {
+    "kind": "initial_snapshot",
+    "recorded_on": "2026-10-11",
+    "fork": "iDoris-ai/WeKnora",
+    "upstream": "Tencent/WeKnora",
+    "release": {
+      "tag": "v0.8.2",
+      "commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
+      "mirror_branch": "upstream-release"
+    },
+    "development": {
+      "source_branch": "main",
+      "commit": "231a5c0b15b817bb13ee3a876c3fbaf337cb4d5e",
+      "mirror_branch": "upstream-main"
+    },
+    "product": {
+      "branch": "a24/develop",
+      "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97"
+    },
+    "sync_policy": {
+      "mirror_update": "fast-forward-only",
+      "product_update": "reviewed-release-merge-pr",
+      "auto_merge": false,
+      "interval_hours": 6
+    }
   },
-  "development": {
-    "source_branch": "main",
-    "commit": "231a5c0b15b817bb13ee3a876c3fbaf337cb4d5e",
-    "mirror_branch": "upstream-main"
-  },
-  "product": {
-    "branch": "a24/develop",
-    "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97"
-  },
-  "sync_policy": {
-    "mirror_update": "fast-forward-only",
-    "product_update": "reviewed-release-merge-pr",
-    "auto_merge": false,
-    "interval_hours": 6
+  "current_baseline": {
+    "kind": "product_baseline",
+    "decided_on": "2026-10-16",
+    "decision": "iDoris-ai/WeKnora#4 (KB-C0-02)",
+    "evaluation": "docs/agent24/BASELINE-EVAL-v0.8.3.md",
+    "release": {
+      "tag": "v0.8.2",
+      "commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97"
+    },
+    "product": {
+      "branch": "a24/develop",
+      "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
+      "product_patches": "none",
+      "note": "base_commit 是产品代码等同的上游提交，不是 a24/develop 的当前提交；product_patches 截至 decided_on；产品代码与 v0.8.2 逐字节相同（截至 2026-10-16）"
+    },
+    "evaluated_upstream_release": {
+      "tag": "v0.8.3",
+      "commit": "3e22822c1d2397be730c458c7539d0eb8c113a24",
+      "as_of": "2026-10-16",
+      "status": "evaluated, not absorbed",
+      "sync_issue": "iDoris-ai/WeKnora#9（工作流会把它改写成届时最新的正式版）"
+    },
+    "upgrade_before": {
+      "definition": "产品补丁 = 改动或新增 fork 自有命名空间（docs/agent24/、scripts/agent24/、.github/scripts/agent24-*、.github/workflows/agent24-*）之外路径的任何工作，不论是否与上游改动相交",
+      "triggers": [
+        "开始第一个产品补丁的 task 分支之前（按计划改动的路径清单判断；开 PR 时用 git diff --name-only origin/a24/develop...<补丁分支> | grep -v -E '^(docs/agent24/|scripts/agent24/|\\.github/(scripts|workflows)/agent24-)' 复核，输出非空就停下：先完成升级并合入 a24/develop，再 rebase）",
+        "导入任何非测试资料、或让开发者以外的人访问任何实例之前（v0.8.2 在鉴权前把 json、form、text/ 类 POST/PUT/PATCH 请求的请求体整体无上限读入内存；ParadeDB 新镜像带的 pgvector 0.8.4 修了 HNSW 缓冲区溢出与 vacuum 索引损坏）",
+        "任何对外制品（Lite 包、镜像）出货之前",
+        "需要启用 minio、langfuse 或 full compose profile 时（v0.8.2 钉的 quay.io MinIO 镜像已不能匿名拉取）",
+        "上游发布影响 v0.8.2 的安全公告时，或到 reevaluate_by 时，重新评估"
+      ],
+      "procedure": [
+        "届时最新正式版不是 v0.8.3 时，先补一份 v0.8.2 到该版本的差异评估",
+        "按同步 issue 的五步开同步 PR",
+        "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go 与前端回归（升级前先在当前基线记录失败清单）、契约回归（KB-CT-02b 完成之前，以新 SHA 上重跑 PR② 探测并重核能力矩阵代替）、LICENSE 核对、KB-LITE-01b 重新测量",
+        "更新本文件与 PATCH-LEDGER"
+      ],
+      "gate": "已登记到 Agent24#1001 进入条件：凡 Target repo 为 WeKnora、会改动命名空间之外路径的任务（例如 KB-C1-01、C1-01b-a、C1-01c、C1-03、OBS-01、SVC-POLICY-01、C2-01、C2-02），建卡时写入“基线已升级（#9 已吸收）”依赖；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
+      "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason",
+      "reevaluate_by": "2026-11-15",
+      "owner": "David（stoptheworld-java，即“用户”）"
+    },
+    "test_stack_constraints": [
+      "在 .env 里设 WEKNORA_VERSION=v0.8.2（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 都已等于 v0.8.3），或从 3e8b0bf 本地构建；起栈后用 RepoDigests 与 v0_8_2_image_digests 比对，不一致就停",
+      "不用 scripts/start_all.sh（默认 up --pull always），要用就带 --no-pull 并先比对 digest",
+      "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local",
+      "误跑过 latest 的数据卷丢弃重建；证据记录 schema_migrations 版本（v0.8.2 为 110）",
+      "APP_PORT=127.0.0.1:8080、FRONTEND_PORT=127.0.0.1:80，证据记录 docker port 输出",
+      "Lite 与标准栈的结果不互相替代"
+    ],
+    "v0_8_2_image_digests": {
+      "as_of": "2026-10-16",
+      "app": "sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc",
+      "ui": "sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f",
+      "docreader": "sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a"
+    }
   }
 }
