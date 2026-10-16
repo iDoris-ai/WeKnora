@@ -10,7 +10,7 @@
 | `upstream-main` | 与上游开发分支 `main` 的 commit 一致 | 纯镜像；不添加产品改动 |
 | `a24/develop` | 从正式 Release 起步的二次开发集成分支；本仓库默认分支 | 保存 Agent24 文档、适配和 feature；通过正常 merge 吸收正式版 |
 
-初始正式版为 `v0.8.2`；完整初始 SHA 见 `UPSTREAM-BASELINE.json` 的 `initial_snapshot`。当前产品基线与升级触发条件见同一文件的 `current_baseline` 和 PATCH-LEDGER 开头；镜像的实时状态以 `git ls-remote` 为准。研究方案里的旧 main SHA 保留为当时证据，不能混称产品发布基线。
+初始正式版为 `v0.8.2`；完整初始 SHA 见 `UPSTREAM-BASELINE.json` 的 `initial_snapshot`。当前产品基线与必须先升级的时点见同一文件的 `current_baseline`（`upgrade_before`）和 PATCH-LEDGER 开头；镜像的实时状态以 `git ls-remote` 为准。研究方案里的旧 main SHA 保留为当时证据，不能混称产品发布基线。
 
 ## 同步规则
 

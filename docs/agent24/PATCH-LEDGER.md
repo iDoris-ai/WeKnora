@@ -1,6 +1,13 @@
 # Agent24 扩展与补丁清单
 
-**当前产品基线**：上游 `v0.8.2`（`3e8b0bf`），2026-10-16 按 #4 登记，评估见 `BASELINE-EVAL-v0.8.3.md`。上游 `v0.8.3` 已进 `upstream-release` 镜像但暂不吸收，入口是同步 issue #9。**升级触发条件**（也写在 `UPSTREAM-BASELINE.json` 的 `next_review_trigger`）：第一个改动 v0.8.3 也改过的文件（路由、`middleware/logger.go`、hybrid-search 的 handler/service、`types/search.go` 等）的产品补丁 PR 开出之前，以及任何对外制品出货之前，先合入同步 PR；同步通道不通时等它修好，不绕过。
+**当前产品基线**：上游 `v0.8.2`（`3e8b0bf`），2026-10-16 按 #4 登记，评估见 `BASELINE-EVAL-v0.8.3.md`。截至 2026-10-16 评估过 `v0.8.3`，暂不吸收，下次吸收的入口是同步 issue #9（标题会随新正式版改写）。
+
+**必须先升级的时点**（与 `UPSTREAM-BASELINE.json` 的 `current_baseline.upgrade_before` 一致）：
+1. 开出第一个产品补丁 PR 之前。产品补丁指改动上游代码文件的 PR，不含 `docs/agent24/` 和本表 A24-BOOT-02 的三个文件。判据：`comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort)` 非空。
+2. 导入任何非测试资料、或让开发者以外的人访问任何实例之前。
+3. 任何对外制品出货之前。
+
+升级做法：届时最新正式版不是 v0.8.3 时先补差异评估；按 #9 的五步开同步 PR；按评估的「若升级的必做清单」做备份与恢复演练、Go/前端/契约回归、能力矩阵换 SHA；最后更新本表与基线文件。同步通道不通时等它修好，不绕过。
 
 | 编号 | 范围与目的 | 路径 | 上游升级处置 / 验证 |
 |---|---|---|---|

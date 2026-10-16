@@ -39,15 +39,27 @@
       "base_commit": "3e8b0bfc80b845b2d4b2ed683994748741450a97",
       "product_patches": "none"
     },
-    "latest_upstream_release_not_absorbed": {
+    "evaluated_upstream_release": {
       "tag": "v0.8.3",
       "commit": "3e22822c1d2397be730c458c7539d0eb8c113a24",
-      "sync_issue": "iDoris-ai/WeKnora#9"
+      "as_of": "2026-10-16",
+      "status": "evaluated, not absorbed",
+      "sync_issue": "iDoris-ai/WeKnora#9（工作流会把它改写成届时最新的正式版）"
     },
-    "next_review_trigger": [
-      "在第一个改动 v0.8.3 也改过的文件的产品补丁 PR 开出之前（路由 internal/router/routes_*.go、internal/middleware/logger.go、internal/handler/knowledgebase.go、internal/application/service/knowledgebase_search*.go、internal/types/search.go 等），先按同步 issue 的五步合入同步 PR，吸收当时最新的正式版",
-      "在任何对外制品（Lite 包、镜像）出货之前，先吸收最新正式版",
-      "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级"
-    ]
+    "upgrade_before": {
+      "definition": "产品补丁 = 改动上游代码文件的 PR，不含 docs/agent24/ 和 Agent24 自己的 .github/ 同步与守卫文件",
+      "triggers": [
+        "开出第一个产品补丁 PR 之前（v0.8.3 改了 1576 个文件，几乎必然相交；可用判据：comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort) 非空）",
+        "导入任何非测试资料、或让开发者以外的人访问任何实例之前（v0.8.2 在鉴权前无上限读取请求体，无头 Lite 默认监听 0.0.0.0）",
+        "任何对外制品（Lite 包、镜像）出货之前"
+      ],
+      "procedure": [
+        "届时最新正式版不是 v0.8.3 时，先补一份 v0.8.2 到该版本的差异评估",
+        "按同步 issue 的五步开同步 PR",
+        "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go/前端/契约回归（#4 步骤 3）、能力矩阵换 SHA 并重跑 PR② 探测",
+        "更新本文件与 PATCH-LEDGER"
+      ],
+      "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级"
+    }
   }
 }

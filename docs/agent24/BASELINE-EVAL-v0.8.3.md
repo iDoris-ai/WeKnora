@@ -4,7 +4,7 @@
 - **对比对象**：`v0.8.2` = `3e8b0bfc80b845b2d4b2ed683994748741450a97`（2026-09-24）；`v0.8.3` = `3e22822c1d2397be730c458c7539d0eb8c113a24`（2026-10-14 发布）。下文简写 `3e8b0bf`、`3e22822`。
 - **fork 现状**：`origin/a24/develop` = `3c0f1e2`（含刚合入的 #6）。它相对 v0.8.2 只改了 9 个文件：`docs/agent24/` 6 个，`.github/` 下 Agent24 自己的同步工作流和守卫 3 个（`git diff --name-only 3e8b0bf origin/a24/develop`）。产品代码与 v0.8.2 逐字节相同。同步现状：评估时 `upstream-release` 还停在 `3e8b0bf`，#6 合入后的工作流尚未运行。2026-10-16 配好 App 凭据后首次手动运行成功（run 38924672104），`upstream-release` 前进到 `3e22822`（v0.8.3），并开出同步 issue #9；#3 还要观察两次定时运行。
 - **方法**：只看两个 tag 的源码树差异（`git diff 3e8b0bf 3e22822`）。本地 clone 是浅克隆，看不到中间历史，所以 release 说明和 `CHANGELOG.md` 只用来定位改动，结论以源码为准。下文 `v0.8.3:路径:行` 指 v0.8.3 树里的行号。
-- **规模**：1576 个文件，+142102/−16333 行。其中 Go 非测试代码 490 个文件（+33392），Go 测试 452 个文件，前端 281 个文件，迁移 32 个文件，docreader 26 个文件。上游自己的发布核对写明，这次核对“不是对 282 个提交重新进行完整安全审计”（`v0.8.3:docs/release-v0.8.3-audit.md:9`），并且“未运行全量 Go/前端业务回归或实际数据库升级”（同文件 `:77`）。
+- **规模**：1576 个文件，+142102/−16333 行。其中 Go 非测试代码 490 个文件（+33392，不含 swagger 生成物 `docs/docs.go`；含则 491 个、+35784），前端 281 个文件，迁移 32 个文件，docreader 30 个文件（含 4 个 proto 生成物）。上游自己的发布核对写明，这次核对“不是对 282 个提交重新进行完整安全审计”（`v0.8.3:docs/release-v0.8.3-audit.md:9`），并且“未运行全量 Go/前端业务回归或实际数据库升级”（同文件 `:77`）。
 
 ## 结论
 
@@ -34,9 +34,9 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 
 | 位置 | 变化 | 许可证 |
 |---|---|---|
-| `go.mod` | `mark3labs/mcp-go` v0.52.0 → **v1.1.1**（大版本，`v0.8.3:go.mod:37`）；`golang.org/x/image` v0.38.0 从间接依赖变成直接依赖（`:80`；`go.sum` 只改了 mcp-go 的两行，`git diff 3e8b0bf 3e22822 -- go.sum`）；`milvus-proto` 去掉 indirect 标记（`:243`） | mcp-go：MIT，两个版本的 LICENSE blob 相同（`3d48435`）；x/image：BSD-3-Clause |
+| `go.mod` | `mark3labs/mcp-go` v0.52.0 → **v1.1.1**（大版本，`v0.8.3:go.mod:37`）；新增直接依赖 `golang.org/x/image` v0.38.0（`:80`，v0.8.2 的 go.mod 没有这一行，`go.sum` 里原本就有；用于 `internal/models/imageprep/prepare.go`；`go.sum` 只改了 mcp-go 的两行）；`milvus-proto` 去掉 indirect 标记（`:243`） | mcp-go：MIT，两个版本的 LICENSE blob 相同（`3d48435`）；x/image：BSD-3-Clause |
 | `cli/go.mod` | `go-runewidth` 0.0.28 → 0.0.30，`modelcontextprotocol/go-sdk` 1.7.0 → 1.8.0（`v0.8.3:cli/go.mod:10-11`） | runewidth：MIT。go-sdk：MIT 向 Apache-2.0 过渡中，1.7.0 与 1.8.0 的 LICENSE blob 相同（`5791499`），没有变化 |
-| `frontend/package.json` | 新增 `pdfjs-dist ^6.3.289`（`v0.8.3:frontend/package.json:37`），用于原文定位预览；lockfile 另带进 `@napi-rs/canvas` 1.0.9 及 12 个平台包，都是 optional | pdfjs-dist：Apache-2.0；@napi-rs/canvas：MIT。worker 随前端打包（`v0.8.3:frontend/src/components/source-preview/pdfjsLoader.ts:3`、`:16`），不走 CDN |
+| `frontend/package.json` | 新增 `pdfjs-dist ^6.3.289`（`v0.8.3:frontend/package.json:37`），用于原文定位预览；lockfile 另带进 `@napi-rs/canvas` 1.0.9 主包及 11 个平台包，都是 optional | pdfjs-dist：Apache-2.0；@napi-rs/canvas：MIT。worker 随前端打包（`v0.8.3:frontend/src/components/source-preview/pdfjsLoader.ts:3`、`:16`），不走 CDN |
 | `website-docs/`、`misc/intro-video/` | 只改版本号和脚本；新增 `playwright-core 1.49.1`，只用来渲染宣传视频 | 不进产品制品 |
 | `third_party/anydoc-go`（Rust，链进 app） | `anydoc` =0.1.9 → =0.2.4（`v0.8.3:third_party/anydoc-go/Cargo.toml:22`）；Cargo.lock 去掉 6 个 crate（calamine 等），没有新增 crate | MIT（`:11`；上游 anydoc 两个版本的 LICENSE 相同） |
 | docreader（Python） | `docreader/pyproject.toml`、`uv.lock` 都没有改（`git diff --stat 3e8b0bf 3e22822 -- docreader/pyproject.toml docreader/uv.lock` 为空）；新增启动探针 `docreader/container_entrypoint.py` | 不变 |
@@ -56,6 +56,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 | KB 描述生成的 token 预算 | 800 → 2048，可用 `KNOWLEDGE_BASE_PROFILE_MAX_TOKENS` 调整 | `v0.8.3:internal/application/service/knowledgebase_profile.go:42`；`git diff 3e8b0bf 3e22822 -- internal/application/service/knowledgebase_profile.go` |
 | 解析超时 | 新增 MinerU、PaddleOCR-VL、WeKnoraCloud 的超时环境变量，默认 1000s / 600s / 20m | `git diff 3e8b0bf 3e22822 -- .env.example docker-compose.yml` |
 | 图片向量召回 | 新能力，默认关闭；要求 KB 开启 `image_vector_enabled` | `v0.8.3:internal/types/knowledgebase.go:913-914` |
+| 对话附件保留 | live 会话里的附件改为保留到上传 TTL 之后，存储占用增加（留存行为变化，与方案 §5 的保留与删除要求有关；集成模式下主聊天被拒绝，影响小） | `v0.8.3:CHANGELOG.md:70`；迁移 117 的注释 |
 | 镜像 | ParadeDB、MinIO 换镜像（见第 2 节）；Helm 默认把镜像钉到 appVersion | `git diff 3e8b0bf 3e22822 -- docker-compose.yml helm/values.yaml` |
 | 构建 | app 镜像的 apt 源可配；docreader 可配 Playwright 制品源 | `git diff 3e8b0bf 3e22822 -- docker/Dockerfile.app docker/Dockerfile.docreader` |
 
@@ -76,6 +77,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 **已有接口的字段变化**：
 - hybrid-search 请求新增可选的 `rerank` 对象（`v0.8.3:internal/types/search.go:279`；`v0.8.3:internal/types/rerank.go:11-14`）。不传时行为与 v0.8.2 相同；传了就会调用租户配置的 rerank 模型，响应里多一个 `meta`（`v0.8.3:internal/handler/knowledgebase.go:345-399`）。
 - `SearchResult` 新增 `source_locators`、`matched_images` 两个字段，都是 omitempty（`v0.8.3:internal/types/search.go:199`、`:233`）。
+- app 与 docreader 之间的 gRPC 契约新增 `SourceBlock` 和 `source_blocks = 6`（`v0.8.3:docreader/proto/docreader.proto:48`、`:63`、`:73`），是 `source_locators` 的来源。线路上向后兼容；两个镜像版本不配套时只是拿不到原文定位。
 - `/knowledge-search` 请求新增 `match_count`、两个阈值、两个检索开关和 `rerank`；响应总是带 `meta`（`v0.8.3:internal/handler/session/qa.go:917`；`git diff 3e8b0bf 3e22822 -- internal/handler/session/qa.go`）。
 - `PUT /knowledge-bases/:id` 可以修改 `vlm_config`，只有 owner 空间或 admin 共享可以改（`git diff 3e8b0bf 3e22822 -- internal/handler/knowledgebase.go`）。
 - 对话接口允许只传图片或文件、不带文字。
@@ -87,7 +89,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 
 - **访问日志不再把整个请求体读进内存**：v0.8.2 在所有路由（包括鉴权前的路由）上都执行无上限的 `io.ReadAll`；v0.8.3 只读 10KB+1 字节，其余部分原样交给 handler（`v0.8.3:internal/middleware/logger.go:122`）。脱敏正则只多了 `assertion` 一项（`:59`）。
 - **LLM 调试日志**：目录和文件权限改为 0700/0600（`v0.8.3:internal/logger/llm_logger.go:40`、`:105`）；文件名里来自客户端 `X-Request-ID` 的部分会被清洗，`../` 不再能改写落盘目录（`:116-122`）。这项功能默认关闭，只有设置了对应环境变量才启用。
-- **令牌和账号**：签发令牌时如果写库失败，登录直接报错，不再返回一对下一个请求就失效的令牌（`v0.8.3:internal/application/service/user.go:1166-1169`）；查库出错时如实报错，不再谎称“token is revoked”（`:1319`）；被停用的账号，已签发的令牌逐请求失效（`:1337`）；系统管理员停用用户时会撤销该用户的会话（`v0.8.3:internal/router/routes_auth_tenant.go:302`）。
+- **令牌和账号**：签发令牌时如果写库失败，登录直接报错，不再返回一对下一个请求就失效的令牌（`v0.8.3:internal/application/service/user.go:1166-1169`）；查库出错时如实报错，不再谎称“token is revoked”（`:1319`）；被停用的账号，已签发的令牌逐请求失效（`:1337`）；系统管理员停用用户时，在同一事务里撤销该用户的全部令牌（`v0.8.3:internal/handler/system.go:1595`；`v0.8.3:internal/application/repository/user.go:239` 起）。
 - **授权收紧**：数据分析只作用于有授权的共享 KB（#4136）；共享智能体操作本机浏览器时，按调用者而不是 owner 配对（`git diff 3e8b0bf 3e22822 -- internal/agent/tools/browserskill.go`）。
 - **授权放宽**：同租户的 Admin 可以管理其他成员的 IM 渠道会话（`git diff 3e8b0bf 3e22822 -- internal/application/service/session.go` 里的 `loadSessionForManage`）。
 - **限量与稳健性**：Feishu、Notion、IMA、Yuque、GitLab 的分页和响应体加了上限（#3985、#3887 等）；远程图片下载受文件大小上限约束（#3906）；RSS 超大响应直接拒绝（#3658）；WeCom 自定义 wss 端点经过 SSRF 检查（#4070）；agent 子 goroutine 里的 panic 不再导致进程退出（#3846）；MCP 资源分页加了上限（#4007）。这一行只按 CHANGELOG 定位、抽查过源码，没有逐条核对。
@@ -101,7 +103,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 |---|---|---|---|
 | 1 | scoped key / 空白名单 | 不变 | 判定代码没改；新增的 `/wiki-search`、`/images` 沿用“白名单空 = 全部”（`v0.8.3:internal/handler/wiki_page.go:1092`；`routes_knowledge.go:89-101`）。集成模式的允许列表要多表态 4 组路由 |
 | 2 | signed_token / direct | 不变 | `auth.go`、`tenant.go`、审计相关类型都没改。新增的 MCP OAuth assertion（`routes_infra.go:189`）给按主体归属的 MCP 令牌多了一条不经浏览器的获取路径，但不改变“主体不受权威绑定”这一结论 |
-| 3 | hybrid-search | 结论不变，细节有变 | 仍然没有调用方 deadline；非 AppError 仍然返回 500 并带回 `err.Error()`（`v0.8.3:internal/handler/knowledgebase.go:388`）；`ContentRevision` 仍是 `json:"-"`（`v0.8.3:internal/types/search.go:244`）；query 全文仍会写进日志（`knowledgebase.go:355`；`knowledgebase_search.go:167`）；仍会自己算 query embedding，而且主 KB 没有 embedding 模型时，会改用另一个 KB 的模型（`knowledgebase_search.go:242`）。**新增**：可选 rerank，开启后会调用模型；**单个 store 部分失败时返回部分结果、错误为 nil，只记一条 WARN**（`v0.8.3:internal/application/service/knowledgebase_search_fanout.go:172-184`），契约的 partial 语义要覆盖这种情况；多了 `source_locators`。矩阵引用的行号会漂移 |
+| 3 | hybrid-search | 结论不变，细节有变 | 仍然没有调用方 deadline；非 AppError 仍然返回 500 并带回 `err.Error()`（`v0.8.3:internal/handler/knowledgebase.go:388`）；`ContentRevision` 仍是 `json:"-"`（`v0.8.3:internal/types/search.go:244`）；query 全文仍会写进日志（`knowledgebase.go:355`；`knowledgebase_search.go:167`）；仍会自己算 query embedding。**新增**：主 KB 没有 embedding 模型时改用范围内另一个 KB 的模型（`knowledgebase_search.go:242`；v0.8.2 只用主 KB，`3e8b0bf:internal/application/service/knowledgebase_search.go:206-209`）；可选 rerank，开启后会调用模型；**单个 store 部分失败时返回部分结果、错误为 nil，只记一条 WARN**（`v0.8.3:internal/application/service/knowledgebase_search_fanout.go:172-184`），契约的 partial 语义要覆盖这种情况；多了 `source_locators`。矩阵引用的行号会漂移 |
 | 4 | /knowledge 与 chunks | 不变 | `handler/chunk.go` 没改；Chunk 多了 `source_locators`（有助于 KB-C1-01c 定位），但仍然不能按修订读取，也没有 stale 语义 |
 | 5 | /download、batch-download、/files | 不变 | 相关文件都没改 |
 | 6 | /preview | 不变 | `handler/knowledge.go` 的改动集中在画廊（`git diff 3e8b0bf 3e22822 -- internal/handler/knowledge.go` 显示，最后一个 hunk 从 v0.8.2 的 1104 行开始，只新增画廊函数），preview 部分没改 |
@@ -123,7 +125,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 - 改动只有 3 个文件（`git diff --name-status 3e8b0bf 3e22822 -- .github/`）：
   - `ISSUE_TEMPLATE/config.yml`：只换了一个文档链接。
   - `workflows/docker-image.yml`：Cube 镜像加了 arm64 平台。触发条件仍是 push 到 `main` 或 `v*` tag（`v0.8.3:.github/workflows/docker-image.yml:2-7`），会引用 DockerHub 的 secret；镜像分支不在触发范围内。
-  - 新增 `workflows/helm.yml`：push 只针对 `main`（`v0.8.3:.github/workflows/helm.yml:5-6`）；另有 `pull_request`，路径过滤为 `helm/**`（`:10`）；工作流级权限 `contents: read`（`:15-16`）；没有引用 GitHub secret（`secrets.dbPassword` 之类是 helm `--set` 的参数字符串）；用到一个新的外部 action `azure/setup-helm@v4`，按 tag 引用，没有钉 SHA（`:26`）。
+  - 新增 `workflows/helm.yml`：push 只针对 `main`（`v0.8.3:.github/workflows/helm.yml:5-6`）；另有 `pull_request`（`:10`），路径过滤为 `helm/**` 和 `.github/workflows/helm.yml` 本身（`:11-13`）；工作流级权限 `contents: read`（`:15-16`）；没有引用 GitHub secret（`secrets.dbPassword` 之类是 helm `--set` 的参数字符串）；用到一个新的外部 action `azure/setup-helm@v4`，按 tag 引用，没有钉 SHA（`:26`）。
 - **守卫**：用 a24/develop 上的 `.github/scripts/agent24-mirror-trigger-guard.rb` 检查 `3e22822 upstream-release`，输出 `mirror trigger guard: ok`，退出码 0；对 `3e8b0bf` 同样通过。这与 `FORK-MAINTENANCE.md` 里“上游 main 与 v0.8.3 都能通过”的说法一致。
 - **评审人开同步 PR 时要注意**：v0.8.3 改了 `helm/**`，所以 `helm.yml` 会在同步 PR 上运行（只读权限、不用 secret，可以接受；`azure/setup-helm@v4` 要按 FORK-MAINTENANCE 逐个确认）。其余 `pull_request` 类工作流与 v0.8.2 相同，没有新增写权限或 secret 引用。
 - **与 fork 补丁的冲突**：上游改动的文件和 fork 的 9 个文件没有交集（`comm -12` 两份文件清单，结果为空），升级合并在文件层面不会冲突。
@@ -135,11 +137,16 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 1. **升级换不来我们需要的东西。** 第 6 节的 16 项结论全部不变；KB-C1 要补的缺口（允许列表、权威主体、日志政策、deadline/错误分类、修订、Lite 托管）在 v0.8.3 里一个都没变。v0.8.3 带来的好处（rerank 选项、source_locators、`invite_register`、令牌修复）都不是 KB-CT-01/02 和首个只读切片的前提。
 2. **升级路径还没稳定。** 按 #4 的步骤 3，升级依赖 #3 的同步 PR。评估时 `upstream-release` 还停在 v0.8.2；首次手动同步刚刚成功（#9 已开），但 #3 的两次定时运行还没观察，五步评审和回归也没做。留在 v0.8.2 则按步骤 2 可以直接登记，不依赖 #3。
 3. **升级的成本和不可逆性是实打实的。** 迁移 115（扩展升级）和 116/035（改写数据）都不能回退；ParadeDB 大版本升级，MinIO 换了发布者；改动规模 1576 个文件，而上游自己既没跑全量回归、也没演练数据库升级（`docs/release-v0.8.3-audit.md:77`）。我们要先补上 Go、前端和契约回归，契约回归此时还没有可跑的 schema 测试（KB-CT-02b 未做）。
-4. **D7 要求探测用固定 SHA。** 能力矩阵 PR #7 已经评审了 5 轮，PR② 的探测还没开始。现在换 SHA 就得重新核对行号，而且按方案 §3，升级 PR 要额外占一个名额，排期顺延。
+4. **D7 要求探测用固定 SHA。** 能力矩阵 PR #7 已经评审了 5 轮，PR② 的探测还没开始。现在换 SHA 就得重新核对行号，而且按方案 §3，升级 PR 要额外占一个名额，排期顺延。需要说明：按下面的触发条件，升级会发生在第一个产品补丁之前，所以换 SHA、重跑探测这些返工只是**延后，并没有省掉**；换来的是 #7 和 PR② 能按固定 SHA 落地，以及届时可以直接跳到更新的正式版。
 
 **反方理由（如实记录）**：现在 fork 没有产品补丁、没有真实数据，与上游改动的文件也没有交集，这是升级成本最低的时候。之后 KB-C1-01（路由）、KB-OBS-01（`logger.go`）、KB-C1-01c（hybrid-search 的 handler、service 和 `types/search.go`）落下的补丁，恰好都在 v0.8.3 改动过的文件里，再吸收上游时会有冲突要手工解决。
 
-**所以登记时一并写明重新评估的条件**：#3 的同步工作流成功跑通（镜像推进、开出同步 issue）以后，**在第一个改动上述文件的产品补丁 PR 开出之前**，用正常的同步 PR 吸收当时最新的正式版（v0.8.3 或更新）。做法见下面的“若升级的必做清单”。
+**所以登记时一并写明必须先升级的时点**（`UPSTREAM-BASELINE.json` 的 `current_baseline.upgrade_before` 与 PATCH-LEDGER 开头写法一致）：
+1. 开出第一个产品补丁 PR 之前。产品补丁指改动上游代码文件的 PR，不含 `docs/agent24/` 和 Agent24 自己的同步、守卫文件。v0.8.3 改了 1576 个文件，几乎必然相交；判据是 `comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort)` 非空。
+2. 导入任何非测试资料、或让开发者以外的人访问任何实例之前：v0.8.2 在鉴权前无上限读取请求体（`3e8b0bf:internal/middleware/logger.go:105`，Logger 挂在 Auth 之前），而无头 Lite 默认监听 `0.0.0.0`（能力矩阵第 15 项）。
+3. 任何对外制品出货之前。
+
+做法：届时最新正式版不是 v0.8.3 时，先补一份 v0.8.2 到该版本的差异评估；按同步 issue 的五步开同步 PR；再按下面的“若升级的必做清单”执行。
 
 ## 是否升级为用户决策（D7 / §5）
 
@@ -158,8 +165,10 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 2. 测试库先做一致性备份，再演练升级和恢复（ParadeDB v0.25.11 加迁移 111–118；Lite 用 SQLite 031–036）；按上游的 `website-docs/01-getting-started/06-paradedb-upgrade.md` 操作，**不要**对新镜像执行旧的 0.22.6 升级命令。
 3. 跑 Go（`go test ./...`）和前端回归；anydoc 的 Rust 构建按本机约定设置 `CARGO_TARGET_DIR`。
 4. 把能力矩阵换成新 SHA，至少重新核对第 3、8 项及行号会漂移的文件：`logger.go`、`knowledgebase.go`、`knowledgebase_search*.go`、`qa.go`、`types/search.go`、`config.go`、`user.go`、`router.go`、`routes_knowledge.go`、`routes_auth_tenant.go`；在新 SHA 上重跑 PR② 的探测；允许列表补上第 4 节列出的新路由和 `rerank` 字段。
-5. MinIO 镜像沿用 `pgsty/minio` 还是在 fork 的 compose 里覆盖，要单独决定并写进 PATCH-LEDGER。
-6. 更新 `UPSTREAM-BASELINE.json`：保留 `initial_snapshot`，新增当前基线字段；同时更新 `PATCH-LEDGER.md`。
+5. MinIO 镜像换了发布者（`pgsty/minio`），属于供应链来源变化：升级时单独请用户决定沿用还是在 fork 的 compose 里覆盖，结果写进 PATCH-LEDGER。
+6. 在 Agent24 #994 补一条事实说明：hybrid-search 新增的 `rerank` 字段可让持有 retrieve key 的调用方触发租户已配置的 rerank 服务；KB-C1-01 的允许列表要对它表态。
+7. fork 按 D6 自建 Lite 制品时，app 与 docreader 配套构建（`SourceBlock` 契约）。
+8. 更新 `UPSTREAM-BASELINE.json` 的 `current_baseline`（`initial_snapshot` 保持不动），同时更新 `PATCH-LEDGER.md`。
 
 ## 未核实 / 不确定
 
@@ -171,4 +180,4 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 
 ## 决定记录
 
-2026-10-16 按本评估登记 v0.8.2 为当前产品基线。方案选择做了盲选交叉确认：两个独立评审（Opus 5.5 与 Sonnet 5.5，分别代替当日不可用的 Codex 与 Grok）都看不到本文结论，各自读事实部分后都选“留在 v0.8.2”，都判断不改变目标、费用、出口、许可证或范围。两者都建议把重新评估的条件写成硬条件，已写入 `UPSTREAM-BASELINE.json` 的 `next_review_trigger` 和 PATCH-LEDGER 开头。另一条补充：v0.8.2 上未修的访问日志无上限读取、令牌写库失败等问题，只影响当前的测试实例，任何对外制品出货之前必须先升级。
+2026-10-16 按本评估登记 v0.8.2 为当前产品基线。按方案 §5 这属于工程决定。另做了一次盲选交叉确认作参考：当日 Codex 与 Grok 都不可用，改由 Opus 5.5 与 Sonnet 5.5 两个替代评审（同一厂商，独立性弱于原流程）在看不到本文结论的情况下各自读事实部分，都选“留在 v0.8.2”，都判断不改变目标、费用、出口、许可证或范围。两者都建议把升级时点写成硬条件，已写入 `UPSTREAM-BASELINE.json` 的 `current_baseline.upgrade_before` 和 PATCH-LEDGER 开头。另一条补充：v0.8.2 上未修的访问日志无上限读取、令牌写库失败等问题，只影响当前的测试实例；导入真实资料、开放给开发者以外的人访问、对外制品出货之前都必须先升级（见上面的时点 2、3）。
