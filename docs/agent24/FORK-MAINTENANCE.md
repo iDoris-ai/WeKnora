@@ -36,9 +36,14 @@ gh workflow run agent24-upstream-sync.yml -R iDoris-ai/WeKnora --ref a24/develop
 - 缺任一项时工作流第一步即失败，不回退到 `GITHUB_TOKEN`。每次运行用 `actions/create-github-app-token` 换取限定本仓库、上述三项写权限的 1 小时令牌，任务结束自动吊销。
 - 轮换：在 App 设置页先生成新私钥、更新 Environment secret、手动运行一次工作流确认成功，再删除旧私钥。撤销：删除全部私钥或卸载 App。
 
-用 App 令牌推送会产生 push 事件，push 事件运行的是被推送提交里的工作流定义，也就是未经评审的上游代码。今天上游工作流的 push 触发都限定 `main` 分支或 tag，本仓库没有 `main` 分支，同步只推两条镜像分支、不推 tag，所以不会触发。为防上游以后改变触发条件，推送前由 `.github/scripts/agent24-mirror-trigger-guard.rb` 检查两个目标提交里的全部工作流：任何 `push` 触发会匹配到镜像分支名（无分支过滤、通配、`branches-ignore` 未排除、只有 `paths` 过滤），或出现 `create` 触发，或文件无法解析，都失败停止、不推送。处理时先确认上游改动的意图，再决定是否手动推送或调整守卫。
+用 App 令牌推送会产生 push 事件，开同步 PR 或推进它的 head 会产生 pull_request 事件；这两类事件运行的都是上游提交里的工作流定义，也就是未经评审的上游代码。推送前由 `.github/scripts/agent24-mirror-trigger-guard.rb` 检查两个目标提交里的全部工作流，下列任一情况都失败停止、不推送、不开 PR：
 
-同步 PR 会触发上游的 `pull_request` 工作流，它们拿到的 `GITHUB_TOKEN` 权限取决于各工作流自己的声明和仓库默认值；评审同步 PR 时要看上游是否新增了声明写权限的 `pull_request` 工作流。
+- `push` 触发会匹配到镜像分支名：无分支过滤、只有 `paths` 过滤、`branches` 的模式可能匹配（按 GitHub 过滤语法解析 `*`、`**`、`?`、`+`、`[...]`，无法识别的模式按匹配处理，`!` 否定一律忽略），或 `branches-ignore` 没有确定排除它；
+- 出现 `create` 触发；
+- `upstream-release` 的目标提交里，`pull_request` / `pull_request_review` / `pull_request_review_comment` 工作流有任一 job 可能拿到写权限的 `GITHUB_TOKEN`：job 与顶层都没声明 `permissions`（会取仓库默认值，本仓库目前是 write），或声明了 `write-all`、任一 scope 为 `write`。`id-token: write` 只用于申请 OIDC 身份令牌，不授予仓库写权限，不计入；
+- 文件无法解析、不是普通文件，或结构无法识别。
+
+今天上游 main 与 v0.8.3 都能通过。触发时先确认上游改动的意图，再决定是否手动推送或调整守卫。修改守卫后运行 `bash .github/scripts/agent24-mirror-trigger-guard-test.sh`（33 个正反例）。`schedule`、`workflow_run`、`pull_request_target` 等事件使用默认分支 `a24/develop` 上已评审的定义，不在检查范围内。
 
 ## 防止覆盖我们的 feature
 
