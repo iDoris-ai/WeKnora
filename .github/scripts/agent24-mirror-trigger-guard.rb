@@ -106,6 +106,10 @@ end
 problems = []
 raise "need <commit> <branch> pairs" if ARGV.empty? || ARGV.length.odd?
 ARGV.each_slice(2) do |commit, branch|
+  git("cat-file", "-e", "#{commit}^{commit}") # 目标提交必须存在
+  # 没有 .github/workflows 目录：不会触发任何工作流
+  _, wf_status = Open3.capture2e("git", "cat-file", "-e", "#{commit}:.github/workflows")
+  next unless wf_status.success?
   entries = git("ls-tree", "-z", "#{commit}:.github/workflows").split("\0")
   entries.each do |entry|
     meta, name = entry.split("\t", 2)

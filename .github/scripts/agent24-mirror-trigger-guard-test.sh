@@ -38,6 +38,12 @@ run 0 $M "main + tags"              w.yml $'on:\n  push:\n    branches: [main]\n
 run 0 $M "只有 tags"                w.yml $'on:\n  push:\n    tags: ["v*"]\njobs: {}'
 run 0 $M "ignore upstream-*"        w.yml $'on:\n  push:\n    branches-ignore: ["upstream-*"]\njobs: {}'
 run 0 $M "镜像 main 的 PR 工作流不查" w.yml $'on: pull_request\njobs:\n  a:\n    runs-on: x'
+# 没有 .github/workflows 目录：放行
+rm -rf .github; echo x > README; git add -A; git -c user.name=t -c user.email=t@t commit -qm x
+if ruby "$G" "$(git rev-parse HEAD)" "$M" >/dev/null 2>&1; then echo "PASS 无工作流目录"; else echo "FAIL 无工作流目录"; fail=1; fi
+git rm -rq --cached . >/dev/null 2>&1; rm -f README
+# 目标提交不存在：失败
+if ruby "$G" 0000000000000000000000000000000000000000 "$M" >/dev/null 2>&1; then echo "FAIL 提交不存在"; fail=1; else echo "PASS 提交不存在"; fi
 run 1 $R "PR 未声明 permissions"    w.yml $'on: pull_request\njobs:\n  a:\n    runs-on: x'
 run 1 $R "PR contents: write"       w.yml $'on: pull_request\npermissions:\n  contents: write\njobs:\n  a:\n    runs-on: x'
 run 1 $R "PR job write-all"         w.yml $'on: pull_request\npermissions:\n  contents: read\njobs:\n  a:\n    permissions: write-all'
