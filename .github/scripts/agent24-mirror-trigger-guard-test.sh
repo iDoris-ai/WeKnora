@@ -41,6 +41,7 @@ run 1 $M "方括号 [^x] 排除"         w.yml $'on:\n  push:\n    branches-igno
 run 1 $M "方括号 [m&&r]"            w.yml $'on:\n  push:\n    branches: ["upstream-[m&&r]ain"]\njobs: {}'
 run 1 $M "方括号 [!x]"              w.yml $'on:\n  push:\n    branches: ["upstream-[!x]ain"]\njobs: {}'
 run 1 $M "ignore 里 ! 重新包含"     w.yml $'on:\n  push:\n    branches-ignore: ["upstream-*", "!upstream-main"]\njobs: {}'
+run 1 $M "flow 映射里的合并键"      w.yml $'on:\n  push: {branches: ["**"], <<: {branches: [main]}}\njobs: {}'
 run 1 $M "YAML 合并键"              w.yml $'s: &s\n  branches: [main]\non:\n  push:\n    branches: [upstream-main]\n    <<: *s\njobs: {}'
 run 0 $M "方括号 [a-z]* 不匹配"     w.yml $'on:\n  push:\n    branches: ["release-[0-9]*"]\njobs: {}'
 run 1 $M "branches: [] 空列表"       w.yml $'on:\n  push:\n    branches: []\njobs: {}'
