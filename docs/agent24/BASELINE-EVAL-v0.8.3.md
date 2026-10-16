@@ -21,7 +21,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 | PG 113 / SQLite 032 `chunk_images` | 画廊用的投影表，加 chunks 上的触发器和函数，并回填已有数据（`000113_chunk_images.up.sql` 共 177 行） | 可以（down 删表、触发器和函数）；回填耗时与图片分块数成正比 |
 | PG 114 / SQLite 033 `chunk_source_locators` | `chunks` 加 `source_locators` 列 | 可以：down 删列，定位数据丢失；SQLite 的 down 用 `DROP COLUMN`，要求 3.35 或更高 |
 | PG 115 `pg_search_02511` | 把 pg_search 升到 0.25.11、vector 升到 0.8.4（`000115_pg_search_02511.up.sql`），配合把镜像从 `paradedb:v0.22.6-pg17` 换成 `v0.25.11-pg17`（`v0.8.3:docker-compose.yml:544`、`:822`） | **不能**：down 是 No-op（`v0.8.3:migrations/versioned/000115_pg_search_02511.down.sql:1`），只能连同旧镜像一起从备份恢复 |
-| PG 116 / SQLite 035 `agent_allowed_tools_explicit_defaults` | 改写数据：smart-reasoning 智能体的 `allowed_tools: []` 被写成显式默认工具列表，因为 `[]` 的语义改成了“不选任何内置工具” | **不能**：两边的 down 都是空操作（`v0.8.3:migrations/versioned/000116_agent_allowed_tools_explicit_defaults.down.sql:4`；`v0.8.3:migrations/sqlite/000035_agent_allowed_tools_explicit_defaults.down.sql:1`） |
+| PG 116 / SQLite 035 `agent_allowed_tools_explicit_defaults` | 改写数据：smart-reasoning 智能体的 `allowed_tools: []` 被写成显式默认工具列表，因为 `[]` 的语义改成了“不选任何内置工具” | **不能**：两边的 down 都是空操作（`v0.8.3:migrations/versioned/000116_agent_allowed_tools_explicit_defaults.down.sql:4`；`v0.8.3:migrations/sqlite/000035_agent_allowed_tools_explicit_defaults.down.sql:2`，`:1` 是注释） |
 | PG 117 / SQLite 036 `messages_attachment_lookup` | 部分索引；PG 端是 GIN 索引，用 CONCURRENTLY 建（`000117_messages_attachment_lookup.up.sql:5`） | 可以（down 删索引） |
 | PG 118 `mcp_oauth_timestamp_tz` | 把 MCP OAuth 表的时间列改成 timestamptz，原值按 UTC 解释 | 可以（down 按 UTC 转回）；进程时区不是 UTC 时写入的旧行会偏移，需要重新授权 |
 | SQLite 034 `mcp_metadata` | 补建 `mcp_metadata` 表，`mcp_services` 加列 | 可以，但 down 依赖 `DROP COLUMN`（`v0.8.3:migrations/sqlite/000034_mcp_metadata.down.sql:2`），要求 SQLite 3.35 或更高 |
@@ -41,7 +41,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 | `third_party/anydoc-go`（Rust，链进 app） | `anydoc` =0.1.9 → =0.2.4（`v0.8.3:third_party/anydoc-go/Cargo.toml:22`）；Cargo.lock 去掉 6 个 crate（calamine 等），没有新增 crate | MIT（`:11`；上游 anydoc 两个版本的 LICENSE 相同） |
 | docreader（Python） | `docreader/pyproject.toml`、`uv.lock` 都没有改（`git diff --stat 3e8b0bf 3e22822 -- docreader/pyproject.toml docreader/uv.lock` 为空）；新增启动探针 `docreader/container_entrypoint.py` | 不变 |
 | 新的可选脚本 | `scripts/wemm-transformers/requirements.txt`（transformers 5.2.0 等），用于自建 WeMM embedding 服务 | 不进默认制品 |
-| 容器镜像 | ParadeDB v0.22.6 → v0.25.11（见第 1 节）；**MinIO 镜像换了发布者**：`quay.io/minio/minio` → `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`（`v0.8.3:docker-compose.yml:625`、`:879`；dev 环境用 `pgsty/minio:latest`，`v0.8.3:docker-compose.dev.yml:85`） | ParadeDB、MinIO 都是 AGPL-3.0，与之前相同；但 MinIO 改由社区（Pigsty）重新构建发布，属于供应链来源变化。原因是 MinIO 官方已关闭 Docker Hub 与 quay.io 的匿名拉取（`v0.8.3:website-docs/01-getting-started/05-troubleshooting.md:26`）：**v0.8.2 钉的 `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`（`3e8b0bf:docker-compose.yml:613`、`:867`）已不能匿名拉取**（2026-10-16 实测带匿名令牌仍 401，对照镜像 200）。这只影响 `minio`、`langfuse`、`full` 三个 compose profile；默认 `STORAGE_TYPE=local`（`3e8b0bf:.env.example:188`），Lite 也是 local，不受影响 |
+| 容器镜像 | ParadeDB v0.22.6 → v0.25.11（见第 1 节）；**MinIO 镜像换了发布者**：`quay.io/minio/minio` → `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`（`v0.8.3:docker-compose.yml:625`、`:879`；dev compose 里 `minio` 服务用未钉版本的 `pgsty/minio:latest`（`v0.8.3:docker-compose.dev.yml:85`），`langfuse-minio` 钉到 `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`（`:441`）） | ParadeDB、MinIO 都是 AGPL-3.0，与之前相同；但 MinIO 改由社区（Pigsty）重新构建发布，属于供应链来源变化。原因是 MinIO 官方已关闭 Docker Hub 与 quay.io 的匿名拉取（`v0.8.3:website-docs/01-getting-started/05-troubleshooting.md:26`）：**v0.8.2 钉的 `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`（`3e8b0bf:docker-compose.yml:613`、`:867`）已不能匿名拉取**（2026-10-16 实测带匿名令牌仍 401，对照镜像 200）。这只影响 `minio`、`langfuse`、`full` 三个 compose profile；默认 `STORAGE_TYPE=local`（`3e8b0bf:.env.example:188`），Lite 也是 local，不受影响 |
 | `LICENSE` | 第三方声明从 3262 行缩到 283 行：去掉了 paddle、playwright、numpy、PIL、MPL-2.0 组件等清单，也去掉了指向 `THIRD_PARTY_NOTICES.md` 的那句；现在只列 opencc、anydoc、wails（`v0.8.3:LICENSE:7`、`:41`、`:254`、`:258`）。`THIRD_PARTY_NOTICES.md` 和 `licenses/` 都没改 | 项目本身仍是 MIT。这不是许可证变更，但 fork 按 D6 自建 Lite 制品时，第三方声明要自己核全，不能照搬 v0.8.3 的 LICENSE |
 
 ## 3. 默认配置变化
@@ -107,8 +107,8 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 | 2 | signed_token / direct | 不变 | `auth.go`、`tenant.go`、审计相关类型都没改。新增的 MCP OAuth assertion（`routes_infra.go:189`）给按主体归属的 MCP 令牌多了一条不经浏览器的获取路径，但不改变“主体不受权威绑定”这一结论 |
 | 3 | hybrid-search | 结论不变，细节有变 | 仍然没有调用方 deadline；非 AppError 仍然返回 500 并带回 `err.Error()`（`v0.8.3:internal/handler/knowledgebase.go:388`）；`ContentRevision` 仍是 `json:"-"`（`v0.8.3:internal/types/search.go:244`）；query 全文仍会写进日志（`knowledgebase.go:355`；`knowledgebase_search.go:167`）；仍会自己算 query embedding。**新增**：主 KB 没有 embedding 模型时改用范围内另一个 KB 的模型（`knowledgebase_search.go:242`；v0.8.2 只用主 KB，`3e8b0bf:internal/application/service/knowledgebase_search.go:206-209`）；可选 rerank，开启后会调用模型；**单个 store 部分失败时返回部分结果、错误为 nil，只记一条 WARN**（`v0.8.3:internal/application/service/knowledgebase_search_fanout.go:172-184`），契约的 partial 语义要覆盖这种情况；多了 `source_locators`。矩阵引用的行号会漂移 |
 | 4 | /knowledge 与 chunks | 不变 | `handler/chunk.go` 没改；Chunk 多了 `source_locators`（有助于 KB-C1-01c 定位），但仍然不能按修订读取，也没有 stale 语义 |
-| 5 | /download、batch-download、/files | 不变 | 相关文件都没改 |
-| 6 | /preview | 不变 | `handler/knowledge.go` 的改动集中在画廊（`git diff 3e8b0bf 3e22822 -- internal/handler/knowledge.go` 显示，最后一个 hunk 从 v0.8.2 的 1104 行开始，只新增画廊函数），preview 部分没改 |
+| 5 | /download、batch-download、/files | 不变 | 下载 handler 函数体未改，行号漂移：`DownloadKnowledgeFile` 从 `3e8b0bf:internal/handler/knowledge.go:1603` 移到 `v0.8.3:internal/handler/knowledge.go:1987`，函数体逐行相同；`/download` 路由从 `routes_knowledge.go:120` 移到 `:138`，batch-download 仍在 `:78`；`knowledge_download.go`、`router/files.go`、`filetransport/response.go` 没改 |
+| 6 | /preview | 不变 | `handler/knowledge.go` 的改动集中在画廊（`git diff 3e8b0bf 3e22822 -- internal/handler/knowledge.go` 显示，最后一个 hunk 从 v0.8.2 的 1104 行开始，只新增画廊函数），preview 函数体没改，行号漂移（`PreviewKnowledgeFile` 1653 → 2037，路由 `:121` → `:139`） |
 | 7 | /system/info | 不变 | `system.go` 只新增了 ListUsers/SetUserStatus；路由策略没改 |
 | 8 | /system/capabilities | 文字要改 | 键从 13 个变成 14 个（新增 `settings.sandbox.remote`，`v0.8.3:internal/handler/deployment_capabilities.go:27`）；“只表示路由已注册”这一结论不变 |
 | 9 | /health | 不变 | `router.go` 只改了 CORS 头（:130）和多注册了一组路由（:263）；`/health` 与 Auth 挂载点（:208）没动 |
@@ -120,7 +120,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 | 15 | 无头 Lite 默认监听 | 不变 | `config.yaml`、`listen.go` 没改；`JWT_SECRET` 为空时仍在启动时随机生成（`v0.8.3:internal/application/service/user.go:81-94`）。持久化 JWT secret 的改动只在 Wails 桌面版（`git diff 3e8b0bf 3e22822 -- cmd/desktop/signing_key.go`）；Lite 本机技能也只在桌面版（`v0.8.3:internal/application/service/tenant_skill_host.go:22-28`） |
 | 16 | auto-setup | 不变 | `handler/auth.go` 只有 Register 这一个 hunk |
 
-**影响**：16 项结论没有一项因 v0.8.3 失效，也没有一个缺口被上游补上。如果升级，能力矩阵要换受测 SHA，并重新核对上表“结论不变，细节有变”和“文字要改”两类里引用的行号；PR② 的探测要在新 SHA 上跑。
+**影响**：16 项结论没有一项因 v0.8.3 失效，也没有一个缺口被上游补上。如果升级，能力矩阵要换受测 SHA，并按必做清单第 4 条的机械规则重核（不只限于上表“结论不变，细节有变”和“文字要改”两类）；PR② 的探测要在新 SHA 上跑。
 
 ## 7. `.github/` 的改动与守卫
 
@@ -130,7 +130,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
   - 新增 `workflows/helm.yml`：push 只针对 `main`（`v0.8.3:.github/workflows/helm.yml:5-6`）；另有 `pull_request`（`:10`），路径过滤为 `helm/**` 和 `.github/workflows/helm.yml` 本身（`:11-13`）；工作流级权限 `contents: read`（`:15-16`）；没有引用 GitHub secret（`secrets.dbPassword` 之类是 helm `--set` 的参数字符串）；用到一个新的外部 action `azure/setup-helm@v4`，按 tag 引用，没有钉 SHA（`:26`）。
 - **守卫**：用 a24/develop 上的 `.github/scripts/agent24-mirror-trigger-guard.rb` 检查 `3e22822 upstream-release`，输出 `mirror trigger guard: ok`，退出码 0；对 `3e8b0bf` 同样通过。这与 `FORK-MAINTENANCE.md` 里“上游 main 与 v0.8.3 都能通过”的说法一致。
 - **评审人开同步 PR 时要注意**：v0.8.3 改了 `helm/**`，所以 `helm.yml` 会在同步 PR 上运行（只读权限、不用 secret，可以接受；`azure/setup-helm@v4` 要按 FORK-MAINTENANCE 逐个确认）。其余 `pull_request` 类工作流与 v0.8.2 相同，没有新增写权限或 secret 引用。
-- **与 fork 补丁的冲突**：上游改动的文件和 fork 的 9 个文件没有交集（`comm -12` 两份文件清单，结果为空），升级合并在文件层面不会冲突。
+- **与 fork 补丁的冲突**：上游改动的文件和 fork 的 10 个文件（文首 `e5da6de` 的清单）没有交集（`comm -12` 两份文件清单，结果为空），升级合并在文件层面不会冲突。
 
 ## 结论与理由
 
@@ -144,20 +144,23 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 **反方理由（如实记录）**：现在 fork 没有产品补丁、没有真实数据，与上游改动的文件也没有交集，这是升级成本最低的时候。之后 KB-C1-01（路由）、KB-OBS-01（`logger.go`）、KB-C1-01c（hybrid-search 的 handler、service 和 `types/search.go`）落下的补丁，恰好都在 v0.8.3 改动过的文件里，再吸收上游时会有冲突要手工解决。
 
 **所以登记时一并写明必须先升级的时点**（`UPSTREAM-BASELINE.json` 的 `current_baseline.upgrade_before` 与 PATCH-LEDGER 开头写法一致）：
-1. 开始第一个产品补丁的 task 分支之前（不是写完再判断，免得在 v0.8.2 上白写）。产品补丁指改动或新增 fork 自有命名空间（`docs/agent24/`、`scripts/agent24/`、`.github/scripts/agent24-*`、`.github/workflows/agent24-*`，例如 PR② 的探测脚本放在 `scripts/agent24/probe/`）之外路径的任何工作，**不论是否与上游改动相交**。开工前按计划改动的路径清单判断；开 PR 时用 `git diff --name-only origin/a24/develop...<补丁分支> | grep -v -E '^(docs/agent24/|scripts/agent24/|\.github/(scripts|workflows)/agent24-)'` 复核，**输出非空就停下**：先按下面的做法完成升级并合入 a24/develop，再 rebase 补丁分支。`comm -12` 与上游改动文件取交集只作辅助参考，不作判据。
+1. 开始第一个产品补丁的 task 分支之前（不是写完再判断，免得在 v0.8.2 上白写）。产品补丁指改动或新增 fork 自有命名空间（`docs/agent24/`、`scripts/agent24/`、`.github/scripts/agent24-*`、`.github/workflows/agent24-*`，例如 PR② 的探测脚本放在 `scripts/agent24/probe/`）之外路径的任何工作，**不论是否与上游改动相交**。开工前按计划改动的路径清单判断；开 PR 时用 `git diff --name-only --no-renames origin/a24/develop...<补丁分支> | grep -v -E '^(docs/agent24/|scripts/agent24/|\.github/(scripts|workflows)/agent24-)'` 复核，**输出非空就停下**：先按下面的做法完成升级并合入 a24/develop，再 rebase 补丁分支。`--no-renames` 必须带：默认的重命名检测会让从命名空间外移进来的文件只显示新路径，漏掉被删的产品路径。这条复核只在 `current_baseline` 仍是 v0.8.2 时适用；同步 PR（head 为 `upstream-release`）本身就是升级，不适用。目前靠人工执行。`comm -12` 与上游改动文件取交集只作辅助参考，不作判据。
 2. 导入任何非测试资料、或让开发者以外的人访问任何实例之前：v0.8.2 在鉴权前把 json、form、`text/` 类 POST/PUT/PATCH 请求的请求体整体无上限读入内存（`3e8b0bf:internal/middleware/logger.go:105`，Logger 挂在 Auth 之前），而无头 Lite 默认监听 `0.0.0.0`（能力矩阵第 15 项）。
 3. 任何对外制品出货之前。
 4. 需要启用 `minio`、`langfuse` 或 `full` compose profile 时（见第 2 节 MinIO 一行）。不用不入库的本地 override 绕开，免得受测环境与登记不一致。
-5. 上游发布影响 v0.8.2 的安全公告时，或到 2026-11-15（距本次评估满 30 天）时，重新评估。由 David 负责关注上游的 Release 与 Security Advisories。
+
+**重新评估**（不是必须先升级的时点，结论可以是继续留守）：上游发布影响 v0.8.2 的安全公告时，或到 2026-11-15（距本次评估满 30 天）时，重新评估是否提前升级。由 David 负责关注上游的 Release 与 Security Advisories。对应 `UPSTREAM-BASELINE.json` 的 `upgrade_before.reevaluate_by` 与 `review_triggers`；目前没有自动提醒。
 
 **留守期间的受测栈约束**（PR② 的探测与任何产品验证都要遵守）：
-- **应用镜像必须钉版本。** v0.8.2 的 compose 用 `wechatopenai/weknora-{ui,app,sandbox,docreader}:${WEKNORA_VERSION:-latest}`（`3e8b0bf:docker-compose.yml:3`、`:37`、`:396`、`:408`），而且 `.env.example` 本身就写着 `WEKNORA_VERSION=latest`（`3e8b0bf:.env.example:34`），照常 `cp .env.example .env` 也会拉 latest。Docker Hub 上 app、ui、docreader 三个镜像的 `latest` 都已等于 v0.8.3（2026-10-16 实测）。所以必须在 `.env` 里改成 `WEKNORA_VERSION=v0.8.2`（或从 `3e8b0bf` 本地构建），起栈后用 `docker image inspect` 的 RepoDigests 与下面登记的 digest 比对，**不一致就停**；证据记录 digest 与应用自报的版本。不用 `scripts/start_all.sh`，它默认 `up --pull always`（`3e8b0bf:scripts/start_all.sh:387`），要用就带 `--no-pull` 并先完成 digest 比对。
-- **只用默认服务**（`frontend`、`app`、`docreader`、`postgres`、`redis`），不启用任何 profile；显式写出 `STORAGE_TYPE=local`。三个应用镜像的 v0.8.2 digest（2026-10-16 查得）：app `sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc`、ui `sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f`、docreader `sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a`。
+- **应用镜像必须钉版本。** v0.8.2 的 compose 用 `wechatopenai/weknora-{ui,app,sandbox,docreader}:${WEKNORA_VERSION:-latest}`（`3e8b0bf:docker-compose.yml:3`、`:37`、`:396`、`:408`），而且 `.env.example` 本身就写着 `WEKNORA_VERSION=latest`（`3e8b0bf:.env.example:34`），照常 `cp .env.example .env` 也会拉 latest。Docker Hub 上 app、ui、docreader 三个镜像的 `latest` 都已等于 v0.8.3（2026-10-16 实测）。所以必须在 `.env` 里改成 `WEKNORA_VERSION=v0.8.2`，用 `docker compose up -d --no-build` 起栈，起栈后用 `docker image inspect` 的 RepoDigests 把 5 个默认服务的镜像都与下面登记的 digest 比对，**不一致就停**；证据记录这 5 个 digest 与应用自报的版本。
+- **不用 `scripts/start_all.sh`，`--no-pull` 也不行。** 它默认 `up --pull always`（`3e8b0bf:scripts/start_all.sh:387`）；`--no-pull` 走的是 `up --build -d`（`:380-384`），而 frontend、app、docreader 都带 `build:`（`3e8b0bf:docker-compose.yml:8`、`:38`、`:409`），会用当前 checkout 重建并覆盖本地的 `v0.8.2` tag，本地镜像没有 RepoDigests，digest 比对注定失败；`--no-pull` 还会设 `START_OLLAMA=true`（`:666-668`），在宿主机拉起 Ollama，超出“只用默认服务”。
+- **从 `3e8b0bf` 本地构建是另一条路**，只在拉不到官方镜像时用。本地镜像没有 RepoDigests，证据改为记录：源码 SHA（`git rev-parse HEAD` 等于 `3e8b0bf…`，且 `git status --porcelain` 为空）、每个镜像的 image ID（`docker image inspect --format '{{.Id}}'`）、应用自报的版本、构建参数（`--build-arg` 与影响构建的环境变量，如 `PLATFORM`）。`WEKNORA_VERSION` 设成区别于官方的值（例如 `v0.8.2-local`），不覆盖拉下来的 `v0.8.2` tag；证据标明“本地构建”。
+- **只用默认服务**（`frontend`、`app`、`docreader`、`postgres`、`redis`），不启用任何 profile；显式写出 `STORAGE_TYPE=local`。三个应用镜像的 v0.8.2 digest（2026-10-16 查得）：app `sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc`、ui `sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f`、docreader `sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a`。postgres 与 redis 用的是可变 tag（`paradedb/paradedb:v0.22.6-pg17`、`redis:7.0-alpine`，`3e8b0bf:docker-compose.yml:532`、`:553`），同样要比对：postgres `sha256:58bf87d2a6f1e72f56590b0f0ae1467e82c3f99ca203dde646672c8ac13148b2`、redis `sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2`（2026-10-17 用 `docker image inspect --format '{{json .RepoDigests}}' <镜像>` 只读查本机已拉取的镜像得到，没有联网核对 Docker Hub 上这两个 tag 的当前指向；不一致时先查明 tag 是否被改指，再重新登记）。
 - **误跑过 latest 的数据卷一律丢弃重建。** v0.8.3 会把库迁移到 111–118，新表、新列和 116 改写的数据都不可回退（115 只在新 ParadeDB 镜像上才升级扩展，在 v0.8.2 的旧镜像上是空操作），而 v0.8.2 启动时迁移失败只记警告、照常启动（`3e8b0bf:internal/container/container.go:898-904`），会在不匹配的 schema 上悄悄运行。证据里同时记录 `schema_migrations` 的版本，v0.8.2 应为 110。结论不覆盖 MinIO/S3 系后端；例如 local 后端签名链接有效期与 MinIO 不同，不能外推。
 - **Lite 与标准栈不能互相替代。** Lite 走 SQLite 迁移与另一套默认配置，用它跑的结果不能算作标准栈证据，反之亦然。
-- **实例只绑定本机或隔离网络**（见时点 2）。默认 compose 把 `${APP_PORT:-8080}:8080`、`${FRONTEND_PORT:-80}:80` 映射到所有网卡（`3e8b0bf:docker-compose.yml:16`、`:46`），所以要设 `APP_PORT=127.0.0.1:8080`、`FRONTEND_PORT=127.0.0.1:80`，并在证据里记录 `docker port` 的输出。
+- **实例只绑定本机或隔离网络**（见时点 2）。默认 compose 把 `${APP_PORT:-8080}:8080`、`${FRONTEND_PORT:-80}:80` 映射到所有网卡（`3e8b0bf:docker-compose.yml:16`、`:46`），所以要设 `APP_PORT=127.0.0.1:8080`；frontend 只需绑 `127.0.0.1`，端口任意（例如 `FRONTEND_PORT=127.0.0.1:18080`，本机 80 端口可能被占用；探测只访问 app，frontend 的端口不影响任何结论），并在证据里记录 `docker port` 的输出。
 
-为了让这些时点真正生效，这条门槛已登记到 Agent24#1001（WS2 epic）的进入条件：建卡时要写入“基线已升级（#9 已吸收）”这一依赖。KB-CT-02b 在 WeKnora 侧的 Go 测试放在 `scripts/agent24/` 下，不放 `internal/`，所以不算产品补丁。门槛按规则执行，不只限于点名的任务：凡是 Target repo 为 WeKnora、会改动命名空间之外路径的任务（例如 KB-C1-01、KB-C1-01b-a、KB-C1-01c、KB-C1-03、KB-OBS-01、KB-SVC-POLICY-01、KB-C2-01、KB-C2-02），建卡时都要写入这条依赖。受测栈约束同样写进 WeKnora#5（PR②）的验收。同步通道（#3）不通时等它修好，不绕过；不通超过 7 天时上报 David 与 jason。KB-C1-01c 与 KB-CT-02a 的修订、定位设计应以 v0.8.3 的 `source_locators` 与 `SourceBlock` 为准，避免重做上游已有的东西。
+为了让这些时点真正生效，门槛按规则执行，不只限于点名的任务：凡是 Target repo 为 WeKnora、会改动命名空间之外路径的任务，建卡时都要写入“基线已升级（#9 已吸收）”这一依赖。KB-CT-02b 在 WeKnora 侧的 Go 测试放在 `scripts/agent24/` 下，不放 `internal/`，所以不算产品补丁。**登记位置如实写明**：截至 2026-10-17，这条规则只写在 Agent24#1001（WS2 epic）的一条评论里，还没有进任何 epic 正文。要写进三个 epic 正文的进入条件（WeKnora#11 跟进）：#1001（KB-C1-01、KB-C1-01b-a、KB-C1-01c、KB-C1-03、KB-OBS-01、KB-SVC-POLICY-01 等）、#1002（WS3：KB-C2-01、KB-C2-02）、#1003（WS4：KB-LITE-01a，以及按规则判断的 KB-LITE-01b；它现有的“KB-C0-02 定基线”只表示基线已登记，不表示已升级）。时点 2 挂到 #1001 退出验收的“真实数据验收”，时点 3 挂到 #1003 的出货验收。写入后以三个 epic 正文为准。受测栈约束同样写进 WeKnora#5（PR②）的验收。同步通道（#3）不通时等它修好，不绕过；不通超过 7 天时上报 David 与 jason。KB-C1-01c 与 KB-CT-02a 的修订、定位设计应以 v0.8.3 的 `source_locators` 与 `SourceBlock` 为准，避免重做上游已有的东西。
 
 做法：届时最新正式版不是 v0.8.3 时，先补一份 v0.8.2 到该版本的差异评估；按同步 issue 的五步开同步 PR；再按下面的“若升级的必做清单”执行。
 
@@ -177,7 +180,7 @@ PostgreSQL 新增 000111–000118，SQLite 新增 000031–000036；另有 3 个
 1. 先确认 #3 的同步工作流成功；按 FORK-MAINTENANCE 的五步暂停同步、核对镜像 SHA、审 `.github/`（重点是 `helm.yml` 和 `azure/setup-helm@v4`），然后再开同步 PR。
 2. 测试库先做一致性备份，再演练升级和恢复（ParadeDB v0.25.11 加迁移 111–118；Lite 用 SQLite 031–036）；按上游的 `website-docs/01-getting-started/06-paradedb-upgrade.md` 操作，**不要**对新镜像执行旧的 0.22.6 升级命令。
 3. 升级前先在当前基线上跑一遍 Go（`go test ./...`）和前端测试，记下失败清单；升级后再跑，对照区分回归与原有失败。契约回归：KB-CT-02b 完成后跑 schema 与夹具测试；在此之前以第 4 条的“新 SHA 上重跑 PR② 探测并重核能力矩阵”代替。
-4. 把能力矩阵换成新 SHA，至少重新核对第 3、8 项及行号会漂移的文件：`logger.go`、`knowledgebase.go`、`knowledgebase_search*.go`、`qa.go`、`types/search.go`、`config.go`、`user.go`、`router.go`、`routes_knowledge.go`、`routes_auth_tenant.go`；在新 SHA 上重跑 PR② 的探测；允许列表补上第 4 节列出的新路由和 `rerank` 字段。
+4. 把能力矩阵换成新 SHA，按机械规则重核：矩阵引用的产品路径（简写按全路径还原）里，凡是 `git diff --name-only --no-renames <旧 SHA> <新 SHA> -- <路径>` 有输出的，全部重核行号与结论，不按“看起来相关”挑选。PR-Daemon 对 #12 的统计：v0.8.2 → v0.8.3 矩阵引用约 62 个路径，28 个有输出；其中 `handler/knowledge.go` 的下载与 preview 函数体没改，但行号整体漂移（第 6 节第 5、6 行），`types/chunk.go`、`types/knowledge.go` 也有漂移。在新 SHA 上重跑 PR② 的探测；允许列表补上第 4 节列出的新路由和 `rerank` 字段。
 5. MinIO 镜像换了发布者（`pgsty/minio`），属于供应链来源变化，不在 D7 的四项（费用、出口、许可证、范围）之内。由工程决定：不启用 `minio` profile（默认 `STORAGE_TYPE=local`）时不需要处理；真要启用时（时点 4），再请用户（David）确认沿用 `pgsty/minio` 还是在 fork 的 compose 里覆盖，结果写进 PATCH-LEDGER。
 6. rerank 出口的事实说明已在 2026-10-16 UTC 补进 Agent24 #994（v0.8.2 的 `/knowledge-search` 已有这条路径，v0.8.3 又加到 hybrid-search）；升级时由 KB-C1-01 的允许列表对 `rerank` 字段表态。
 7. fork 按 D6 自建 Lite 制品时，app 与 docreader 配套构建（`SourceBlock` 契约）。
