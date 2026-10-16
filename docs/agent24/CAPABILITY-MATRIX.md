@@ -3,7 +3,7 @@
 - **受测 SHA**：`4b363d153122797c857871ce7e4bb63626efc637`（`a24/develop`，简写 `4b363d15`）。
 - **与上游的关系**：上游 `v0.8.2` = `3e8b0bfc80b845b2d4b2ed683994748741450a97`；受测 SHA = v0.8.2 + 2 个 Agent24 提交（`9d4e79f`、`4b363d1`）。
   这两个提交只新增 `docs/agent24/*` 和 `.github/workflows/agent24-upstream-sync.yml`，Go 源码、配置和前端与 v0.8.2 逐字节相同（`git diff --stat 3e8b0bf 4b363d1`）。
-- **文档性质**：静态源码阅读得出的**探测依据**，不是运行证据。每条 `file:line` 都已在受测 SHA 上打开文件核对；“证据文件”一列是 PR② 探测脚本将来输出的位置，目前都**待 PR② 产出**。
+- **文档性质**：静态源码阅读得出的**探测依据**，不是运行证据。每条 `file:line` 都已在受测 SHA 上打开文件核对；逐项里的“证据文件”是 PR② 探测脚本将来输出的位置，目前都**待 PR② 产出**。
   运行结论以证据文件为准；证据与本表冲突时，回写本表和 iDoris-ai/Agent24#989。
 - **来源**：iDoris-ai/WeKnora#5；事实台账 iDoris-ai/Agent24#989；任务 ID 见 Agent24 #1000–#1013 和 WS 各 epic。
 - 文中路径都相对 WeKnora 仓库根目录。本文不含凭据，也不含任何真实资料。
@@ -46,7 +46,7 @@
 - **signed_token**：租户 `APIPrincipalConfig.Mode=signed_token` 时，从 `X-External-User-Token` 取出 JWT 校验（`internal/middleware/auth.go:595-607`）。
   校验函数在 `auth.go:613-659`：要求 HS256、`aud=weknora`、带 exp，剩余有效期≤24h（`:26`、`:644`）；校验 nbf；token 的 tenant_id 必须等于 key 所属租户（`:650`）；最后只返回 `sub`（`:653-658`）。
   得到的主体是 `api_external_user:<tenant>:<sub>`（`:604-607`），而 key 的权限范围仍原样从 key 复制（`auth.go:550-558`）。
-- **ACL**：KB 访问只看 key 范围和租户（`internal/middleware/kb_access.go:202`；`internal/application/access/knowledgebase.go:104-118`），主体不参与。
+- **ACL**：KB 访问只看 key 范围和调用方的租户与角色，经同租户、组织共享、共享 Agent 三条路径判定（`internal/middleware/kb_access.go:202`；`internal/application/access/knowledgebase.go:104-154`），外部主体不参与。
 - **审计**：`audit_logs` 只有 `actor_user_id`（`internal/types/audit_log.go:220`），外部主体不进表。
   租户 API key 请求的 user 取自 `GetUserByTenantID`，即该租户 `created_at` 最早的用户（`auth.go:513`；`internal/application/repository/user.go:101-104`）；查不到时改用合成用户 `system-<tenantID>`（`auth.go:513-524`）。
   这个 user 写进上下文（`internal/middleware/auth_context.go:63-65`）后成为审计 actor（`internal/application/service/tenant_member.go:133-135`、`internal/application/service/kb_activity.go:175-181`）。
@@ -64,13 +64,14 @@
 
 ### 3. hybrid-search
 - **现状**：POST/GET `/api/v1/knowledge-bases/:id/hybrid-search`，路由要求 Viewer 和 KB 读权限，API key 需 retrieve 或 full access（`internal/router/routes_knowledge.go:200`、`:232-233`）。
+  请求体的 `knowledge_base_ids` 可以覆盖路径里的 KB，一次检索多个库（`internal/types/search.go:244-247`；`internal/application/service/knowledgebase_search.go:133-137`）；对每个库都会再做 key 白名单和共享权限校验（`knowledgebase_search_storegroup.go:211-229`），并要求 embedding 模型一致（`knowledgebase_search.go:178`）。
   handler 在 `internal/handler/knowledgebase.go:321-381`，用的是请求上下文（`:359`），所以客户端断开会传导下去。
   调用方没给 query_embedding、KB 开了向量、配置了 embedding 模型、且没有禁用向量匹配时，服务层会算一次 query embedding（`internal/application/service/knowledgebase_search.go:206-213`）。
 - **缺口**：
   - 没有调用方 deadline 和预算参数；只有引擎解析阶段有 12s 内部上限（`internal/application/service/knowledgebase_search_storegroup.go:21`、`:114`），`http.Server` 也没有设超时（`cmd/server/main.go:72-74`）。
   - 有统一错误信封（`internal/middleware/error_handler.go:23-43`），但没有契约要求的错误分类；服务层的非 AppError 一律包成 500（`knowledgebase.go:366-372`），并把内部错误原文 `err.Error()` 返回给客户端（`:371`；`internal/errors/errors.go:144-151`；`internal/middleware/error_handler.go:25-29`）。
   - `SearchResult.ContentRevision` 不序列化，标的是 `json:"-"`（`internal/types/search.go:220`）。
-  - handler 用 `logger.Infof` 记录 query 全文（`knowledgebase.go:346-347`），不受访问日志 10KB 上限约束。
+  - handler 和服务层都用 `logger.Infof` 记录 query 全文（`knowledgebase.go:346-347`；`internal/application/service/knowledgebase_search.go:142-143`），只去掉控制字符，不受访问日志 10KB 上限约束。
   - 相关的 `/knowledge-search` 用 `logger.CloneContext` 脱开了请求 ctx（`internal/handler/session/qa.go:829`；`internal/logger/logger.go:511-512`），参数错误返回 400（`qa.go:834-844`、`:881-884`），服务层错误一律 500 并带回内部错误原文（`:902-905`），也会记录 query（`qa.go:897`）。
 - **任务**：KB-C1-01c（PR1：deadline 与错误信封；PR3：修订映射）、KB-OBS-01、KB-SVC-POLICY-01、KB-CT-02a §3、§6（错误分类）。
 - **证据文件**：`docs/agent24/probe-evidence/4b363d15/03-hybrid-search.json`（待 PR② 产出）
@@ -79,7 +80,8 @@
 - **现状**：
   - `GET /knowledge/:id`、`/:id/spans`、`/:id/stages` 要求 Viewer 和父 KB 读权限（`internal/router/routes_knowledge.go:105-107`）；handler 分别是 `GetKnowledge`（`internal/handler/knowledge.go:600`）和 `GetKnowledgeSpans`（`:649`，spans 与 stages 共用）。
   - `GET /chunks/:knowledge_id`、`/chunks/by-id/:id`、`/chunks/:knowledge_id/:id/revisions` 走 retrieve（`routes_knowledge.go:31-38`）。分页默认 10、最大 100（`internal/handler/chunk.go:117-125`），默认只返回 text 类型分块（`chunk.go:128`）。
-  - Chunk 带 `content_revision` 和 `index_status`（ready/processing/failed）字段（`internal/types/chunk.go:132-135`），Knowledge 带 `file_hash` 和 `parse_status`（`internal/types/knowledge.go:189`、`:218`）。
+  - Chunk 带 `content_revision` 和 `index_status`（ready/processing/failed）字段（`internal/types/chunk.go:132-135`），Knowledge 带 `parse_status` 和 `file_hash`（`internal/types/knowledge.go:189`、`:218`）。
+  - 同属 retrieve 档、读元数据而非正文的还有 `GET /knowledge-bases/:id/knowledge`（`routes_knowledge.go:76`）、`GET /knowledge/batch`（`:104`，KB 校验在 handler 内）、`GET /knowledge/search`（`:123`），集成模式的允许列表也要对它们表态。
   - `/revisions` 返回历史修订列表，带历史正文（`internal/handler/chunk.go:257-268`；`types/chunk.go:189`）。
 - **缺口**：有历史修订列表，但不能按指定修订读并校验“检索时的修订”；没有 stale 返回；源修订、索引构建、chunk 修订三者之间没有映射。
   单条 chunk 找不到时返回 404（`chunk.go:69-72`），列表的参数错误返回 400（`:104-107`、`:112-115`）；其余服务层错误一律 500 并带回内部错误原文（`:74-75`、`:139-141`）。
@@ -90,7 +92,7 @@
 - **现状**：`GET /knowledge/:id/download`，JWT 需要 Contributor，并对父 KB 有写（Editor）权限（`internal/router/routes_knowledge.go:120`）；handler 里再查一次 Editor（`internal/handler/knowledge.go:1615-1622`）。返回原件，带 `no-store`（`:1634-1636`）。
   角色守卫对 API key 直接放行（路由注释 `routes_knowledge.go:114-119`；`internal/middleware/rbac.go:75-78`），但 KB 写权限检查仍在（`:120`；`knowledge.go:1618`）。
   本租户 KB 按 Admin 授予（`internal/application/access/knowledgebase.go:117-118`），所以**本租户 key 有 retrieve 就能下载**。KB 白名单仍然生效（`kb_access.go:202`）。
-  跨租户共享时，非 full_access key 的角色上下文是 Viewer（`auth.go:536-543`），编辑共享会被 `applyTenantRoleCap` 压成 Viewer（`internal/application/service/kbshare.go:69-73`、`:505-507`），所以下载不了；只有 full_access key（Owner）能经编辑共享下载。
+  跨租户共享时，非 full_access key 的角色上下文是 Viewer（`auth.go:536-543`），编辑共享会被 `applyTenantRoleCap` 压成 Viewer（`internal/application/service/kbshare.go:69-73`、`:505-507`），所以下载不了。full_access key（Owner）不受这层压缩，但还要满足：源租户仍在组织里，调用方租户在组织里的成员角色不低于 Editor（`kbshare.go:496-507`，取 `MinOrgRole(共享权限, 成员角色)`）。
   平台 retrieve key 用 X-Tenant-ID 进入目标租户后也算本租户（见第 10 项）。
 - **第二个原件出口**：`POST /api/v1/knowledge-bases/:id/knowledge/batch-download`（分组在 `routes_knowledge.go:70`，路由在 `:78`）。边界与单文件下载相同，handler 要求 Editor（`internal/handler/knowledge_download.go:68-70`），返回多个原件的 zip。
 - **缺口**：机器主体下载原件的门槛（retrieve）低于人（Contributor+Editor）。谁能下载原件还没定（#996）。集成模式需要在允许列表里对两个出口都明确开或关。
@@ -111,7 +113,7 @@
 - **证据文件**：`docs/agent24/probe-evidence/4b363d15/07-system-info.json`（待 PR② 产出）
 
 ### 8. /system/capabilities
-- **现状**：任意有效 API key 和 Viewer 都能读（`routes_auth_tenant.go:254`）。13 个键（`internal/handler/deployment_capabilities.go:13-27`），是启动时的快照，来源包括路由注册（`:58-63`、`:116-118`）、版本（Lite 下 organizations，`:70-74`）和平台（sandbox.host，`:85-93`）；只有 sandbox.docker 是实时值（`:138-154`）。
+- **现状**：任意有效 API key 和 Viewer 都能读（`routes_auth_tenant.go:254`）。13 个键（`internal/handler/deployment_capabilities.go:13-27`），是启动时的快照，来源包括 handler 是否注入（`internal/router/deployment_capabilities.go:8-29`，在 `internal/router/router.go:309` 绑定）、版本（Lite 下 organizations，`:70-74`）和平台（sandbox.host，`:85-93`）；只有 sandbox.docker 是实时值（`:138-154`）。
 - **缺口**：capabilities 表示“路由已注册”，不表示依赖健康或业务就绪。已有的 `integrations.im/embed/api/mcpserver`（`:16-19`）是上游自己的集成开关，没有 Agent24 集成、knowledge 协议版本这类扩展字段；集成模式下也不会如实反映已禁用的路由。
 - **任务**：KB-C1-01b-a、KB-C1-01（如实声明）、KB-CT-02a §9。
 - **证据文件**：`docs/agent24/probe-evidence/4b363d15/08-system-capabilities.json`（待 PR② 产出）
@@ -165,11 +167,11 @@
 - **现状**：
   - Logger 中间件挂在所有路由之前（`internal/router/router.go:140`），所以鉴权前路由（登录、注册、IM、embed、MCP 回调等）也一样记录。
   - 对 POST/PUT/PATCH 读取 json、form、text 类请求体（`internal/middleware/logger.go:96-102`、`:179-182`），截断到 10KB（`:20`、`:114-124`）；JSON 和 text 类响应体也捕获，同样截断（`:221-233`）。两者以 `request_body`、`response_body` 写入（`:252-258`）。
-  - 跳过的只有：`/assets/` 和 wiki stats 整条不记（`:168-172`），local-browser 流量不读请求体（`:176-177`），SSE 响应体不记（`:223-224`）。
+  - 跳过的只有：`/assets/` 和 wiki stats 整条不记（`:168-172`），local-browser 流量（`/api/v1/local-browser/` 前缀、`/api/v1/me/browser`、`*/local-browser` 后缀）请求体和响应体都不记（`:176-177`、`:180`、`:190-192`），SSE 响应体不记（`:223-224`）。
   - 脱敏只覆盖 password、token、key 这类字段名（`:45-56`）。所以 chunk 正文（GET 响应）、search query（POST 请求体）、经 preview 下发的 text 类原件，都会落日志。
-  - 另外 handler 还单独记录 query 全文（`internal/handler/knowledgebase.go:346`、`internal/handler/session/qa.go:897`）。
+  - 另外 handler 和服务层还单独记录 query 全文（`internal/handler/knowledgebase.go:346`、`internal/handler/session/qa.go:897`、`internal/application/service/knowledgebase_search.go:142-143`）。
   - 配置了 Langfuse 凭据就自动启用追踪（`internal/tracing/langfuse/config.go:79-84`）：retrieve span 的输入带 `query_text`（`internal/application/service/knowledgebase_search.go:233-236`），命中带 160 字正文预览（`internal/tracing/langfuse/retrieval_obs.go:163`、`:258`）。默认不启用，但它是 query 和正文外流的另一个出口。
-- **缺口**：没有关闭正文记录的开关。`LOG_LEVEL` 设为 warn 及以上时 2xx 访问日志不输出（`logger.go:263-270`），但 4xx/5xx 仍带正文，而 Lite 默认 `LOG_LEVEL=debug`（`.env.lite.example:8`）。
+- **缺口**：没有关闭正文记录的开关。`LOG_LEVEL` 设为 warn 及以上时 2xx 访问日志不输出（`logger.go:263-270`），但 4xx/5xx 仍带正文。`LOG_LEVEL` 未设置或无效时就是 debug（`internal/logger/logger.go:337-338`），Lite 的示例配置也是 debug（`.env.lite.example:8`）。
 - **任务**：KB-OBS-01（哨兵秘密负例）。
 - **证据文件**：`docs/agent24/probe-evidence/4b363d15/13-log-body.txt`（待 PR② 产出，只含哨兵串）
 
@@ -208,7 +210,7 @@
 1. **signed_token 行号**：#989 写的是 `auth.go:551-658`。实际 signed_token 分支在 `auth.go:595-607`，校验函数在 `:613-659`；551-558 是 key 范围的赋值。
 2. **“signed_token 不影响……”说得太绝对**：ACL 确实不受影响，但主体会决定会话、记忆、MCP OAuth 令牌、沙箱凭据和工具执行的归属；租户 key 的审计还会记到最早的真人名下。另有 `direct` 模式完全不签名（见第 2 项）。
 3. **“:0 不回报端口”**：在无头 `cmd/server` 上，端口 0 根本通不过配置校验（`config.go:686`）；`:0` 只出现在桌面版（`cmd/desktop/main.go:456`）。
-4. **日志**：#989 只提到请求体（`logger.go:180/253`）。响应体同样会记录（`logger.go:221-233`、`:258`），所以 chunk 正文读取也会落日志；`/knowledge-search` 也记录 query（`qa.go:897`）。
+4. **日志**：#989 写了“记录请求/响应正文”，但行号只指向请求体（`logger.go:180/253`）。应补上响应体的位置（`logger.go:221-233`、`:258`），以及服务层（`knowledgebase_search.go:142-143`）和 `/knowledge-search`（`qa.go:897`）也记录 query。
 5. **/system/info 列在“可复用”**：retrieve key 读不到（`routes_auth_tenant.go:252`、`:255`），需要 manage_vector_stores 或 full access。
 6. **/download、/preview 列在“可复用”**：没写出三点。一是本租户 API key 只要 retrieve 就能下载原件（`routes_knowledge.go:114-120`）；二是还有 batch-download 这个出口（`:78`）；三是 preview 返回的是原件，跨租户共享的 Viewer 也能拿到（`knowledge.go:1653-1679`）。
 7. **“RBAC 可配置为放行 rbac.go:89”**：漏了更严重的一条。RBAC 关闭时，没有成员关系的用户在已解析到的租户上会被授予 Admin（`auth.go:817-828`）；正常移除成员会吊销 token，所以主要缺口是降权不生效，以及成员查询出错时兜底给 Admin；只有移除后的清理失败时，被移除的成员才可能继续访问。
@@ -224,4 +226,4 @@
 - 本表全部都是静态结论，运行行为待 PR② 证据。尤其是第 10 项平台 key 跨租户读取、第 11 项 RBAC 关闭时的降权与兜底行为，最需要探测确认。
 - `SERVER_HOST`、`SERVER_PORT` 环境变量能否通过 viper AutomaticEnv 覆盖 `config.yaml` 的 host 和 port（`internal/config/config.go:511-512`），没有逐行追到 viper 内部，也没有实测。
 - auto-setup 中 Register 流程具体建了哪些空间和默认资源，没有逐行追到 `userService.Register` 的内部。
-- 无头 Lite 在 `GIN_MODE=release` 下的实际行为（swagger 是否关闭、日志级别），没有实测。
+- 无头 Lite 在 `GIN_MODE=release` 下的行为已能静态确认：swagger 只在非 release 模式注册（`internal/router/router.go:151-152`；`cmd/server/main.go:44-46`），日志级别只看 `LOG_LEVEL`（`internal/logger/logger.go:337-338`）。没有实测。
