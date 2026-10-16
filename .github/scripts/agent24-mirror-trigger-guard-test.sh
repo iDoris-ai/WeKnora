@@ -42,6 +42,7 @@ run 1 $M "方括号 [m&&r]"            w.yml $'on:\n  push:\n    branches: ["ups
 run 1 $M "方括号 [!x]"              w.yml $'on:\n  push:\n    branches: ["upstream-[!x]ain"]\njobs: {}'
 run 1 $M "ignore 里 ! 重新包含"     w.yml $'on:\n  push:\n    branches-ignore: ["upstream-*", "!upstream-main"]\njobs: {}'
 run 1 $M "flow 映射里的合并键"      w.yml $'on:\n  push: {branches: ["**"], <<: {branches: [main]}}\njobs: {}'
+run 1 $M "加引号的合并键"           w.yml $'s: &s\n  branches: [main]\non:\n  push:\n    branches: [upstream-main]\n    "<<": *s\njobs: {}'
 run 1 $M "YAML 合并键"              w.yml $'s: &s\n  branches: [main]\non:\n  push:\n    branches: [upstream-main]\n    <<: *s\njobs: {}'
 run 0 $M "方括号 [a-z]* 不匹配"     w.yml $'on:\n  push:\n    branches: ["release-[0-9]*"]\njobs: {}'
 run 1 $M "branches: [] 空列表"       w.yml $'on:\n  push:\n    branches: []\njobs: {}'
@@ -58,6 +59,12 @@ run 0 $M "PR 工作流不查" w.yml $'on: pull_request\njobs:\n  a:\n    runs-on
 rm -rf .github; echo x > README; git add -A; git -c user.name=t -c user.email=t@t commit -qm x
 if ruby "$G" "$(git rev-parse HEAD)" "$M" 2>&1 | grep -q '^mirror trigger guard: ok$'; then echo "PASS 无工作流目录"; else echo "FAIL 无工作流目录"; fail=1; fi
 git rm -rq --cached . >/dev/null 2>&1; rm -f README
+# 工作流文件是符号链接：拦下
+rm -rf .github; mkdir -p .github/workflows; printf 'on:\n  pull_request:\njobs: {}\n' > .github/workflows/real.txt; ln -s real.txt .github/workflows/w.yml
+git add -A; git -c user.name=t -c user.email=t@t commit -qm x
+out=$(ruby "$G" "$(git rev-parse HEAD)" "$M" 2>&1)
+if grep -q '^::error::.*符号链接' <<<"$out"; then echo "PASS 符号链接"; else echo "FAIL 符号链接"; fail=1; fi
+git rm -rq --cached . >/dev/null 2>&1
 # 目标提交不存在：失败
 if ruby "$G" 0000000000000000000000000000000000000000 "$M" >/dev/null 2>&1; then echo "FAIL 提交不存在"; fail=1; else echo "PASS 提交不存在"; fi
 exit $fail

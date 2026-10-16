@@ -108,8 +108,9 @@ ARGV.each_slice(2) do |commit, branch|
     next unless name.downcase.end_with?(".yml", ".yaml")
     path = ".github/workflows/#{name}"
     tag = "#{commit[0, 10]} #{path}"
-    unless meta.split(" ")[1] == "blob"
-      problems << "#{tag}: 不是普通文件，按有风险处理"
+    mode, type = meta.split(" ")
+    unless type == "blob" && mode != "120000"
+      problems << "#{tag}: 不是普通文件（目录、子模块或符号链接），按有风险处理"
       next
     end
     begin
@@ -117,7 +118,7 @@ ARGV.each_slice(2) do |commit, branch|
       raise Unknown, "内容不是合法 UTF-8" unless raw.valid_encoding?
       # Psych 处理合并键 << 的优先级与规范相反，可能把分支过滤解析错；块式与 flow 映射里
       # 出现就按无法识别处理（宁可误拦 run 脚本里恰好写了 <<: 的文件）
-      raise Unknown, "含 YAML 合并键 <<" if raw.match?(/<<\s*:/)
+      raise Unknown, "含 YAML 合并键 <<" if raw.match?(/<<["']?\s*:/)
       doc = YAML.safe_load(raw, aliases: true)
       raise Unknown, "顶层不是映射" unless doc.is_a?(Hash)
       on = doc.key?("on") ? doc["on"] : doc[true] # YAML 1.1 把 on 解析成 true
