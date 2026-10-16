@@ -19,6 +19,9 @@ jobs:
   sync:
     if: github.repository == 'iDoris-ai/WeKnora'
     runs-on: ubuntu-latest
+    # App 私钥与 Client ID 只存在这个 Environment，部署分支策略只允许 a24/develop。
+    # 镜像推送和同步 PR 触发的上游工作流跑在别的 ref 上，读不到它们。
+    environment: upstream-sync
     steps:
       - name: Require sync App credentials
         env:
@@ -67,6 +70,11 @@ jobs:
           # Verify both histories before changing either mirror. Never force push.
           git merge-base --is-ancestor origin/upstream-main upstream/main
           git merge-base --is-ancestor origin/upstream-release "$release_sha"
+          # 用 App 令牌推送会触发被推送提交里的工作流（上游代码，未经评审）；
+          # 有任何会被镜像推送激活的触发就停止，交给人处理。
+          ruby .github/scripts/agent24-mirror-trigger-guard.rb \
+            "$(git rev-parse upstream/main)" upstream-main \
+            "$release_sha" upstream-release
           git push --atomic origin \
             refs/remotes/upstream/main:refs/heads/upstream-main \
             "$release_sha:refs/heads/upstream-release"
