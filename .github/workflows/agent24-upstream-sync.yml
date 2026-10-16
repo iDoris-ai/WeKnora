@@ -5,9 +5,11 @@ on:
     - cron: '23 */6 * * *'
   workflow_dispatch:
 
+# 推送镜像与开同步 PR 用组织 App「iDoris WeKnora Sync」的 1 小时安装令牌：
+# 内置 GITHUB_TOKEN 无法获得 workflows 权限，推不动改了 .github/workflows/ 的上游提交，
+# 它开的 PR 也不会触发 CI。凭据设置与轮换见 docs/agent24/FORK-MAINTENANCE.md。
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: agent24-upstream-sync
@@ -18,13 +20,34 @@ jobs:
     if: github.repository == 'iDoris-ai/WeKnora'
     runs-on: ubuntu-latest
     steps:
+      - name: Require sync App credentials
+        env:
+          CLIENT_ID: ${{ vars.WEKNORA_SYNC_APP_CLIENT_ID }}
+          HAS_KEY: ${{ secrets.WEKNORA_SYNC_APP_PRIVATE_KEY != '' }}
+        shell: bash
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ "$HAS_KEY" != "true" ]; then
+            echo "::error::缺少 vars.WEKNORA_SYNC_APP_CLIENT_ID 或 secrets.WEKNORA_SYNC_APP_PRIVATE_KEY，见 docs/agent24/FORK-MAINTENANCE.md"
+            exit 1
+          fi
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.WEKNORA_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WEKNORA_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: WeKnora
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: a24/develop
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
       - name: Fast-forward mirrors and propose release integration
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -71,7 +94,7 @@ jobs:
           本 PR 仅提议将 upstream-release 正常 merge 到 a24/develop；禁止 reset、强推和整树覆盖。
           评审须核对 Agent24 适配、身份/权限、取消、引用、数据迁移和恢复，以及补丁清单。
           冲突必须逐项解决；保留 docs/agent24 与二次开发 feature，不以 ours/theirs 批量掩盖。
-          机器人创建的 PR 不保证自动触发 GitHub CI：请显式运行适用检查，再审查/合并。
+          本 PR 由同步 App 创建，会触发 pull_request 检查；须确认适用检查实际运行并通过，再审查/合并。
           本工作流不批准或合并 PR，也不把上游开发版自动送进产品分支。
           EOF
           gh pr create --repo "$GITHUB_REPOSITORY" \

@@ -22,10 +22,20 @@ gh workflow run agent24-upstream-sync.yml -R iDoris-ai/WeKnora --ref a24/develop
 
 1. 查询上游正式 Release 和 main；先确认两条镜像均可快进，再 atomic push，使镜像指向上游 commit，不创建额外提交。
 2. 产品分支尚未包含正式版时，创建 `upstream-release → a24/develop` 同步 PR；已有 PR 则复用。开发版仅跟踪，不自动进入产品。
-3. 同步 PR 必须完成适配/权限/取消/引用/迁移/恢复检查及评审后正常 merge。工作流没有自动批准或合并权限行为。GitHub Actions 创建的 PR 不保证触发 PR CI，应显式运行适用检查；未执行不算通过。
+3. 同步 PR 必须完成适配/权限/取消/引用/迁移/恢复检查及评审后正常 merge。工作流没有自动批准或合并权限行为。同步 PR 由同步 App 创建，会触发 pull_request 检查；仍须确认适用检查实际运行，未执行不算通过。
 4. 非快进、改写 tag、冲突、权限不足或上游 API 错误均失败停止，查看 Actions 日志处理；不 reset、强推、rebase 已共享历史或把上游文件整树覆盖到产品分支。六小时是检查周期，不是实时同步保证；失败期间旧版本仍保留。
 
 镜像随上游移动，同步 PR 的 head 也可能移动；评审/验收必须针对当前精确 head，不能复用旧批准。长期改动不得放在镜像分支。产品开发用短期 task 分支，PR base 为 `a24/develop`；上游镜像不是 task PR 的 base。
+
+## 同步凭据
+
+内置 `GITHUB_TOKEN` 无法获得 `workflows` 权限，推送改动了 `.github/workflows/` 的上游提交会被拒（2026-10-13 起的失败即此原因），它开的 PR 也不触发 CI。工作流因此改用组织 App 的短期令牌：
+
+- App：iDoris-ai 组织下的私有 GitHub App「iDoris WeKnora Sync」，只安装到本仓库。仓库权限仅 Contents RW、Workflows RW、Pull requests RW、Metadata R；不订阅 webhook，不申请组织或账号权限。
+- 仓库配置：Actions variable `WEKNORA_SYNC_APP_CLIENT_ID` 存 App 的 Client ID；Actions secret `WEKNORA_SYNC_APP_PRIVATE_KEY` 存 App 私钥（PEM 全文）。缺任一项时工作流第一步即失败，不回退到 `GITHUB_TOKEN`。
+- 每次运行用 `actions/create-github-app-token` 换取限定本仓库、上述三项写权限的 1 小时令牌，任务结束自动吊销。
+- 轮换：在 App 设置页先生成新私钥、更新 secret、手动运行一次工作流确认成功，再删除旧私钥。撤销：删除全部私钥或卸载 App。
+- 上游工作流的 push 触发都限定 `main` 分支或 tag；本仓库没有 `main` 分支，同步只推两条镜像分支、不推 tag，所以换凭据后推镜像不会触发上游构建或发布。上游若新增其它分支触发，要在同步 PR 评审时检查。
 
 ## 防止覆盖我们的 feature
 
