@@ -61,7 +61,7 @@
         "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go 与前端回归（升级前先在当前基线记录失败清单）、契约回归（KB-CT-02b 完成之前，以新 SHA 上重跑 PR② 探测并重核能力矩阵代替）、LICENSE 核对、KB-LITE-01b 重新测量",
         "更新本文件与 PATCH-LEDGER"
       ],
-      "gate": "凡 Target repo 为 WeKnora、会改动命名空间之外路径的任务，建卡时写入“基线已升级（#9 已吸收）”依赖；已于 2026-10-17 写进 Agent24#1001（KB-C1-01、C1-01b-a、C1-01b-b、C1-01c、C1-03、OBS-01、SVC-POLICY-01 等）、#1002（KB-C2-01、C2-02）、#1003（KB-LITE-01a，按规则判断 LITE-01b）正文的进入条件，时点 2 挂 #1001 真实数据验收，时点 3 挂 #1003 出货验收（WeKnora#11；以三个 epic 正文为准）；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
+      "gate": "凡 Target repo 为 WeKnora、会改动命名空间之外路径的任务，建卡时写入“基线已升级（#9 已吸收）”依赖；已于 2026-10-16 UTC 写进 Agent24#1001（KB-C1-01、C1-01b-a、C1-01b-b、C1-01c、C1-03、OBS-01、SVC-POLICY-01 等）、#1002（KB-C2-01、C2-02）、#1003（KB-LITE-01a，按规则判断 LITE-01b）正文的进入条件，时点 2 挂 #1001 真实数据验收，时点 3 挂 #1003 出货验收（WeKnora#11；任务级依赖以三个 epic 正文为准，基线数据与时点以本文件为准）；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
       "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason",
       "review_triggers": [
         "上游发布影响 v0.8.2 的安全公告时",
