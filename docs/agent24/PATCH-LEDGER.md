@@ -3,11 +3,15 @@
 **当前产品基线**：上游 `v0.8.2`（`3e8b0bf`），2026-10-16 按 #4 登记，评估见 `BASELINE-EVAL-v0.8.3.md`。截至 2026-10-16 评估过 `v0.8.3`，暂不吸收，下次吸收的入口是同步 issue #9（标题会随新正式版改写）。
 
 **必须先升级的时点**（与 `UPSTREAM-BASELINE.json` 的 `current_baseline.upgrade_before` 一致）：
-1. 开出第一个产品补丁 PR 之前。产品补丁指改动上游代码文件的 PR，不含 `docs/agent24/` 和本表 A24-BOOT-02 的三个文件。判据：`comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort)` 非空。
+1. 开始第一个产品补丁的 task 分支之前（不是写完再判断）。产品补丁指改动或新增上游代码路径的工作；fork 自有命名空间（`docs/agent24/、scripts/agent24/、.github/scripts/agent24-*、.github/workflows/agent24-*`）内的改动不算。辅助判据：`comm -12 <(git diff --name-only 3e8b0bf <届时最新正式版 SHA> | sort) <(git diff --name-only origin/a24/develop...<补丁分支> | sort)` 非空。
 2. 导入任何非测试资料、或让开发者以外的人访问任何实例之前。
 3. 任何对外制品出货之前。
+4. 需要启用 `minio`、`langfuse` 或 `full` compose profile 时（v0.8.2 钉的 quay.io MinIO 镜像已不能匿名拉取；默认 `STORAGE_TYPE=local` 不受影响）。
+5. 上游发布影响 v0.8.2 的安全公告时，或距上次评估满 30 天时，重新评估。
 
-升级做法：届时最新正式版不是 v0.8.3 时先补差异评估；按 #9 的五步开同步 PR；按评估的「若升级的必做清单」做备份与恢复演练、Go/前端/契约回归、能力矩阵换 SHA；最后更新本表与基线文件。同步通道不通时等它修好，不绕过。
+**留守期间的受测栈约束**：设 `WEKNORA_VERSION=v0.8.2`（Docker Hub 的 `latest` 已等于 v0.8.3）并记录镜像 digest；只用默认服务、`STORAGE_TYPE=local`，不启用 profile；Lite 与标准栈的结果不互相替代；实例只绑定本机或隔离网络。详见评估文档。
+
+升级做法：届时最新正式版不是 v0.8.3 时先补差异评估；按 #9 的五步开同步 PR；按评估的「若升级的必做清单」做备份与恢复演练、Go 与前端回归、契约回归（KB-CT-02b 完成前以新 SHA 上重跑 PR② 探测并重核矩阵代替）、LICENSE 核对；最后更新本表与基线文件。第一批产品补丁任务（KB-C1-01、C1-01b-a、C1-01c、OBS-01）以“基线已升级”为前置。同步通道不通时等它修好，不绕过；不通超过 7 天时上报 David 与 jason。
 
 | 编号 | 范围与目的 | 路径 | 上游升级处置 / 验证 |
 |---|---|---|---|
