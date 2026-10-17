@@ -2,6 +2,8 @@
 # 守卫脚本的正反例。用法：bash .github/scripts/agent24-mirror-trigger-guard-test.sh
 # 在临时 git 仓库里逐例提交一个工作流文件，断言守卫的退出码。
 set -uo pipefail
+# 继承的仓库定位变量（例如从 git hook 里运行）会让临时仓库上的操作落到真实仓库
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
 G="$(cd "$(dirname "$0")" && pwd)/agent24-mirror-trigger-guard.rb"
 T=$(mktemp -d) || exit 1; trap 'rm -rf "$T"' EXIT
 cd "$T" || exit 1; git init -q || exit 1
@@ -112,4 +114,72 @@ for d in .github/workflows .github; do
 done
 # 目标提交不存在：失败
 if ruby "$G" 0000000000000000000000000000000000000000 "$M" >/dev/null 2>&1; then echo "FAIL 提交不存在"; fail=1; else echo "PASS 提交不存在"; fi
+
+# 镜像推进的失败路径：非快进时停止、不强推。从工作流里取出推进镜像那一步的脚本，在临时裸仓库上原样运行；
+# gh 用桩代替，上游地址经 url.insteadOf 指向本地仓库，其他 github.com 地址一律改写到不存在的目录。不访问网络，不碰真实镜像分支。
+F="$T/ff"; mkdir -p "$F/bin"
+ruby -ryaml -e 'puts YAML.load_file(ARGV[0])["jobs"]["sync"]["steps"].find { |s| s["name"] == "Fast-forward mirrors and propose release integration" }["run"]' \
+  "$(dirname "$G")/../workflows/agent24-upstream-sync.yml" > "$F/step.sh" 2>&1 || { echo "FAIL 取出推进镜像的步骤"; fail=1; }
+# 先拼接续行；整个脚本里都不许出现强制（+ 开头）或删除（: 开头）的 refspec
+awk '{ if (sub(/\\$/, "")) printf "%s", $0; else print }' "$F/step.sh" > "$F/joined.sh"
+pushes=$(grep 'git push' "$F/joined.sh")
+first_push=$(grep -n 'git push' "$F/joined.sh" | head -1 | cut -d: -f1)
+last_check=$(grep -n 'git merge-base --is-ancestor origin/upstream-' "$F/joined.sh" | tail -1 | cut -d: -f1)
+if [ "$(head -1 "$F/joined.sh")" = "set -euo pipefail" ] && [ -n "$pushes" ] \
+  && ! grep -qE -- '--force|--mirror|--delete|--prune|(^|[[:space:]])-[a-zA-Z]*f' <<<"$pushes" \
+  && ! grep -qE "(^|[[:space:]\"'(])[+:][^[:space:]]*refs/" "$F/joined.sh" \
+  && [ "$(grep -c 'git merge-base --is-ancestor origin/upstream-' "$F/joined.sh")" = 2 ] && [ "$last_check" -lt "$first_push" ]; then
+  echo "PASS 推送不带强推，两条祖先检查都在推送之前"
+else echo "FAIL 推送不带强推，两条祖先检查都在推送之前"; fail=1; fi
+cat > "$F/bin/gh" <<'SH'; chmod +x "$F/bin/gh"
+#!/usr/bin/env bash
+echo "$*" >> "$GH_LOG"
+case "$1 $2|$*" in
+  "api repos/Tencent/WeKnora/releases/latest|"*) echo v1.0.0 ;;
+  "pr list|"*"--head ${PR_HEAD:-none} "*) echo 7 ;;
+esac
+exit 0
+SH
+# 不读开发者的全局与系统 git 配置（pre-push hook、push.gpgSign 等会让本地误报）
+nocfg() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 "$@"; }
+g() { nocfg git -c user.name=t -c user.email=t@t -c init.defaultBranch=main -c advice.detachedHead=false "$@"; }
+ff_run() { # 期望退出 用例名 上游main 上游正式版 [noverify|pr-main|pr-release]
+  # 历史：R─base─A─B，X 从 base 分出，Y 从 R 分出。upstream-main 现在 A，upstream-release 现在 base（起点不同，
+  # 祖先检查拿错镜像就会被 B X 用例抓到）；a24/develop 是 B 与 X 的合并，正例都在"已包含"处退出、不开 issue。
+  local mode=${5:-}  # bash 4+ 在 set -u 下展开未设置的 $5 会报错
+  rm -rf "$F/up" "$F/origin.git" "$F/work" "$F/gh.log"
+  ( g init -q "$F/up" && cd "$F/up" && for c in R base A B; do g commit -q --allow-empty -m $c || exit 1; done \
+    && g checkout -q main~2 && g commit -q --allow-empty -m X && g update-ref refs/heads/X HEAD \
+    && g checkout -q main~3 && g commit -q --allow-empty -m Y && g update-ref refs/heads/Y HEAD \
+    && g checkout -q --detach main && g merge -q --no-ff --no-edit X && g update-ref refs/heads/M HEAD && g init -q --bare "$F/origin.git" \
+    && g push -q "$F/origin.git" main~1:refs/heads/upstream-main main~2:refs/heads/upstream-release M:refs/heads/a24/develop ) || { echo "FAIL $2（准备仓库）"; fail=1; return; }
+  local A B X Y SR; A=$(g -C "$F/up" rev-parse main~1) && B=$(g -C "$F/up" rev-parse main) && X=$(g -C "$F/up" rev-parse X) \
+    && Y=$(g -C "$F/up" rev-parse Y) && SR=$(g -C "$F/up" rev-parse main~2) || { echo "FAIL $2（准备仓库）"; fail=1; return; }
+  local m=${!3} r=${!4}; g -C "$F/up" update-ref refs/heads/main "$m" && g -C "$F/up" tag -f v1.0.0 "$r" >/dev/null || { echo "FAIL $2（准备仓库）"; fail=1; return; }
+  g clone -q -b a24/develop "$F/origin.git" "$F/work" && mkdir -p "$F/work/.github/scripts" && cp "$G" "$F/work/.github/scripts/" \
+    || { echo "FAIL $2（准备仓库）"; fail=1; return; }
+  if [ "$mode" = noverify ]; then grep -v 'git merge-base --is-ancestor origin/upstream-' "$F/step.sh"; else cat "$F/step.sh"; fi > "$F/run.sh"
+  (cd "$F/work" && env PATH="$F/bin:$PATH" GH_LOG="$F/gh.log" PR_HEAD="upstream-${mode#pr-}" GITHUB_REPOSITORY=example/sandbox GITHUB_STEP_SUMMARY="$F/summary" \
+    GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0="url.$F/up.insteadOf" GIT_CONFIG_VALUE_0=https://github.com/Tencent/WeKnora.git \
+    GIT_CONFIG_KEY_1="url.$F/blocked/.insteadOf" GIT_CONFIG_VALUE_1=https://github.com/ \
+    GIT_CONFIG_KEY_2="url.$F/blocked/.pushInsteadOf" GIT_CONFIG_VALUE_2=https:// GIT_TERMINAL_PROMPT=0 \
+    LC_ALL=C GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash --noprofile --norc -eo pipefail "$F/run.sh") > "$F/out" 2>&1; local rc=$?
+  local om or; om=$(g --git-dir="$F/origin.git" rev-parse upstream-main); or=$(g --git-dir="$F/origin.git" rev-parse upstream-release)
+  local em=$m er=$r; [ "$mode" = pr-main ] && em=$A; [ "$mode" = pr-release ] && er=$SR
+  # 负例要钉住失败位置：已从本地上游取到 main（insteadOf 生效）、查过正式版，且停在 pr list 之前
+  if [ "$1" = 0 ]; then [ "$rc" = 0 ] && [ "$om" = "$em" ] && [ "$or" = "$er" ]; else
+    [ "$rc" != 0 ] && [ "$om" = "$A" ] && [ "$or" = "$SR" ] && ! grep -q '^issue ' "$F/gh.log" 2>/dev/null \
+      && grep -q '^api repos/Tencent/WeKnora/releases/latest' "$F/gh.log" && [ "$(g -C "$F/work" rev-parse -q --verify refs/remotes/upstream/main)" = "$m" ] \
+      && { [ "$mode" = noverify ] || ! grep -q '^pr list' "$F/gh.log" 2>/dev/null; } \
+      && { [ "$mode" != noverify ] || grep -q 'non-fast-forward' "$F/out"; }; fi \
+    && echo "PASS $2" || { echo "FAIL $2 (rc=$rc)"; sed 's/^/    /' "$F/out"; fail=1; }
+}
+ff_run 0 "两条镜像都快进：推进（对照）" B B
+ff_run 0 "正式版只是 upstream-release 的后代：推进（两条祖先检查各查各的镜像）" B X
+ff_run 0 "upstream-main 有同仓 PR：只推进 upstream-release" B B pr-main
+ff_run 0 "upstream-release 有同仓 PR：只推进 upstream-main" B B pr-release
+ff_run 1 "upstream-main 非快进：停止，两条镜像都不动" X B
+ff_run 1 "upstream-release 非快进：停止，两条镜像都不动" B Y
+ff_run 1 "去掉祖先检查，推送本身也拒绝 upstream-main 非快进（不强推）" X B noverify
+ff_run 1 "去掉祖先检查，推送本身也拒绝 upstream-release 非快进（不强推）" B Y noverify
 exit $fail
