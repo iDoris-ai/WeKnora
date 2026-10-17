@@ -1,0 +1,383 @@
+{
+  "item": 2,
+  "title": "外部主体 signed_token / direct_header",
+  "environment": {
+    "tested_dir_note": "受测目录名 4b363d15 = v0.8.2（3e8b0bf）+ 2 个只改 docs/agent24 与 .github/workflows 的提交（9d4e79f、4b363d1），Go 源码与 v0.8.2 相同",
+    "images": [
+      "app=wechatopenai/weknora-app:v0.8.2@sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc",
+      "frontend=wechatopenai/weknora-ui:v0.8.2@sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f",
+      "docreader=wechatopenai/weknora-docreader:v0.8.2@sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a",
+      "postgres=paradedb/paradedb:v0.22.6-pg17@sha256:58bf87d2a6f1e72f56590b0f0ae1467e82c3f99ca203dde646672c8ac13148b2",
+      "redis=redis:7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
+    ],
+    "digest_check": "RepoDigests 与登记值一致",
+    "schema_migrations": "110 dirty=false",
+    "run_at_utc": "2026-10-17T10:08:27Z",
+    "base": "http://127.0.0.1:8080",
+    "running_services": "app docreader frontend postgres redis",
+    "storage_type": "local",
+    "docker_port": [
+      "app: 8080/tcp -> 127.0.0.1:8080",
+      "frontend: 80/tcp -> 127.0.0.1:18080"
+    ],
+    "embed_mode": "fake-ollama",
+    "embedding_note": "向量为伪造的固定值，只证明分块和读取路径，不代表检索质量",
+    "system_info": {
+      "version": "0.8.2",
+      "edition": "standard",
+      "commit_id": "3e8b0bf",
+      "db_version": "110",
+      "build_time": "2026-09-24 06:44:03 UTC"
+    }
+  },
+  "requests": [
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10120/api-principal-config",
+      "status": 400,
+      "fields": {
+        "error": "mode must be tenant, direct_header, or signed_token"
+      }
+    },
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10120/api-principal-config",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "POST",
+      "path": "/api/v1/sessions",
+      "status": 201
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions/8579eaa9-ccbd-4724-8298-5c8262c12503",
+      "status": 404
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions/8579eaa9-ccbd-4724-8298-5c8262c12503",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions/8579eaa9-ccbd-4724-8298-5c8262c12503",
+      "status": 404
+    },
+    {
+      "actor": "key:full",
+      "method": "POST",
+      "path": "/api/v1/tenants/10120/api-principal-test-token",
+      "status": 403
+    },
+    {
+      "actor": "key:chat",
+      "method": "POST",
+      "path": "/api/v1/knowledge-bases/a593595c-3651-4193-83c2-73f72359163b/hybrid-search",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "POST",
+      "path": "/api/v1/knowledge-bases/a593595c-3651-4193-83c2-73f72359163b/hybrid-search",
+      "status": 200
+    },
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10120/api-principal-config",
+      "status": 200,
+      "fields": {
+        "resp": {
+          "mode": "signed_token",
+          "has_hmac_secret": true
+        }
+      }
+    },
+    {
+      "actor": "jwt:A",
+      "method": "POST",
+      "path": "/api/v1/tenants/10120/api-principal-test-token",
+      "status": 200,
+      "fields": {
+        "ttl": 900
+      }
+    },
+    {
+      "actor": "jwt:A",
+      "method": "POST",
+      "path": "/api/v1/tenants/10120/api-principal-test-token",
+      "status": 200,
+      "fields": {
+        "ttl": 900
+      }
+    },
+    {
+      "actor": "jwt:A",
+      "method": "POST",
+      "path": "/api/v1/tenants/10120/api-principal-test-token",
+      "status": 400
+    },
+    {
+      "actor": "key:full",
+      "method": "GET",
+      "path": "/api/v1/knowledge-bases",
+      "status": 401
+    },
+    {
+      "actor": "key:chat",
+      "method": "POST",
+      "path": "/api/v1/sessions",
+      "status": 201
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions/b3a69035-a74b-475f-b2e9-443d58ec3416",
+      "status": 404
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions/b3a69035-a74b-475f-b2e9-443d58ec3416",
+      "status": 401,
+      "fields": {
+        "error": "Unauthorized: invalid external user token"
+      }
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 401
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 401
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 401
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 401
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "POST",
+      "path": "/api/v1/knowledge-bases/a593595c-3651-4193-83c2-73f72359163b/hybrid-search",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "POST",
+      "path": "/api/v1/knowledge-bases/a593595c-3651-4193-83c2-73f72359163b/hybrid-search",
+      "status": 200
+    },
+    {
+      "actor": "key:full",
+      "method": "POST",
+      "path": "/api/v1/knowledge-bases",
+      "status": 201
+    },
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10120/api-principal-config",
+      "status": 200
+    }
+  ],
+  "checks": [
+    {
+      "check": "源码取值是 direct_header，矩阵写作 direct（待回写）：发 direct 返回 400",
+      "expect": "400",
+      "actual": "400",
+      "ok": true
+    },
+    {
+      "check": "切到 direct_header",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "direct：主体 a 建会话",
+      "expect": "200|201",
+      "actual": "201",
+      "ok": true
+    },
+    {
+      "check": "direct：主体 b 读不到主体 a 的会话",
+      "expect": "403|404",
+      "actual": "404",
+      "ok": true
+    },
+    {
+      "check": "direct：持 key 自称 a 即可读 a 的会话（无签名）",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "API key（含 full_access）不能签发主体 token",
+      "expect": "403",
+      "actual": "403",
+      "ok": true
+    },
+    {
+      "check": "direct：主体 a 的 KB 检索不受主体影响",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "direct：主体 b 的 KB 检索不受主体影响",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "配置 signed_token",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "响应不回显 HMAC 明文",
+      "expect": "false",
+      "actual": "false",
+      "ok": true
+    },
+    {
+      "check": "服务端签发最长 1 小时",
+      "expect": "400",
+      "actual": "400",
+      "ok": true
+    },
+    {
+      "check": "signed：主体 a 建会话",
+      "expect": "200|201",
+      "actual": "201",
+      "ok": true
+    },
+    {
+      "check": "signed：主体 b 读不到 a 的会话",
+      "expect": "403|404",
+      "actual": "404",
+      "ok": true
+    },
+    {
+      "check": "signed：缺 token 被拒",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "自签 token（aud 错误）被拒",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "自签 token（exp 超过 24h）被拒",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "自签 token（无 exp）被拒",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "自签 token（tenant_id 不符）被拒",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "持 HMAC 可自签任意 sub 并被接受（无 jti）",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "signed：主体 a 的 KB 检索不受主体影响（ACL 不看主体）",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "signed：主体 b 的 KB 检索不受主体影响（ACL 不看主体）",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "full key 建 KB",
+      "expect": "200|201",
+      "actual": "201",
+      "ok": true
+    },
+    {
+      "check": "审计 actor 是租户 Owner A（本栈无法区分'最早注册'与'Owner'），不是 key/主体",
+      "expect": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "check": "审计 details 带 api_key_id",
+      "expect": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "check": "审计不记外部主体 probe-ext-a",
+      "expect": "false",
+      "actual": "false",
+      "ok": true
+    }
+  ],
+  "observations": [
+    {
+      "observation": "direct：不带头（回落租户主体）读 a 的会话",
+      "value": "404"
+    },
+    {
+      "observation": "signed_token 模式下不带 token 的任何租户 key 请求（含 full_access）",
+      "value": "401"
+    },
+    {
+      "observation": "读取校验（只读 SQL）：audit_logs 中该条 details 的键",
+      "value": "[\"api_key_id\",\"api_key_name\",\"name\",\"type\"]"
+    }
+  ],
+  "conclusion": {
+    "verdict": "已测部分与矩阵一致；其余未测",
+    "mismatches": [],
+    "untested": "记忆、MCP OAuth、沙箱凭据归属未测（需模型或沙箱）；会话归属已测；审计 actor 取\"最早注册\"还是\"Owner\"未区分（本栈里 A 两者兼是，需另建先注册的非 Owner 用户才能分开）",
+    "pending_writeback": [
+      "principal mode 的源码取值是 direct_header，矩阵第 2、11 项写作 direct"
+    ]
+  }
+}

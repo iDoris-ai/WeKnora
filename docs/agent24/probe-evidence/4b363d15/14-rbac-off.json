@@ -1,0 +1,46 @@
+{
+  "item": 14,
+  "title": "RBAC 可配成放行",
+  "environment": {
+    "tested_dir_note": "受测目录名 4b363d15 = v0.8.2（3e8b0bf）+ 2 个只改 docs/agent24 与 .github/workflows 的提交（9d4e79f、4b363d1），Go 源码与 v0.8.2 相同",
+    "images": [
+      "app=wechatopenai/weknora-app:v0.8.2@sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc",
+      "frontend=wechatopenai/weknora-ui:v0.8.2@sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f",
+      "docreader=wechatopenai/weknora-docreader:v0.8.2@sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a",
+      "postgres=paradedb/paradedb:v0.22.6-pg17@sha256:58bf87d2a6f1e72f56590b0f0ae1467e82c3f99ca203dde646672c8ac13148b2",
+      "redis=redis:7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
+    ],
+    "digest_check": "RepoDigests 与登记值一致",
+    "schema_migrations": "110 dirty=false",
+    "run_at_utc": "2026-10-17T10:08:27Z",
+    "base": "http://127.0.0.1:8080",
+    "running_services": "app docreader frontend postgres redis",
+    "storage_type": "local",
+    "docker_port": [
+      "app: 8080/tcp -> 127.0.0.1:8080",
+      "frontend: 80/tcp -> 127.0.0.1:18080"
+    ],
+    "embed_mode": "fake-ollama",
+    "embedding_note": "向量为伪造的固定值，只证明分块和读取路径，不代表检索质量",
+    "system_info": {
+      "version": "0.8.2",
+      "edition": "standard",
+      "commit_id": "3e8b0bf",
+      "db_version": "110",
+      "build_time": "2026-09-24 06:44:03 UTC"
+    }
+  },
+  "requests": [],
+  "checks": [],
+  "observations": [
+    {
+      "observation": "app 容器 WEKNORA_TENANT_ENABLE_RBAC",
+      "value": "<空，默认开启>"
+    }
+  ],
+  "conclusion": {
+    "verdict": "未测",
+    "mismatches": [],
+    "untested": "整项未测：需改 app 环境变量 WEKNORA_TENANT_ENABLE_RBAC=false 并重启，本次不改环境"
+  }
+}
