@@ -4,7 +4,7 @@
 - **与上游的关系**：上游 `v0.8.2` = `3e8b0bfc80b845b2d4b2ed683994748741450a97`；受测 SHA = v0.8.2 + 2 个 Agent24 提交（`9d4e79f`、`4b363d1`）。
   这两个提交只新增 `docs/agent24/*` 和 `.github/workflows/agent24-upstream-sync.yml`，Go 源码、配置和前端与 v0.8.2 逐字节相同（`git diff --stat 3e8b0bf 4b363d1`）。
 - **文档性质**：静态源码阅读得出的**探测依据**，每条 `file:line` 都已在受测 SHA 上打开文件核对。PR②（#19、#20，`967d822`）已对 v0.8.2 标准栈实测，证据在 `docs/agent24/probe-evidence/4b363d15/`（2026-10-17，`embed_mode: fake-ollama`：向量为伪造的固定值，只证明分块和读取路径，不代表检索质量）。
-  逐项的“证据”一行摘录实测结论与未测部分；运行结论以证据文件为准。回写的内容：逐项的实测结论；第 2、11 项的模式名改为 `direct_header`；第 16 项旧稿“无头 `cmd/server` 一律 401”被实测改正为“标准版返回 403”；第 15 项 Edition 的注入方式；#8 列出的静态补充（第 3、4、5、10、11、13 项）。除第 16 项那句旧说法外，证据没有推翻本表的其他结论。
+  逐项的“证据”一行摘录实测结论与未测部分；运行结论以证据文件为准。回写的内容：逐项的实测结论；第 2、11 项的模式名改为 `direct_header`；第 16 项旧稿“无头 `cmd/server` 一律 401”被实测改正为“标准版返回 403”；第 15 项 Edition 的注入方式；#8 列出的静态补充（第 3、4、5、10、11、13 项）。除模式名的写法和第 16 项那句旧说法外，证据没有推翻本表的其他结论。
 - **来源**：iDoris-ai/WeKnora#5；事实台账 iDoris-ai/Agent24#989；任务 ID 见 Agent24 #1000–#1013 和 WS 各 epic。
 - 文中路径都相对 WeKnora 仓库根目录。本文不含凭据，也不含任何真实资料。
 
@@ -24,7 +24,7 @@
 | 10 | 租户隔离 | KB 按租户隔离；跨租户经组织共享、共享 Agent、平台 API key、跨租户超管 | 同租户内没有 per-user ACL；平台 retrieve key 可读任意租户 | KB-C1-01、KB-C1-03、KB-C4-02a、#993 |
 | 11 | 撤权生效时机 | key、JWT、成员关系都按请求查库；移除成员会吊销其全部 token | signed_token 只能粗粒度失效；在途流式请求不取消；RBAC 关闭时降权不生效 | KB-C1-03、KB-CT-03①、KB-C1-04 |
 | 12 | 鉴权前路由 | 有 10 组路由注册在 Auth 之前，另有 noAuthAPI 白名单（含默认开放的注册） | 集成模式无法整体关闭这些路由 | KB-C1-01 |
-| 13 | 日志记正文 | 请求体、响应体各最多 10KB 写入访问日志，鉴权前路由也一样；完整 `path?query` 只对少数参数脱敏；配置 Langfuse 时 query 和命中预览进追踪 | 正文、query、HMAC 明文、query 与路径里的 bearer 凭据落日志；Lite 默认 debug 级 | KB-OBS-01 |
+| 13 | 日志记正文 | 请求体、响应体各最多 10KB 写入访问日志，鉴权前路由也一样；完整 `path?query` 只对少数参数脱敏；启用 Langfuse 时 query 和命中预览进追踪 | 正文、query、HMAC 明文、query 与路径里的 bearer 凭据落日志；Lite 默认 debug 级 | KB-OBS-01 |
 | 14 | RBAC 可配成放行 | `WEKNORA_TENANT_ENABLE_RBAC=false` 后只记日志不拒绝，非成员按 Admin 放行 | 任何成员都能管理 key、主体配置并签发主体 token；集成模式必须禁止这样配置 | KB-C1-01、KB-C1-03 |
 | 15 | Lite 无头默认监听 | `0.0.0.0:8080`；端口 0 通不过配置校验；默认开放自助注册 | 没有 loopback 默认、端口回报、ready 握手、--version；同网段任何人可注册 | KB-LITE-01a、KB-C1-01b-a |
 | 16 | auto-setup 范围 | 仅 Wails 桌面版能用；只建默认用户和空间并签发令牌 | 无头版不能用；不建 KB、不配模型 | KB-LITE-01a、KB-C4-02a/02b |
@@ -94,12 +94,12 @@
   - Chunk 带 `content_revision` 和 `index_status`（ready/processing/failed）字段（`internal/types/chunk.go:132-135`），Knowledge 带 `parse_status` 和 `file_hash`（`internal/types/knowledge.go:189`、`:218`）。
   - 同属 retrieve 档的其他读接口（示例，非穷举）：读元数据的 `GET /knowledge-bases/:id/knowledge`（`routes_knowledge.go:76`）、`/folders`（`:79`）、`GET /knowledge/batch`（`:104`，KB 校验在 handler 内）、`GET /knowledge/search`（`:123`）、`/move/progress/:task_id`（`:124`）、tags（`:283`）、FAQ 读取（`:157-159`、`:170`）；返回正文的 wiki 页面与搜索（`:304-336`）；返回 `exports/` 下文件字节的 `/knowledge-bases/:id/files`（`internal/router/files.go:336-341`）。集成模式的允许列表要逐一表态。
   - `/revisions` 返回历史修订列表，带历史正文（`internal/handler/chunk.go:257-268`；`types/chunk.go:189`）。
-  - `/spans`、`/stages` 会把 span 的 `input`、`output`、`metadata` 序列化返回（`internal/types/knowledge_span.go:92-94`），内容由各处理阶段的调用方决定（`internal/application/service/knowledge_span_tracker.go:297`、`:405`、`:453`），可能带出解析正文，不应当作“不含正文”的接口。
+  - `/spans`、`/stages` 把 span 的 `input`、`output` 序列化返回（`internal/types/knowledge_span.go:92-93`；`internal/handler/knowledge.go:855`、`:718`）。启用了图谱抽取、多模态、摘要这些阶段时，output 里带截断的正文预览：`chunk_preview`（`internal/application/service/extract.go:309`）、`ocr_preview` 与 `caption_preview`（`internal/application/service/image_multimodal.go:292`、`:308`），各 200 字；`summary_preview`（`internal/application/service/knowledge_process.go:1482`，240 字）。所以它不是“不含正文”的接口。
 - **缺口**：有历史修订列表，但不能按指定修订读并校验“检索时的修订”；没有 stale 返回；源修订、索引构建、chunk 修订三者之间没有映射。
   单条 chunk 找不到时返回 404（`chunk.go:69-72`），列表的参数错误返回 400（`:104-107`、`:112-115`）；其余服务层错误一律 500 并带回内部错误原文（`:74-75`、`:139-141`）。
 - **任务**：KB-C1-01c（PR2：正文读取与 stale；PR3：修订映射）、KB-CT-02a §4–§5。
 - **证据**：`docs/agent24/probe-evidence/4b363d15/04-knowledge-chunk-read.json`。已测部分一致：retrieve key 能读元数据、`/spans`、`/stages`、chunk 列表（page_size 上限 100）和 revisions；revisions 带回历史正文（改写分块后 revision 0 是旧内容）；分页参数错误 400，chunk 不存在 404，白名单外 KB 403。
-  本次 txt 文档的 `/spans`、`/stages` 响应里没有正文哨兵；其他文件类型和增强阶段没测，上面那条仍待探测。未测：服务层 500 原文路径（需制造存储故障）；按修订读与 stale（静态结论）。
+  本次 txt 文档的 `/spans`、`/stages` 响应里没有正文哨兵；这次没有启用上述增强阶段，带预览的情形没有测到。未测：服务层 500 原文路径（需制造存储故障）；按修订读与 stale（静态结论）。
 
 ### 5. /download 与 batch-download
 - **现状**：`GET /knowledge/:id/download`，JWT 需要 Contributor，并对父 KB 有写（Editor）权限（`internal/router/routes_knowledge.go:120`）；handler 里再查一次 Editor（`internal/handler/knowledge.go:1615-1622`）。返回原件，带 `no-store`（`:1634-1636`）。
@@ -156,7 +156,7 @@
 - **缺口**：同租户内没有 per-user ACL（任何成员、任何同租户 key 都按 KB 白名单看到全部）；集成模式还没有禁止消费既存的共享授权；平台 key 不受 KB 白名单约束，绝不能进入 Desktop 或用于知识读取。
 - **任务**：KB-C1-01（禁止消费既存共享、允许列表）、KB-C1-03、KB-C4-02a（平台 key 不进 Desktop、不扩权）、#993。
 - **证据**：`docs/agent24/probe-evidence/4b363d15/10-tenant-isolation.json`。已测部分一致：租户 key 不能用 X-Tenant-ID 切租户；跨租户 hybrid-search、读 knowledge、full key 下载都 403；JWT 切到非成员租户 403；同租户 Viewer 看到全部 KB。
-  未测：平台 key 跨租户读取。v0.8.2 没有用 API 创建 SystemAdmin 的途径（本栈 SystemAdmin 为 0），要设 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` 并重启，本次不改环境。组织共享与跨租户超管也未测。
+  未测：平台 key 跨租户读取。提升 SystemAdmin 的接口只允许 SystemAdmin 调用（`internal/router/routes_auth_tenant.go:289-292`），本栈 SystemAdmin 为 0，没法从零自举；启动引导只提升已注册的邮箱（`cmd/server/bootstrap.go:72-78`），要先注册用户、再设 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` 并重启，本次不改环境。组织共享与跨租户超管也未测。
 
 ### 11. 撤权生效时机
 - **现状**：
@@ -192,7 +192,7 @@
   - 跳过的只有：`/assets/` 和 wiki stats 整条不记（`:168-172`），local-browser 流量（`/api/v1/local-browser/` 前缀、`/api/v1/me/browser`、`*/local-browser` 后缀）请求体和响应体都不记（`:176-177`、`:180`、`:190-192`），SSE 响应体不记（`:223-224`）。
   - 脱敏只覆盖 password、token、key 这类字段名（`:45-56`）。所以 chunk 正文（GET 响应）、search query（POST 请求体）、经 preview 下发的 text 类原件，都会落日志。
   - 脱敏正则要求整个字段名等于列表中的某一项（两侧都有引号，`:45-50`），所以 `PUT /tenants/:id/api-principal-config` 请求体里的 `hmac_secret`（`internal/handler/tenant.go:112`；`internal/router/routes_auth_tenant.go:102`）匹配不上：**租户 HMAC 明文会进访问日志的 `request_body`**。这正是第 2 项里“持有就能冒充任意主体”的那个根秘密。
-  - 访问日志把完整的 `path?query` 写进去（`internal/middleware/logger.go:215-217`），query 只对 `access_token`、`code`、`id_token`、`refresh_token`、`state`、`ticket`、`token` 等少数参数脱敏（`:58-71`）。所以 presigned 的 `sig` 和 `file_path`、`/r/:token` 路径里的令牌、`GET /knowledge/search` 的关键词都以明文落日志；前两者是有时效的 bearer 凭据。
+  - 访问日志把完整的 `path?query` 写进去（`internal/middleware/logger.go:215-217`），query 只对 `access_token`、`code`、`id_token`、`refresh_token`、`state`、`ticket`、`token` 等少数参数脱敏（`:58-71`）。所以整条 presigned URL（`sig` 与 `file_path`、`tenant_id`、`expires` 绑定，`internal/router/files.go:554-557`）、`/r/:token` 路径里的令牌、`GET /knowledge/search` 的关键词都以明文落日志；前两者是有时效、可重放的 bearer 凭据。
   - 另外 handler 和服务层还单独记录 query 全文（`internal/handler/knowledgebase.go:346`、`internal/handler/session/qa.go:897`、`internal/application/service/knowledgebase_search.go:142-143`）。
   - `LANGFUSE_ENABLED` 为空且配置了 Langfuse 凭据时自动启用追踪，该变量非空时以它为准（`internal/tracing/langfuse/config.go:79-84`）：retrieve span 的输入带 `query_text`（`internal/application/service/knowledgebase_search.go:233-236`），命中带 160 字正文预览（`internal/tracing/langfuse/retrieval_obs.go:163`、`:258`）。默认不启用，但它是 query 和正文外流的另一个出口。
 - **缺口**：没有关闭正文记录的开关。访问日志按状态码分级：5xx 用 Error、4xx 用 Warn、其余用 Info（`logger.go:263-270`）。`LOG_LEVEL=warn` 时 2xx 不输出，但 4xx/5xx 仍带正文；`LOG_LEVEL=error` 时只剩 5xx。`LOG_LEVEL` 未设置或无效时就是 debug（`internal/logger/logger.go:337-338`），Lite 的示例配置也是 debug（`.env.lite.example:8`）。
@@ -229,7 +229,7 @@
   - 默认用户不存在时，用固定的默认邮箱常量和随机口令注册（空间由 Register 流程建立）；已存在时不再注册。两种情况最后都签发 access/refresh token（`auth.go:919-976`，判断在 `:921-922`，签发在 `:953`），所以重复调用就会重复签发。
 - **缺口**：不建默认 KB，不配置模型和配置档；无头托管没有可用的引导入口；引导凭据和日常凭据没有分开。
 - **任务**：KB-LITE-01a（握手通道）、KB-C4-02a（可信 bootstrap）、KB-C4-02b（幂等建库）。
-- **证据**：`docs/agent24/probe-evidence/4b363d15/16-auto-setup.json`（标准栈）。与本表一致：标准版返回 403，带任意桌面 token 仍 403。未测：无头 Lite 返回 401、桌面版的签发行为。
+- **证据**：`docs/agent24/probe-evidence/4b363d15/16-auto-setup.json`（标准栈）。与本表一致：标准版返回 403，带任意桌面 token 仍 403。（证据脚本按源码预期 403，所以记为一致；本表旧稿“无头 `cmd/server` 一律 401”据此改正。）未测：无头 Lite 返回 401、桌面版的签发行为。
 
 ## 与 iDoris-ai/Agent24#989 的差异（待回写）
 
@@ -244,10 +244,10 @@
 9. **鉴权前路由**：#989 只引用 `router.go:174-205`。还应加上 `/health`（`:145`）、非 release 模式的 swagger（`:151`）、Lite 静态文件（`:170`）和 noAuthAPI 白名单（`auth.go:36-63`）。
 10. **“v0.8.2 + 2 文档提交”**：这两个提交还新增了 `.github/workflows/agent24-upstream-sync.yml`，不全是文档；Go 源码确实未变。
 11. **“/knowledge-search 错误一律 500”**：参数错误返回 400（`qa.go:834-844`、`:874-884`），只有服务层错误返回 500 并带回原文（`:902-905`）。
-12. **#989 没提到的**：平台 API key 可经 X-Tenant-ID 读任意租户（第 10 项）、默认开放自助注册（第 12、15 项）、500 响应带回内部错误原文（第 3、4 项）、配置 Langfuse 时 query 和正文进追踪（第 13 项）、`/files` 这个 gate 外的原件出口（第 5 项）、服务端主体 token 签发和 RBAC 关闭后的管理放大面（第 2、14 项）。
+12. **#989 没提到的**：平台 API key 可经 X-Tenant-ID 读任意租户（第 10 项）、默认开放自助注册（第 12、15 项）、500 响应带回内部错误原文（第 3、4 项）、启用 Langfuse 时 query 和正文进追踪（第 13 项）、`/files` 这个 gate 外的原件出口（第 5 项）、服务端主体 token 签发和 RBAC 关闭后的管理放大面（第 2、14 项）。
 13. **主体模式名**：源码取值是 `direct_header`（`internal/types/tenant.go:201`），写 `direct` 会被拒（400，PR② 第 2 项实测）。#989 和本表旧稿都写作 direct。
-14. **#8 补充的静态结论**（PR② 没有反证）：访问日志写入完整 `path?query`，presigned `sig`、`/r/:token` 等凭据会落日志（第 13 项）；`/r/:token` 和 presigned 两个凭据型出口（第 5 项）；`/spans`、`/stages` 可能带出解析正文（第 4 项）；取消没有类型化的错误，多组超时是不带原文的 400（第 3 项）。另外，embedding 阶段的取消已实测记为 500。
-15. **实测结论**：只有第 16 项旧稿“无头 `cmd/server` 一律 401”被推翻，标准版实测返回 403，已改正；其余结论没有被证据推翻。第 14 项整项、第 10 项平台 key 跨租户读取、第 5 项凭据型出口的覆盖面、无头 Lite（第 15、16 项）仍未测。
+14. **#8 补充的静态结论**（PR② 没有反证）：访问日志写入完整 `path?query`，presigned `sig`、`/r/:token` 等凭据会落日志（第 13 项）；`/r/:token` 和 presigned 两个凭据型出口（第 5 项）；`/spans`、`/stages` 在启用增强阶段时带截断的正文预览（第 4 项）；平台 key 也能经 `/files` 和 batch-download 取原件（第 10 项）；鉴权只在请求进入时做一次，在途请求不因撤权中止（第 11 项）；取消没有类型化的错误，多组超时是不带原文的 400（第 3 项）。另外，embedding 阶段的取消已实测记为 500。
+15. **实测结论**：除模式名的写法外，只有第 16 项旧稿“无头 `cmd/server` 一律 401”被推翻，标准版实测返回 403，已改正；其余结论没有被证据推翻。第 14 项整项、第 10 项平台 key 跨租户读取、第 5 项凭据型出口的覆盖面、无头 Lite（第 15、16 项）仍未测。
 
 #989 里还有几条不在本表 16 项之内，本 PR 不覆盖，留给对应任务：主 SPA 不支持嵌入（`internal/router/static.go:53` 的 `frame-ancestors 'self'`、前端 token 存在 localStorage）、鉴权后路由对 JWT 没有集成模式总开关（例如 `internal/router/routes_agent.go:24`、`routes_chat.go:51`）、`WEKNORA_SANDBOX_MODE` 是死配置、`release-lite.yml` 不按 tag 检出。
 
