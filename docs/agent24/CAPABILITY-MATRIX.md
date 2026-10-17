@@ -85,7 +85,7 @@
   - 相关的 `/knowledge-search` 用 `logger.CloneContext` 脱开了请求 ctx（`internal/handler/session/qa.go:829`；`internal/logger/logger.go:511-512`），参数错误返回 400（`qa.go:834-844`、`:874-878` 的 tag 校验、`:881-884`），key 白名单不允许的 KB 返回类型化的 Forbidden（`:886-889`；`internal/types/tenant_api_key.go:398-401`），服务层错误一律 500 并带回内部错误原文（`:902-905`），也会记录 query（`qa.go:897`）。
 - **任务**：KB-C1-01c（PR1：deadline 与错误信封；PR3：修订映射）、KB-OBS-01、KB-SVC-POLICY-01、KB-CT-02a §3、§6（错误分类）。
 - **证据**：`docs/agent24/probe-evidence/4b363d15/03-hybrid-search.json`。已测部分一致：retrieve key 可用 POST，GET 带 JSON body 也可用；结果不序列化 `content_revision`；开向量而 embedding 模型不可用的 KB 返回 500，响应带回服务层原文；请求体指向另一租户的 KB 返回 404；访问日志和 handler/服务层日志都记 query 全文。
-  取消已实测，走的是 query embedding 阶段（错误原文以 `failed to embed text:` 开头）：客户端 1 秒断开后，服务端日志出现 context canceled，访问日志记为 500，客户端没有收到响应体。未测：超时（多组 400、单组原样）、fanout 里的取消分支、检索质量（伪 embedding）、修订映射（静态结论）。
+  取消已实测，走的是 query embedding 阶段（错误原文以 `failed to embed text:` 开头）：客户端 1 秒断开后，服务端日志出现 context canceled，访问日志记为 500，客户端没有收到任何响应（curl 记为 000）。未测：超时（多组 400、单组原样）、fanout 里的取消分支、检索质量（伪 embedding）、修订映射（静态结论）。
 
 ### 4. /knowledge/{id} 与 chunks 读取
 - **现状**：
@@ -94,7 +94,7 @@
   - Chunk 带 `content_revision` 和 `index_status`（ready/processing/failed）字段（`internal/types/chunk.go:132-135`），Knowledge 带 `parse_status` 和 `file_hash`（`internal/types/knowledge.go:189`、`:218`）。
   - 同属 retrieve 档的其他读接口（示例，非穷举）：读元数据的 `GET /knowledge-bases/:id/knowledge`（`routes_knowledge.go:76`）、`/folders`（`:79`）、`GET /knowledge/batch`（`:104`，KB 校验在 handler 内）、`GET /knowledge/search`（`:123`）、`/move/progress/:task_id`（`:124`）、tags（`:283`）、FAQ 读取（`:157-159`、`:170`）；返回正文的 wiki 页面与搜索（`:304-336`）；返回 `exports/` 下文件字节的 `/knowledge-bases/:id/files`（`internal/router/files.go:336-341`）。集成模式的允许列表要逐一表态。
   - `/revisions` 返回历史修订列表，带历史正文（`internal/handler/chunk.go:257-268`；`types/chunk.go:189`）。
-  - `/spans`、`/stages` 把 span 的 `input`、`output` 序列化返回（`internal/types/knowledge_span.go:92-93`；`internal/handler/knowledge.go:855`、`:718`）。启用了图谱抽取、多模态、摘要、wiki 摄取这些阶段时，output 里带截断的正文预览：`chunk_preview`（`internal/application/service/extract.go:309`）、`ocr_preview` 与 `caption_preview`（`internal/application/service/image_multimodal.go:292`、`:308`），各 200 字；`summary_preview`（`internal/application/service/knowledge_process.go:1482`，240 字）；wiki 摄取：`body_preview`、`content_preview`（各 320 字）和 `page_summary`（200 字）（`internal/application/service/wiki_ingest_batch.go:1366-1369`、`:1809-1810`）。所以它不是“不含正文”的接口。
+  - `/spans`、`/stages` 把 span 的 `input`、`output` 序列化返回（`internal/types/knowledge_span.go:92-93`；`internal/handler/knowledge.go:855`、`:718`）。启用了图谱抽取、多模态、摘要、wiki 摄取这些阶段时，output 里带截断的正文预览：`chunk_preview`（`internal/application/service/extract.go:309`）、`ocr_preview` 与 `caption_preview`（`internal/application/service/image_multimodal.go:292`、`:308`），各 200 字；`summary_preview`（`internal/application/service/knowledge_process.go:1482`，240 字）；wiki 摄取：`body_preview`、`content_preview`（各 320 字）、`page_summary`（200 字）、`summary_line`（160 字，`internal/application/service/wiki_ingest_batch.go:1368`）和 `summary_preview`（160 字，`:1616`，经 `:840-843` 并入 wiki span 的 output）（`internal/application/service/wiki_ingest_batch.go:1366-1369`、`:1809-1810`）。所以它不是“不含正文”的接口。
 - **缺口**：有历史修订列表，但不能按指定修订读并校验“检索时的修订”；没有 stale 返回；源修订、索引构建、chunk 修订三者之间没有映射。
   单条 chunk 找不到时返回 404（`chunk.go:69-72`），列表的参数错误返回 400（`:104-107`、`:112-115`）；其余服务层错误一律 500 并带回内部错误原文（`:74-75`、`:139-141`）。
 - **任务**：KB-C1-01c（PR2：正文读取与 stale；PR3：修订映射）、KB-CT-02a §4–§5。
@@ -111,11 +111,11 @@
 - **第三个原件出口**：`GET /files?file_path=`（`internal/router/files.go:251-255`）挂在全局 Auth 之后，但不在 `/api/v1` 的 API-key gate 里（`internal/router/router.go:208`、`:211`）。
   它自己的守卫对 JWT 直接放行；API key 只要是 full_access，或者白名单为空且有 retrieve，也放行（`internal/middleware/api_key_gate.go:186-203`）。handler 只校验租户：knowledge 原件的 `file_path` 是 `resource://…`，按 catalog 记录的租户比对（`files.go:110-121`）；不在 catalog 里的路径才校验路径里的租户段（`:193-200`；`internal/utils/presign.go:119-127`）。不查角色和 KB 授权，响应头是 `public, max-age=86400`（`files.go:220`）。
   原件的 `file_path` 可以从只要 Viewer 的 `GET /knowledge/:id` 响应里拿到（`internal/types/knowledge.go:220`），所以**本租户任何成员**都能经 /files 取原件。跨租户共享走不通。
-- **凭据型出口（盘点）**：`/r/:token`（`internal/router/files.go:258-313`，路由在 `:312-313`，在 Auth 之前注册，`internal/router/router.go:195`）和 `/api/v1/files/presigned`（`files.go:534-538`，HMAC 签名、免鉴权，`router.go:214`）。它们能否覆盖 knowledge 原件，取决于签发点。
+- **凭据型出口（盘点）**：`/r/:token`（`internal/router/files.go:258-313`，路由在 `:312-313`，在 Auth 之前注册，`internal/router/router.go:195`）和 `/api/v1/files/presigned`（`files.go:534-538`，HMAC 签名、在 noAuthAPI 白名单里免鉴权（`internal/middleware/auth.go:62`），路由在 `router.go:214`）。它们能否覆盖 knowledge 原件，取决于签发点。
   实测（见下面的证据）只确认了：无效 token 的 `/r/` 返回 404，不带签名的 presigned 返回 400；本栈没设 `APP_EXTERNAL_URL`，没有签发点，`resource_access_grants` 为 0 行。所以覆盖面仍待在设了 `APP_EXTERNAL_URL` 的栈上探测。
 - **缺口**：机器主体和普通成员取原件的门槛（retrieve 或 Viewer）都低于 /download（Contributor+Editor）。谁能下载原件还没定（#996）。集成模式的允许列表要对三个出口和两个凭据型出口都明确开或关，而且要覆盖 gate 之外的 /files；/files 的 public 缓存头归 KB-C1-01 处理，KB-OBS-01 只在“文本原件落日志”这一点上相关。
 - **任务**：KB-C1-01（含 /files 缓存头）、KB-ORG-02a（预览/下载 ACL 负例）、KB-OBS-01、#996。
-- **证据**：`docs/agent24/probe-evidence/4b363d15/05-download.json`。已测部分一致：本租户 retrieve key 能下载原件（带 `private, no-store`），白名单外 403；JWT Viewer 下载 403、Contributor 200；batch-download 同样对 retrieve key 开放；`/files` 对空白名单 retrieve key 和本租户 Viewer 都返回原件，缓存头 `public, max-age=86400`，非空白名单 key、无 retrieve 的 key、另一租户都 403。
+- **证据**：`docs/agent24/probe-evidence/4b363d15/05-download.json`。已测部分一致：本租户 retrieve key 能下载原件（带 `private, no-store`），白名单外 403；JWT Viewer 下载 403、Contributor 200；batch-download 同样对 retrieve key 开放；`/files` 对空白名单 retrieve key 返回原件（核对了哨兵），本租户 Viewer 返回 200（只核对了状态码），缓存头 `public, max-age=86400`，非空白名单 key、无 retrieve 的 key、另一租户都 403。
   未测：组织跨租户共享；凭据型出口能否覆盖原件（见上）。
 
 ### 6. /preview
