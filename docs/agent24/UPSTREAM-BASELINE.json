@@ -72,10 +72,10 @@
       "owner": "David（stoptheworld-java，即“用户”）"
     },
     "test_stack_constraints": [
-      "在 .env 里设 WEKNORA_VERSION=v0.8.2（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 都已等于 v0.8.3），先 unset WEKNORA_VERSION（shell 变量优先于 .env），docker compose config --images 须正好是登记的 5 个引用，不符就停；再 docker compose pull，5 个默认服务的 RepoDigests 都须含 v0_8_2_image_digests 登记的 digest（为空也算不一致），不一致就停、不起栈；比对通过后再 docker compose up -d --no-build，起栈后确认各容器的 image ID 等于比对过的镜像，不一致就停栈、数据卷丢弃重建（误拉 latest 时 app 一启动就迁移到 111–118）；tag 被改指时可 docker pull <仓库>@<登记 digest> 再 docker tag 打回，之后不再对该服务 pull",
+      "在 .env 里设 WEKNORA_VERSION=v0.8.2（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 都已等于 v0.8.3），每条 docker compose 命令前加 env -u WEKNORA_VERSION（shell 变量优先于 .env，不依赖 shell 状态），docker compose config --images 须正好是评估文档列出的 5 个引用，docker compose config 里 app 的 STORAGE_TYPE 须为 local、app 与 frontend 端口的 host_ip 须为 127.0.0.1，不符就停；再 docker compose pull，5 个默认服务的 RepoDigests 都须含 v0_8_2_image_digests 登记的 digest（为空也算不一致），不一致就停、不起栈；比对通过后再 docker compose up -d --no-build，起栈后确认各容器的 image ID 等于比对过的镜像，不一致就停栈、数据卷丢弃重建（误拉 latest 时 app 一启动就迁移到 111–118）；tag 被改指时可 docker pull <仓库>@<登记 digest> 再 docker tag 打回，之后不再对该服务 pull",
       "不用 scripts/start_all.sh，含 --no-pull：默认 up --pull always；--no-pull 走 up --build -d，用当前 checkout 重建并覆盖 v0.8.2 tag（本地构建的镜像 digest 不会等于登记值），还设 START_OLLAMA=true 在宿主机拉起 Ollama",
-      "从 3e8b0bf 本地构建（只在拉不到官方镜像时）：在 3e8b0bf 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.2-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.2-local；命令见评估文档。同样先 unset WEKNORA_VERSION 并用 docker compose config --images 核对引用（三个 :v0.8.2-local 加 postgres、redis），再只 docker compose pull postgres redis（打回过 tag 的服务同样不再 pull），这两个按登记 digest 比对通过后再 docker compose up -d --no-build，起栈后核对容器 image ID；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
-      "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local",
+      "从 3e8b0bf 本地构建（只在拉不到官方镜像时）：在 3e8b0bf 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.2-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.2-local；命令见评估文档。每条 docker compose 命令前同样加 env -u WEKNORA_VERSION，用 docker compose config --images 核对引用（三个 :v0.8.2-local 加 postgres、redis）、用 docker compose config 核对 STORAGE_TYPE 与端口 host_ip，再只 docker compose pull postgres redis（打回过 tag 的服务同样不再 pull），这两个按登记 digest 比对通过后再 docker compose up -d --no-build，起栈后核对容器 image ID；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
+      "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local，起栈后用 docker exec WeKnora-app printenv STORAGE_TYPE 留证",
       "误跑过 latest 的数据卷丢弃重建；证据记录 schema_migrations 版本（v0.8.2 为 110）",
       "APP_PORT=127.0.0.1:8080；frontend 只需绑 127.0.0.1，端口任意（如 FRONTEND_PORT=127.0.0.1:18080；探测只访问 app，不影响结论），证据记录 docker port 输出",
       "Lite 与标准栈的结果不互相替代"
@@ -102,6 +102,6 @@
         "as_of": "2026-10-17"
       }
     },
-    "v0_8_2_image_digests_note": "每项的 as_of 是查得日期；postgres（paradedb/paradedb:v0.22.6-pg17）与 redis（redis:7.0-alpine）是可变 tag，用 docker image inspect --format '{{json .RepoDigests}}' 只读查本机已拉取的镜像得到，未联网核对 tag 当前指向；docker compose pull 会重新解析这两个 tag，比对不一致时先查明 tag 是否被改指，再重新登记（或 docker pull <仓库>@<登记 digest> 后 docker tag 回原 tag，之后不再对该服务 pull）；五个登记值都是多架构 index digest，各平台通用"
+    "v0_8_2_image_digests_note": "每项的 as_of 是查得日期；postgres（paradedb/paradedb:v0.22.6-pg17）与 redis（redis:7.0-alpine）是可变 tag，用 docker image inspect --format '{{json .RepoDigests}}' 只读查本机已拉取的镜像得到，未联网核对 tag 当前指向；docker compose pull 会重新解析所有 tag（postgres、redis 是明确的可变 tag），任一项比对不一致时先查明 tag 是否被改指，再重新登记（或 docker pull <仓库>@<登记 digest> 后 docker tag 回原 tag，之后不再对该服务 pull）；五个登记值都是多架构 index digest，各平台通用"
   }
 }
