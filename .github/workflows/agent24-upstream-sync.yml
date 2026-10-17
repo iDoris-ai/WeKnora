@@ -175,6 +175,8 @@ jobs:
           PR 只提议正常 merge upstream-release 到 a24/develop；禁止 reset、强推和整树覆盖。评审须核对
           Agent24 适配、身份/权限、取消、引用、数据迁移和恢复，以及补丁清单；冲突逐项解决，保留
           docs/agent24 与二次开发 feature。适用检查实际运行并通过后才能合并。合并后同步工作流会关闭本 issue。
+
+          产品基线与必须先升级的时点以 docs/agent24/UPSTREAM-BASELINE.json 的 current_baseline 为准。
           EOF
           title="[upstream-sync] 同步正式版 ${release_tag}"
           if [ -n "$sync_issue" ]; then

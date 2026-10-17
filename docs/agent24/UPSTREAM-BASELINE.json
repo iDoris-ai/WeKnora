@@ -72,7 +72,7 @@
       "owner": "David（stoptheworld-java，即“用户”）"
     },
     "test_stack_constraints": [
-      "在 .env 里设 WEKNORA_VERSION=v0.8.2（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 都已等于 v0.8.3），用 docker compose up -d --no-build 起栈；起栈后 5 个默认服务的 RepoDigests 都与 v0_8_2_image_digests 比对，不一致就停",
+      "在 .env 里设 WEKNORA_VERSION=v0.8.2（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 都已等于 v0.8.3），先 docker compose pull，5 个默认服务的 RepoDigests 都与 v0_8_2_image_digests 比对，不一致就停、不起栈；比对通过后再 docker compose up -d --no-build（误拉 latest 时 app 一启动就迁移到 111–118）",
       "不用 scripts/start_all.sh，含 --no-pull：默认 up --pull always；--no-pull 走 up --build -d，用当前 checkout 重建并覆盖 v0.8.2 tag（本地构建的镜像 digest 不会等于登记值），还设 START_OLLAMA=true 在宿主机拉起 Ollama",
       "从 3e8b0bf 本地构建（只在拉不到官方镜像时）：在 3e8b0bf 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.2-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.2-local；命令见评估文档。postgres、redis 仍按登记 digest 比对；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
       "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local",
@@ -81,13 +81,27 @@
       "Lite 与标准栈的结果不互相替代"
     ],
     "v0_8_2_image_digests": {
-      "as_of": "2026-10-16",
-      "app": "sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc",
-      "ui": "sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f",
-      "docreader": "sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a",
-      "postgres": "sha256:58bf87d2a6f1e72f56590b0f0ae1467e82c3f99ca203dde646672c8ac13148b2",
-      "redis": "sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2",
-      "note": "app/ui/docreader 于 as_of 查得；postgres（paradedb/paradedb:v0.22.6-pg17）与 redis（redis:7.0-alpine）是可变 tag，2026-10-17 用 docker image inspect --format '{{json .RepoDigests}}' 只读查本机已拉取的镜像得到，未联网核对 tag 当前指向"
-    }
+      "app": {
+        "digest": "sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc",
+        "as_of": "2026-10-16"
+      },
+      "ui": {
+        "digest": "sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f",
+        "as_of": "2026-10-16"
+      },
+      "docreader": {
+        "digest": "sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a",
+        "as_of": "2026-10-16"
+      },
+      "postgres": {
+        "digest": "sha256:58bf87d2a6f1e72f56590b0f0ae1467e82c3f99ca203dde646672c8ac13148b2",
+        "as_of": "2026-10-17"
+      },
+      "redis": {
+        "digest": "sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2",
+        "as_of": "2026-10-17"
+      }
+    },
+    "v0_8_2_image_digests_note": "每项的 as_of 是查得日期；postgres（paradedb/paradedb:v0.22.6-pg17）与 redis（redis:7.0-alpine）是可变 tag，用 docker image inspect --format '{{json .RepoDigests}}' 只读查本机已拉取的镜像得到，未联网核对 tag 当前指向"
   }
 }
