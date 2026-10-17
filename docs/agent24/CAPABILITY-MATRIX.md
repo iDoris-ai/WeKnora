@@ -79,12 +79,12 @@
 - **缺口**：
   - 没有调用方 deadline 和预算参数；引擎解析阶段有 12s 内部上限（`internal/application/service/knowledgebase_search_storegroup.go:21`、`:114`）；跨多个 store group 检索时每组另有 30s 超时，可用 `MULTI_STORE_RETRIEVE_TIMEOUT_SEC` 调整，只有一组时没有这层（`internal/application/service/knowledgebase_search_fanout.go:23`、`:56-72`、`:196-206`），多组时，父 ctx 被取消返回原始 `ctx.Err()`（`:95-97`），其余失败（含 `DeadlineExceeded`）收成不带原文的 VectorStoreUnavailable（`:98-104`，HTTP 400，`internal/errors/errors.go:267-275`）；`http.Server` 也没有设超时（`cmd/server/main.go:72-74`）。
   - 有统一错误信封（`internal/middleware/error_handler.go:23-43`），但没有契约要求的错误分类；服务层的非 AppError 一律包成 500（`knowledgebase.go:366-372`），并把内部错误原文 `err.Error()` 返回给客户端（`:371`；`internal/errors/errors.go:144-151`；`internal/middleware/error_handler.go:25-29`）。
-  - 取消没有类型化的错误：多组时父 ctx 被取消返回原始 `ctx.Err()`（`knowledgebase_search_fanout.go:95-97`，`isParentCancelled` 只认 `context.Canceled`，`:222-224`）；只有一组时引擎错误原样返回（`:56-57`）；query embedding 阶段在检索之前，取消也原样上抛（`knowledgebase_search.go:206-211`；`internal/models/embedding/ollama.go:77`、`:115`）。这些非 AppError 都被 handler 包成 500 并带出 "context canceled"（`knowledgebase.go:370-371`）。多组超时则是 400、不带原文（见上一条）。
+  - 取消没有类型化的错误：多组时父 ctx 被取消返回原始 `ctx.Err()`（`knowledgebase_search_fanout.go:95-97`，`isParentCancelled` 只认 `context.Canceled`，`:222-224`）；只有一组时引擎错误原样返回（`:56-57`）；query embedding 阶段在检索之前，取消也原样上抛（`knowledgebase_search.go:206-211`；`internal/models/embedding/ollama.go:77`、`:115`）。这些取消错误被 handler 包成 500，正文是错误原文（`knowledgebase.go:370-371`；实测的 embedding 阶段带 `context canceled`，单组引擎的报错文本没测）。多组超时则是 400、不带原文（见上一条）。
   - `SearchResult.ContentRevision` 不序列化，标的是 `json:"-"`（`internal/types/search.go:220`）。
-  - handler 和服务层都用 `logger.Infof` 记录 query 全文（`knowledgebase.go:346-347`；`internal/application/service/knowledgebase_search.go:142-143`），只去掉控制字符，不受访问日志 10KB 上限约束。
+  - handler 和服务层都用 `logger.Infof` 记录 query 全文（`knowledgebase.go:346-347`；`internal/application/service/knowledgebase_search.go:142-143`），这两层只去掉控制字符，不受访问日志 10KB 上限约束。repository 层同样记录 query 全文（`internal/application/repository/retriever/postgres/repository.go:167`、`internal/application/repository/retriever/elasticsearch/v7/repository.go:719`），这一层不做任何脱敏（连控制字符也不去）。检索失败时 `internal/application/service/knowledgebase_search.go:258-261` 把 `query_text` 写进错误日志字段。
   - 相关的 `/knowledge-search` 用 `logger.CloneContext` 脱开了请求 ctx（`internal/handler/session/qa.go:829`；`internal/logger/logger.go:511-512`），参数错误返回 400（`qa.go:834-844`、`:874-878` 的 tag 校验、`:881-884`），key 白名单不允许的 KB 返回类型化的 Forbidden（`:886-889`；`internal/types/tenant_api_key.go:398-401`），服务层错误一律 500 并带回内部错误原文（`:902-905`），也会记录 query（`qa.go:897`）。
 - **任务**：KB-C1-01c（PR1：deadline 与错误信封；PR3：修订映射）、KB-OBS-01、KB-SVC-POLICY-01、KB-CT-02a §3、§6（错误分类）。
-- **证据**：`docs/agent24/probe-evidence/4b363d15/03-hybrid-search.json`。已测部分一致：retrieve key 可用 POST，GET 带 JSON body 也可用；结果不序列化 `content_revision`；开向量而 embedding 模型不可用的 KB 返回 500，响应带回服务层原文；请求体指向另一租户的 KB 返回 404；访问日志和 handler/服务层日志都记 query 全文。
+- **证据**：`docs/agent24/probe-evidence/4b363d15/03-hybrid-search.json`。已测部分一致：retrieve key 可用 POST，GET 带 JSON body 也可用；结果不序列化 `content_revision`；开向量而 embedding 模型不可用的 KB 返回 500，响应带回服务层原文；请求体指向另一租户的 KB 返回 404；访问日志、handler/服务层日志和 repository 层（`[Postgres] Keywords retrieval`）都记 query 全文。
   取消已实测，走的是 query embedding 阶段（错误原文以 `failed to embed text:` 开头）：客户端 1 秒断开后，服务端日志出现 context canceled，访问日志记为 500，客户端没有收到任何响应（curl 记为 000）。未测：超时（多组 400、单组原样）、fanout 里的取消分支、检索质量（伪 embedding）、修订映射（静态结论）。
 
 ### 4. /knowledge/{id} 与 chunks 读取
@@ -109,7 +109,7 @@
   平台 retrieve key 用 X-Tenant-ID 进入目标租户后也算本租户（见第 10 项）。
 - **第二个原件出口**：`POST /api/v1/knowledge-bases/:id/knowledge/batch-download`（retrieve 档的 `kbRead` 分组在 `routes_knowledge.go:71`，路由在 `:78`）。边界与单文件下载相同，handler 要求 Editor（`internal/handler/knowledge_download.go:68-70`），返回多个原件的 zip。
 - **第三个原件出口**：`GET /files?file_path=`（`internal/router/files.go:251-255`）挂在全局 Auth 之后，但不在 `/api/v1` 的 API-key gate 里（`internal/router/router.go:208`、`:211`）。
-  它自己的守卫对 JWT 直接放行；API key 只要是 full_access，或者白名单为空且有 retrieve，也放行（`internal/middleware/api_key_gate.go:186-203`）。handler 只校验租户：knowledge 原件的 `file_path` 是 `resource://…`，按 catalog 记录的租户比对（`files.go:110-121`）；不在 catalog 里的路径才校验路径里的租户段（`:193-200`；`internal/utils/presign.go:119-127`）。不查角色和 KB 授权，响应头是 `public, max-age=86400`（`files.go:220`）。
+  它自己的守卫对 JWT 直接放行；API key 只要是 full_access，或者白名单为空且有 retrieve，也放行（`internal/middleware/api_key_gate.go:186-203`）。handler 只校验租户：knowledge 原件的 `file_path` 是 `resource://…`，按 catalog 记录的租户比对（`files.go:110-121`）；非 `resource://` 路径（或 catalog 未注入时）才校验路径里的租户段（`:193-200`；`internal/utils/presign.go:119-127`）；未登记的 `resource://` 返回 404（`files.go:111-113`）。不查角色和 KB 授权，响应头是 `public, max-age=86400`（`files.go:220`）。
   原件的 `file_path` 可以从只要 Viewer 的 `GET /knowledge/:id` 响应里拿到（`internal/types/knowledge.go:220`），所以**本租户任何成员**都能经 /files 取原件。跨租户共享走不通。
 - **凭据型出口（盘点）**：`/r/:token`（`internal/router/files.go:258-313`，路由在 `:312-313`，在 Auth 之前注册，`internal/router/router.go:195`）和 `/api/v1/files/presigned`（`files.go:534-538`，HMAC 签名、在 noAuthAPI 白名单里免鉴权（`internal/middleware/auth.go:62`），路由在 `router.go:214`）。它们能否覆盖 knowledge 原件，取决于签发点。
   实测（见下面的证据）只确认了：无效 token 的 `/r/` 返回 404，不带签名的 presigned 返回 400；本栈没设 `APP_EXTERNAL_URL`，没有签发点，`resource_access_grants` 为 0 行。所以覆盖面仍待在设了 `APP_EXTERNAL_URL` 的栈上探测。
@@ -170,7 +170,7 @@
   - 已经开始的流式或长请求不会因撤权而中止：鉴权只在请求进入时做一次（`router.go:208`）。另外，`/knowledge-search` 用 `CloneContext` 脱开了请求 ctx（`internal/handler/session/qa.go:829`；`internal/logger/logger.go:511-512`），客户端断开也不会中止它，这一点与撤权无关。
   - RBAC 关闭时，降权不生效：`UpdateRole` 不吊销 token（`tenant_member.go:349-352`），`RequireRole` 用较低角色也只记日志、照常放行（`internal/middleware/rbac.go:89-95`）。成员查询出错，或者移除成员后清理失败、token 没被吊销时，也会落到兜底分支并按 Admin 放行（`auth.go:768-772` → `:824-828`）。见第 14 项。
 - **任务**：KB-C1-03（撤销、jti）、KB-CT-03①（撤权状态机、generation）、KB-C1-04、KB-CT-02a §7（取消语义）。
-- **证据**：`docs/agent24/probe-evidence/4b363d15/11-revocation.json`。已测部分一致：撤销 key 后下一请求 401；RBAC 开启时降为 Viewer 后下一请求 403；移除成员后访问原租户 401，且该用户的全部 token 被吊销（自己的租户也 401）；轮换 HMAC 后旧 signed token 401；改回 tenant 模式后带旧 token 仍以租户主体成功。
+- **证据**：`docs/agent24/probe-evidence/4b363d15/11-revocation.json`。已测部分一致：撤销 key 后下一请求 401；RBAC 开启时降为 Viewer 后下一请求 403；移除成员后访问原租户 401，且该用户的全部 token 被吊销（自己的租户也 401）；轮换 HMAC 后旧 signed token 401；改回 tenant 模式后带旧 token 请求仍返回 200（主体是租户这一点是静态推论，`auth.go:575-577`，没有实测）。
   未测：在途流式请求不取消；RBAC 关闭时的降权与兜底（要改 app 环境变量）。
 
 ### 12. 注册在鉴权之前的路由
@@ -193,7 +193,7 @@
   - 脱敏只覆盖 password、token、key 这类字段名（`:45-56`）。所以 chunk 正文（GET 响应）、search query（POST 请求体）、经 preview 下发的 text 类原件，都会落日志。
   - 脱敏正则要求整个字段名等于列表中的某一项（两侧都有引号，`:45-50`），所以 `PUT /tenants/:id/api-principal-config` 请求体里的 `hmac_secret`（`internal/handler/tenant.go:112`；`internal/router/routes_auth_tenant.go:102`）匹配不上：**租户 HMAC 明文会进访问日志的 `request_body`**。这正是第 2 项里“持有就能冒充任意主体”的那个根秘密。
   - 访问日志把完整的 `path?query` 写进去（`internal/middleware/logger.go:215-217`），query 只对 `access_token`、`code`、`id_token`、`refresh_token`、`state`、`ticket`、`token` 等少数参数脱敏（`:58-71`）。所以整条 presigned URL（`sig` 与 `file_path`、`tenant_id`、`expires` 绑定，`internal/utils/presign.go:47-48`、`internal/router/files.go:582`）、`/r/:token` 路径里的令牌、`GET /knowledge/search` 的关键词都以明文落日志；前两者是有时效、可重放的 bearer 凭据。
-  - 另外 handler 和服务层还单独记录 query 全文（`internal/handler/knowledgebase.go:346`、`internal/handler/session/qa.go:897`、`internal/application/service/knowledgebase_search.go:142-143`）。
+  - 另外 handler 和服务层还单独记录 query 全文（`internal/handler/knowledgebase.go:346`、`internal/handler/session/qa.go:897`、`internal/application/service/knowledgebase_search.go:142-143`）。repository 层同样记录 query 全文（`internal/application/repository/retriever/postgres/repository.go:167`、`internal/application/repository/retriever/elasticsearch/v7/repository.go:719`），这一层不做任何脱敏（连控制字符也不去）。检索失败时 `internal/application/service/knowledgebase_search.go:258-261` 把 `query_text` 写进错误日志字段。
   - `LANGFUSE_ENABLED` 为空且配置了 Langfuse 凭据时自动启用追踪，该变量非空时以它为准（`internal/tracing/langfuse/config.go:79-84`）：retrieve span 的输入带 `query_text`（`internal/application/service/knowledgebase_search.go:233-236`），命中带 160 字正文预览（`internal/tracing/langfuse/retrieval_obs.go:163`、`:258`）。默认不启用，但它是 query 和正文外流的另一个出口。
 - **缺口**：没有关闭正文记录的开关。访问日志按状态码分级：5xx 用 Error、4xx 用 Warn、其余用 Info（`logger.go:263-270`）。`LOG_LEVEL=warn` 时 2xx 不输出，但 4xx/5xx 仍带正文；`LOG_LEVEL=error` 时只剩 5xx。`LOG_LEVEL` 未设置或无效时就是 debug（`internal/logger/logger.go:337-338`），Lite 的示例配置也是 debug（`.env.lite.example:8`）。
 - **任务**：KB-OBS-01（哨兵秘密负例，须覆盖 `hmac_secret`、presigned `sig`、`/r/:token` 路径令牌和 query 关键词）、KB-C1-03（HMAC 的配置与轮换不得经过记录正文的路径）。
