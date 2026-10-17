@@ -75,7 +75,7 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh 9   # 同上，用伪 Ollam
 
 - **参数与执行顺序**：每个参数都必须是十进制项号（前导 0 按十进制处理），空串、`9abc` 这类参数以退出码 2 拒绝；校验通过后按项号升序、去重执行。
 - **网络**：脚本开头清掉 `http_proxy`、`https_proxy`、`all_proxy`（含大写形式），所有 curl 都带 `-q`（不读用户的 `~/.curlrc`，其中可能开了 `location` 之类会跟随重定向的选项）和 `--noproxy '*'`，只访问 127.0.0.1。
-- **凭据不上命令行**：本机其他用户能看到进程参数，所以凭据都经文件或标准输入交给子进程：请求头（主体凭据和 `xh` 追加的凭据头）写进 0700 工作目录里的文件，用 `curl -H @文件`；JSON 请求体用 `--data-binary @文件`；自签 JWT 的 HMAC 密钥经标准输入交给 python；收尾替换凭据、`.env` 比对都经标准输入或 `grep -f`；探测项按凭据查找时用 `sgrep`（见第 5 节）。
+- **凭据不上命令行**：本机其他用户能看到进程参数，所以凭据都经文件或标准输入交给子进程：请求头（主体凭据和 `xh` 追加的凭据头）写进 0700 工作目录里的文件，用 `curl -H @文件`；JSON 请求体用 `--data-binary @文件`；自签 JWT 的 HMAC 密钥经标准输入交给 python；收尾替换凭据、`.env` 比对、日志里按凭据查找，都经标准输入或 `grep -f`。
 - **环境变量**：
   - `BASE`、`STACK_DIR`；
   - `OUT`：最终证据目录；
@@ -138,7 +138,7 @@ v0.8.2 中，只开关键词的 KB 也需要 embedding：`IndexingStrategy.Needs
 | KB | KB1；KB2；KBX（属于 X）；KBV（开向量，模型指向不存在的 Ollama 模型）；KBF（仅伪模式：开向量，用伪模型） |
 | 文档 | `D_ALPHA`（alpha.txt，在 KB1）、`D_HTML`（probe.html，在 KB1）、`D_BETA`（beta.txt，在 KB2）、`D_GAMMA`（gamma.txt，在 KBX）；`FP_ALPHA` 是 alpha 的 file_path，`PS`/`PERR` 是解析状态与错误 |
 | API key | `K_*`、`KID_*`：empty（retrieve，白名单为空）、kb1（retrieve，白名单只有 KB1）、noretr（只有 run_evaluations）、chat（chat + retrieve）、full（full_access）、mvs（manage_vector_stores）、rev（retrieve，供撤销） |
-| 凭据清单 | `SECRETS`：收尾时从证据里替换为 `<redacted>` |
+| 凭据清单 | `SECRETS`：收尾时从证据里替换为 `<redacted>`。HMAC 哨兵都带随机后缀，不能由 RID 推出 |
 
 探测项可用的函数：
 - `call` 发请求，`J` 发 JSON 请求。`call` 每次先清空上一条响应；记录里的 `file_path` 只留协议头。
@@ -166,7 +166,7 @@ v0.8.2 中，只开关键词的 KB 也需要 embedding：`IndexingStrategy.Needs
 - `X-API-Key` 头带值；
 - URL 里内嵌的口令（`scheme://user:pw@host`，用户名可以为空，如 `redis://:pw@host`）。口令按 RFC 3986 不含未编码的 `/`，遇到 `/` 就不当作口令，免得路径里带邮箱的 URL 误报；
 - 以上三条带值规则里，只有**整个值**就是占位符（`<redacted…>` 或纯 `*`）才放过，按"字段或头 + 占位符"整段锚定比对，所以 `"api_key":"真值=<redacted>"` 这类只在结尾带占位符的值照样报出；
-- `PROBE-HMAC-` 哨兵（预留给后续探测项的租户 HMAC）、探测口令；
+- `PROBE-HMAC-` 哨兵、探测口令；
 - Cookie / Set-Cookie，包括 JSON 写法 `"set-cookie": …`；
 - 非 `@probe.invalid` 的邮箱、`$HOME`、本机主机名；
 - `$USER`：用户名短于 5 个字符或是常见词时，只按 `/home/<u>`、`/Users/<u>` 的路径形态匹配；
@@ -181,3 +181,57 @@ v0.8.2 中，只开关键词的 KB 也需要 embedding：`IndexingStrategy.Needs
 - 临时工作目录、伪 Ollama 进程由 trap 在退出时清理，出错或被中断时也一样。
 - 只跑部分项时，证据留在打印出的临时目录里，需要时自行删除。
 - 栈里的测试数据会保留。
+
+## 8. 第 1–16 项（probes.sh）
+
+`probes.sh` 提供第 1–8、10–16 项，第 9 项见第 6 节。各项用到的 setup 数据：
+
+| 项 | 依赖的数据 |
+|---|---|
+| 1 | KB1、KB2；key empty/kb1/noretr/full；jwt A |
+| 2 | KB1、T_X、U_A；key chat/full；jwt A；只读 audit_logs |
+| 3 | KB1、KBV、KBX、KBF（伪模式，取消探测）；key empty；app 日志 |
+| 4 | D_ALPHA、D_BETA、PERR；key empty/kb1；jwt A（改写 beta 分块，看 revisions） |
+| 5 | KB1、KB2、D_ALPHA、D_BETA、FP_ALPHA；key empty/kb1/noretr；jwt V/C/X；只读 resource_access_grants |
+| 6 | D_ALPHA、D_HTML；key empty；jwt V |
+| 7 | key empty/mvs；jwt V |
+| 8 | key noretr/empty |
+| 10 | KB1、KB2、KBX、D_GAMMA、T_X；key empty/full；jwt A/V；只读 users |
+| 11 | key rev/chat、KID_rev、U_C、U_V、D_ALPHA；jwt A/C/V。会撤 key、给 C 降权、移除 V |
+| 12 | jwt A、PW、RID（另注册用户 R） |
+| 13 | KB1、D_ALPHA；key empty；jwt A；PW；app 日志；app 容器的 Langfuse 变量（只记是否非空） |
+| 14 | app 容器环境变量（整项未测：需改环境并重启） |
+| 15 | app 容器 |
+| 16 | 无 |
+
+第 11 项会撤 key、降权、移除成员，所以执行顺序统一按项号升序：它必须排在用到这些数据的项之后。
+
+## 9. 正式证据
+
+正式证据必须**全量**运行，用伪 Ollama 模式，并且不指定 `OUT`；只有这样才会写入正式证据目录（见第 3 节）：
+
+```bash
+PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
+```
+
+其他组合（部分项、none 模式）都写临时目录，不会覆盖正式证据。
+
+读结果：
+- 文件名与矩阵一致；第 13 项是 `13-log-body.txt`，其余是 JSON。
+- JSON 字段：
+  - `environment`：前置核对的结果；
+  - `requests`：每个请求的主体、方法、路径、状态码，`fields` 是与结论相关的字段；
+  - `checks`：期望值取自矩阵；
+  - `observations`：只记录事实，不参与判定；
+  - `conclusion`：判定结果，见下。
+- `conclusion.verdict` 只有四种取值：
+  - `与矩阵一致`
+  - `已测部分与矩阵一致；其余未测`
+  - `与矩阵不一致（见 mismatches）`
+  - `未测`
+- `conclusion` 的其他字段：
+  - `untested`：写明未测的部分和原因；
+  - `embedding_note`：结论依赖伪 embedding 时才有；
+  - `pending_writeback`：列出已发现、待回写矩阵的差异。
+
+复现要求：需要第二个人在干净环境中复现（新机器，或删掉旧卷重建）。按第 1 节起栈后，运行上面的全量命令，逐项比对 `conclusion.verdict` 和 `checks[].ok`。run id、各种 ID 和时间不同属于正常。复现结果回帖到 iDoris-ai/WeKnora#5。

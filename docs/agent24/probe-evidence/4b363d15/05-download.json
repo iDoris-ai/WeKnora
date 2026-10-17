@@ -1,0 +1,231 @@
+{
+  "item": 5,
+  "title": "原件出口 download / batch-download / files",
+  "environment": {
+    "tested_dir_note": "受测目录名 4b363d15 = v0.8.2（3e8b0bf）+ 2 个只改 docs/agent24 与 .github/workflows 的提交（9d4e79f、4b363d1），Go 源码与 v0.8.2 相同",
+    "images": [
+      "app=wechatopenai/weknora-app:v0.8.2@sha256:bc8a534799fcb54045100daf4bc5db86270b38ae45c5f761c410c50b4dcd6cdc",
+      "frontend=wechatopenai/weknora-ui:v0.8.2@sha256:83cfd9272e1219b5b5729f89d9c3f8d15a16e1b8cc17cacf638153cc0417290f",
+      "docreader=wechatopenai/weknora-docreader:v0.8.2@sha256:3c36e7e738ba515315523876d8041f9bb02809145a4e3b331e2550e4bff98b7a",
+      "postgres=paradedb/paradedb:v0.22.6-pg17@sha256:58bf87d2a6f1e72f56590b0f0ae1467e82c3f99ca203dde646672c8ac13148b2",
+      "redis=redis:7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
+    ],
+    "digest_check": "RepoDigests 与登记值一致",
+    "schema_migrations": "110 dirty=false",
+    "run_at_utc": "2026-10-17T10:08:27Z",
+    "base": "http://127.0.0.1:8080",
+    "running_services": "app docreader frontend postgres redis",
+    "storage_type": "local",
+    "docker_port": [
+      "app: 8080/tcp -> 127.0.0.1:8080",
+      "frontend: 80/tcp -> 127.0.0.1:18080"
+    ],
+    "embed_mode": "fake-ollama",
+    "embedding_note": "向量为伪造的固定值，只证明分块和读取路径，不代表检索质量",
+    "system_info": {
+      "version": "0.8.2",
+      "edition": "standard",
+      "commit_id": "3e8b0bf",
+      "db_version": "110",
+      "build_time": "2026-09-24 06:44:03 UTC"
+    }
+  },
+  "requests": [
+    {
+      "actor": "key:empty",
+      "method": "GET",
+      "path": "/api/v1/knowledge/19920242-c368-4dab-a21f-2a9abd13a758/download",
+      "status": 200
+    },
+    {
+      "actor": "key:kb1",
+      "method": "GET",
+      "path": "/api/v1/knowledge/eb674705-f1c7-44a1-bd06-902c5897beba/download",
+      "status": 403
+    },
+    {
+      "actor": "jwt:V",
+      "method": "GET",
+      "path": "/api/v1/knowledge/19920242-c368-4dab-a21f-2a9abd13a758/download",
+      "status": 403
+    },
+    {
+      "actor": "jwt:C",
+      "method": "GET",
+      "path": "/api/v1/knowledge/19920242-c368-4dab-a21f-2a9abd13a758/download",
+      "status": 200
+    },
+    {
+      "actor": "key:empty",
+      "method": "POST",
+      "path": "/api/v1/knowledge-bases/a593595c-3651-4193-83c2-73f72359163b/knowledge/batch-download",
+      "status": 200,
+      "fields": {
+        "content_type": "application/zip"
+      }
+    },
+    {
+      "actor": "key:kb1",
+      "method": "POST",
+      "path": "/api/v1/knowledge-bases/e416cf24-11eb-4d2c-bdf8-99326dffc69f/knowledge/batch-download",
+      "status": 403
+    },
+    {
+      "actor": "key:empty",
+      "method": "GET",
+      "path": "/files?file_path=resource://…",
+      "status": 200
+    },
+    {
+      "actor": "key:kb1",
+      "method": "GET",
+      "path": "/files?file_path=resource://…",
+      "status": 403
+    },
+    {
+      "actor": "key:noretr",
+      "method": "GET",
+      "path": "/files?file_path=resource://…",
+      "status": 403
+    },
+    {
+      "actor": "jwt:V",
+      "method": "GET",
+      "path": "/files?file_path=resource://…",
+      "status": 200
+    },
+    {
+      "actor": "jwt:X",
+      "method": "GET",
+      "path": "/files?file_path=resource://…",
+      "status": 403
+    },
+    {
+      "actor": "none",
+      "method": "GET",
+      "path": "/r/probe-not-a-token",
+      "status": 404
+    },
+    {
+      "actor": "none",
+      "method": "GET",
+      "path": "/api/v1/files/presigned?file_path=resource://…",
+      "status": 400
+    }
+  ],
+  "checks": [
+    {
+      "check": "本租户 retrieve key 可下载原件",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "原件内容（哨兵）",
+      "expect": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "check": "download 带 no-store",
+      "expect": ".*no-store.*",
+      "actual": "private, no-store",
+      "ok": true
+    },
+    {
+      "check": "白名单外下载被拒",
+      "expect": "403|404",
+      "actual": "403",
+      "ok": true
+    },
+    {
+      "check": "JWT Viewer 不能下载",
+      "expect": "403",
+      "actual": "403",
+      "ok": true
+    },
+    {
+      "check": "JWT Contributor 可下载",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "batch-download：retrieve key 可取 zip",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "batch-download 白名单外被拒",
+      "expect": "403|404",
+      "actual": "403",
+      "ok": true
+    },
+    {
+      "check": "/files：空白名单 retrieve key 可取原件",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "/files 内容（哨兵）",
+      "expect": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "check": "/files 缓存头 public, max-age=86400",
+      "expect": "public, max-age=86400",
+      "actual": "public, max-age=86400",
+      "ok": true
+    },
+    {
+      "check": "/files：非空白名单 key 被拒",
+      "expect": "401|403",
+      "actual": "403",
+      "ok": true
+    },
+    {
+      "check": "/files：无 retrieve 的 key 被拒",
+      "expect": "401|403",
+      "actual": "403",
+      "ok": true
+    },
+    {
+      "check": "/files：本租户 Viewer 可取原件（门槛低于 download）",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "/files：另一租户被拒",
+      "expect": "403|404",
+      "actual": "403",
+      "ok": true
+    }
+  ],
+  "observations": [
+    {
+      "observation": "file_path 形态（来自 GET /knowledge/:id）",
+      "value": "resource://…"
+    },
+    {
+      "observation": "/r/:token 鉴权前、无效 token",
+      "value": "404"
+    },
+    {
+      "observation": "presigned 无签名",
+      "value": "400"
+    },
+    {
+      "observation": "resource_access_grants 行数（只读 SQL；本栈未设 APP_EXTERNAL_URL，无签发点）",
+      "value": "0"
+    }
+  ],
+  "conclusion": {
+    "verdict": "已测部分与矩阵一致；其余未测",
+    "mismatches": [],
+    "untested": "跨租户共享（组织）未测；/r/:token 与 presigned 能否覆盖原件未测（本栈未设 APP_EXTERNAL_URL，GetFileURL 不签发）"
+  }
+}
