@@ -492,7 +492,7 @@ p13() {
   ck "本次登录行的 password 字段被打码" true \
     "$(grep -F "$me" "$L" | grep -F 'path=/api/v1/auth/login' | grep -q '"password":"\*\*\*"' && echo true || echo false)"
   # 日志文件是空的时，0 次不能证明口令没出现。
-  ck_absent "口令明文不出现在日志" "$([ -s "$L" ] && printf x)" "$(sgrep "$PW" -c "$L")" 0
+  ck_absent "口令明文不出现在日志" "$(grep -F "$me" "$L" | grep -F 'path=/api/v1/auth/login')" "$(sgrep "$PW" -c "$L")" 0
   obs "容器 LOG_LEVEL" "$lv"
   langfuse_state
   obs "Langfuse 配置（只记是否非空）" "$LF_DESC"

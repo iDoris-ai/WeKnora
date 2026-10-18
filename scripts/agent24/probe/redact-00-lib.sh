@@ -2,10 +2,9 @@
 # 公共函数与敏感字段名。只定义 TEXT_TARGETS（默认是目录下全部文件），不跑规则。
 # 占位符只认字面 <redacted>、<redacted:标签>（标签 [a-z0-9_]+）和纯 *。整值才算。
 PH='(<redacted>|<redacted:[a-z0-9_]+>|\*+)'
-FIELD_CORE='password|passwd|pwd|secret|token|credential|refresh|api[_-]?key|session_?id|hmac(_secret)?|signature|invite_code|authorization'
+FIELD_CORE='password|passwd|pwd|secret|token|credential|refresh|api[_-]?key|session[_-]?id|hmac(_secret)?|signature|invite_code|authorization|passphrase'
 FIELD_NAME="[A-Za-z0-9_-]*(${FIELD_CORE})[A-Za-z0-9_-]*|[A-Za-z0-9_-]*key|auth|sig"
-KV_CORE='password|passwd|pwd|secret|token|credential|refresh|api[_-]?key|session_?id|hmac(_secret)?|signature|invite_code|authorization'
-KV_NAME="[A-Za-z0-9_-]*(${KV_CORE})[A-Za-z0-9_-]*|[A-Za-z0-9_-]*key|auth|sig"
+KV_NAME=$FIELD_NAME
 # O1：左边界允许引号。键名后仍须是空白加 [:=]，所以 "key": 配不上。
 KV_LINE='(^|[^A-Za-z0-9_])('"$KV_NAME"')[[:space:]]*[:=]'
 Q_PRE='[?&]('"$KV_NAME"')='
@@ -33,7 +32,11 @@ TEXT_TARGETS=$W/text.targets
 : >"$W/dv.list"
 : >"$W/field.jq.locs"
 
-report() {
+# 驱动按模块核对 REPORT_N。report 计一次；出错分支不 report 时用 rule_ran 补记，使次数与
+# 输入无关。解码视图补扫只在命中时打印（report_print），但每次调用都 rule_ran 记一次。
+rule_ran() { REPORT_N=$(( ${REPORT_N:-0} + 1 )); }
+report() { rule_ran; report_print "$@"; }
+report_print() {
   if [ -n "$2" ]; then
     bad=1
     echo "FAIL $1"
@@ -45,6 +48,7 @@ report() {
 unreadable() {
   local rc=$1
   if [ "$rc" -ne 0 ]; then
+    rule_ran
     bad=1
     echo "FAIL 不可读文件（find 出错 rc=${rc}）"
     return
@@ -58,6 +62,7 @@ unreadable() {
 grep_ok() {
   local name=$1 rc
   shift
+  : >"$W/raw" || { bad=1; echo "FAIL ${name}（临时文件不可写）"; return 1; }
   "$@" >"$W/raw"
   rc=$?
   if [ "$rc" -ge 2 ]; then
@@ -90,7 +95,7 @@ dv_collect() {
       if [ -n "$DV_SKIP_RE" ] && printf '%s\n' "$match" | grep -qE "$DV_SKIP_RE"; then
         continue
       fi
-      if [ -n "$DV_VALUE_PRE" ] && printf '%s\n' "$match" | grep -qiE "^${DV_VALUE_PRE}${PH}${DV_VALUE_SUF}\$"; then
+      if [ -n "$DV_VALUE_PRE" ] && printf '%s\n' "$match" | grep -qE "^${DV_VALUE_PRE}${PH}${DV_VALUE_SUF}\$"; then
         continue
       fi
       path=$(sed -n "${num}p" "$f.map")
@@ -101,13 +106,13 @@ dv_collect() {
 scan() {
   local name=$1 locs
   shift
-  grep_ok "$name" grep -rna "$@" "$DIR" || return 0
+  grep_ok "$name" grep -rna "$@" "$DIR" || { rule_ran; return 0; }
   cut -d: -f1,2 <"$W/raw" | sort -u >"$W/locs"
   : >"$W/dv.locs"
   DV_SKIP_RE=
   DV_VALUE_PRE=
   DV_VALUE_SUF=
-  dv_collect "$name" "$@" || return 0
+  dv_collect "$name" "$@" || { rule_ran; return 0; }
   locs=$(cat "$W/locs" "$W/dv.locs" | sed '/^$/d' | sort -u)
   report "$name" "$locs"
 }
@@ -120,8 +125,8 @@ dv_rule() {
   DV_VALUE_SUF=
   dv_collect "$name" "$@" || true
   locs=$(sed '/^$/d' "$W/dv.locs" | sort -u)
-  [ -n "$locs" ] && report "$name" "$locs"
-  return 0
+  rule_ran
+  [ -z "$locs" ] || report_print "$name" "$locs"
 }
 is_placeholder() {
   printf '%s\n' "$1" | grep -qxE '<redacted>|<redacted:[a-z0-9_]+>|\*+'
@@ -164,12 +169,11 @@ auth_value_bad() {
   return 0
 }
 collect_value() {
-  local name=$1 pre=$2 suf=$3 out=$4 line n
-  if [ ! -s "$W/raw" ]; then
-    return 0
-  fi
+  local name=$1 pre=$2 suf=$3 out=$4 line n rc
+  [ -s "$W/raw" ] || return 0
   sed 's/^[^:]*:[0-9]*://' "$W/raw" >"$W/matches"
-  grep -viEn "^${pre}${PH}${suf}\$" "$W/matches" >"$W/kept" || true
+  grep -vEn "^${pre}${PH}${suf}\$" "$W/matches" >"$W/kept" || rc=$?
+  if [ "${rc:-0}" -ge 2 ]; then bad=1; echo "FAIL ${name}（grep 出错 rc=${rc}）"; return 1; fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     n=${line%%:*}
@@ -178,14 +182,14 @@ collect_value() {
 }
 scan_value() {
   local name=$1 pre=$2 val=$3 suf=${4:-} locs
-  grep_ok "$name" grep -rnaoiE "$pre$val$suf" "$DIR" || return 0
+  grep_ok "$name" grep -rnaoiE "$pre$val$suf" "$DIR" || { rule_ran; return 0; }
   : >"$W/locs"
   collect_value "$name" "$pre" "$suf" "$W/locs"
   : >"$W/dv.locs"
   DV_SKIP_RE=
   DV_VALUE_PRE=$pre
   DV_VALUE_SUF=$suf
-  dv_collect "$name" -iE "$pre$val$suf" || return 0
+  dv_collect "$name" -iE "$pre$val$suf" || { rule_ran; return 0; }
   DV_VALUE_PRE=
   DV_VALUE_SUF=
   locs=$(cat "$W/locs" "$W/dv.locs" | sed '/^$/d' | sort -u)
@@ -201,16 +205,14 @@ dv_value_rule() {
   DV_VALUE_PRE=
   DV_VALUE_SUF=
   locs=$(sed '/^$/d' "$W/dv.locs" | sort -u)
-  [ -n "$locs" ] && report "$name" "$locs"
-  return 0
+  rule_ran
+  [ -z "$locs" ] || report_print "$name" "$locs"
 }
 grep_list() {
   local name=$1 list=$2 f rc
   shift 2
   : >"$W/raw"
-  if [ ! -s "$list" ]; then
-    return 0
-  fi
+  [ -s "$list" ] || return 0
   while IFS= read -r -d '' f; do
     grep -aHan "$@" "$f" >>"$W/raw"
     rc=$?
@@ -255,12 +257,12 @@ parse_quoted() {
     elif [ "$ch" = '\' ]; then
       KV_VAL=${KV_VAL}'\'; i=$((i + 1))
     elif [ "$ch" = "$q" ]; then
-      KV_CONSUMED=${s:0:$((i + 1))}; return 0
+      KV_CONSUMED=${s:0:$((i + 1))}; PARSE_CLOSED=1; return 0
     else
       KV_VAL=${KV_VAL}$ch; i=$((i + 1))
     fi
   done
-  KV_VAL=${s:1}; KV_CONSUMED=$s
+  KV_VAL=${s:1}; KV_CONSUMED=$s; PARSE_CLOSED=0
 }
 truncate_at_quote() {
   local s=$1 i=0 n ch bs=0
@@ -295,3 +297,4 @@ label_in_actor() {
   done
   return 1
 }
+MOD_RULES_00=0; MOD_DONE_00=1
