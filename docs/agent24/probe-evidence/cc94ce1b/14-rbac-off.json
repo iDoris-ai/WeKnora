@@ -1,0 +1,46 @@
+{
+  "item": 14,
+  "title": "RBAC 可配成放行",
+  "environment": {
+    "tested_dir_note": "受测目录名 cc94ce1b = 受测 HEAD cc94ce1b；fork 命名空间之外与 v0.8.3（3e22822）逐字节相同，所以直接用 v0.8.3 官方镜像",
+    "images": [
+      "app=wechatopenai/weknora-app:v0.8.3@sha256:b5f96b13c2f69779af8c7291264cafbda64c208398b019e3a6223c6f3ea82031",
+      "frontend=wechatopenai/weknora-ui:v0.8.3@sha256:94f7992e963b1e2e3b8dc429091f1204fde9c3cd985175b16f40b4142f915fe5",
+      "docreader=wechatopenai/weknora-docreader:v0.8.3@sha256:9af668ac0ac857b9dfe8430d0fe77c0e5ad2636dc2b5285cd5500a13d5a35266",
+      "postgres=paradedb/paradedb:v0.25.11-pg17@sha256:78d65750f0f88a56548526201bcab9910f83b90fe929cdbf979890f3f80b0f95",
+      "redis=redis:7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
+    ],
+    "digest_check": "RepoDigests 与登记值一致",
+    "schema_migrations": "118 dirty=false",
+    "run_at_utc": "2026-10-18T15:51:52Z",
+    "base": "http://127.0.0.1:8080",
+    "running_services": "app docreader frontend postgres redis",
+    "storage_type": "local",
+    "docker_port": [
+      "app: 8080/tcp -> 127.0.0.1:8080",
+      "frontend: 80/tcp -> 127.0.0.1:18080"
+    ],
+    "embed_mode": "fake-ollama",
+    "embedding_note": "向量为伪造的固定值，只证明分块和读取路径，不代表检索质量",
+    "system_info": {
+      "version": "0.8.3",
+      "edition": "standard",
+      "commit_id": "3e22822",
+      "db_version": "118",
+      "build_time": "2026-10-14 07:53:47 UTC"
+    }
+  },
+  "requests": [],
+  "checks": [],
+  "observations": [
+    {
+      "observation": "app 容器 WEKNORA_TENANT_ENABLE_RBAC",
+      "value": "<空，默认开启>"
+    }
+  ],
+  "conclusion": {
+    "verdict": "未测",
+    "mismatches": [],
+    "untested": "整项未测：需改 app 环境变量 WEKNORA_TENANT_ENABLE_RBAC=false 并重启，本次不改环境"
+  }
+}
