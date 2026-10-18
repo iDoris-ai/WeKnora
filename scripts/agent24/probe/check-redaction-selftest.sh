@@ -8,7 +8,7 @@
 # 用法：scripts/agent24/probe/check-redaction-selftest.sh
 set -uo pipefail
 # 与驱动的 REQUIRED_MODULES 同样做法：叠放的中间片按本片已有的用例文件改这一行。
-REQUIRED_SELFTESTS="10"
+REQUIRED_SELFTESTS="10 30"
 HERE=$(cd "$(dirname "$0")" && pwd)
 CHECK=$HERE/check-redaction.sh
 BASE=$(mktemp -d "${TMPDIR:-/tmp}/weknora-redaction-selftest.XXXXXX") || exit 2
