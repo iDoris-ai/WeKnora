@@ -21,6 +21,8 @@ BASELINE=$ROOT/docs/agent24/UPSTREAM-BASELINE.json
 command -v jq >/dev/null || { echo "前置核对失败：缺少 jq" >&2; exit 3; }
 REL_TAG=$(jq -er '.current_baseline.release.tag' "$BASELINE" 2>/dev/null) \
   || { echo "前置核对失败：读不到 ${BASELINE} 的 .current_baseline.release.tag" >&2; exit 3; }
+[[ $REL_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || { echo "前置核对失败：登记的 release.tag 无效（${REL_TAG}），应形如 v0.8.3" >&2; exit 3; }
 REL_COMMIT=$(jq -er '.current_baseline.release.commit' "$BASELINE" 2>/dev/null) \
   || { echo "前置核对失败：读不到 ${BASELINE} 的 .current_baseline.release.commit" >&2; exit 3; }
 TESTED_SHA=$(git -C "$ROOT" rev-parse --short=8 HEAD) || { echo "前置核对失败：读不到 HEAD" >&2; exit 3; }
@@ -270,8 +272,9 @@ precheck() {
     digests+="$s=$img@$exp;"
   done
 
-  WANT_DB=$(jq -r '.current_baseline.test_stack_constraints[]
-    | capture("v[0-9]+\\.[0-9]+\\.[0-9]+ 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
+  # 只认"<当前登记 tag> 为 N"，旧版本残留的句子不会被读出。
+  WANT_DB=$(jq -r --arg t "$REL_TAG" '.current_baseline.test_stack_constraints[]
+    | capture(($t | gsub("\\."; "\\.")) + " 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
   WANT_COMMIT=$(jq -r '.current_baseline.release.commit // empty' "$BASELINE")
   [ -n "$WANT_DB" ] && [ -n "$WANT_COMMIT" ] || fail3 "登记里缺 schema_migrations 版本或 release.commit"
   schema=$(sql "select version||' dirty='||dirty from schema_migrations") || fail3 "无法连接数据库（psql 失败）"
@@ -300,10 +303,13 @@ precheck() {
 check_system_info() {
   call jwt:A GET /api/v1/system/info
   [ "$ST" = 200 ] || fail3 "/system/info 返回 $ST"
-  local c d
+  local c d v
   c=$(bj .data.commit_id)
   d=$(bj .data.db_version)
+  v=$(bj .data.version)
   [ ${#c} -ge 7 ] && [[ $WANT_COMMIT == "$c"* ]] || fail3 "/system/info commit_id=$c 与登记 $WANT_COMMIT 不符"
+  # /system/info 的 version 不带 v 前缀（如 0.8.3），登记的 tag 带（如 v0.8.3）。
+  [ "v$v" = "$REL_TAG" ] || fail3 "/system/info version=$v 与登记 $REL_TAG 不符"
   [ "$d" = "$WANT_DB" ] || fail3 "/system/info db_version=${d}，应为 $WANT_DB"
   ENVJ=$(jq -c --argjson s "$(jq -c '.data | {version, edition, commit_id, db_version, build_time}' "$W/body")" \
     '.system_info = $s' <<<"$ENVJ")

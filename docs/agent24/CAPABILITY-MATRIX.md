@@ -132,7 +132,7 @@
 - **证据**：`docs/agent24/probe-evidence/4b363d15/07-system-info.json`。与本表一致：retrieve key 403，manage_vector_stores key 和 JWT Viewer 200；字段齐全，没有协议版本字段。
 
 ### 8. /system/capabilities
-- **现状**：任意有效 API key 和 Viewer 都能读（`routes_auth_tenant.go:254`）。13 个键（`internal/handler/deployment_capabilities.go:13-27`），是启动时的快照，来源包括 handler 是否注入（`internal/router/deployment_capabilities.go:8-29`，在 `internal/router/router.go:309` 绑定）、版本（Lite 下 organizations，`internal/handler/deployment_capabilities.go:70-74`）和平台（sandbox.host，`internal/handler/deployment_capabilities.go:85-93`）；只有 sandbox.docker 是实时值（`internal/handler/deployment_capabilities.go:138-154`）。
+- **现状**：任意有效 API key 和 Viewer 都能读（`routes_auth_tenant.go:254`）。14 个键（v0.8.3 新增 `settings.sandbox.remote`；v0.8.2 为 13 个，`internal/handler/deployment_capabilities.go:13-27` 的行号待按 v0.8.3 重核），是启动时的快照，来源包括 handler 是否注入（`internal/router/deployment_capabilities.go:8-29`，在 `internal/router/router.go:309` 绑定）、版本（Lite 下 organizations，`internal/handler/deployment_capabilities.go:70-74`）和平台（sandbox.host，`internal/handler/deployment_capabilities.go:85-93`）；只有 sandbox.docker 是实时值（`internal/handler/deployment_capabilities.go:138-154`）。
 - **缺口**：capabilities 表示“路由已注册”，不表示依赖健康或业务就绪。已有的 `integrations.im/embed/api/mcpserver`（`internal/handler/deployment_capabilities.go:16-19`）是上游自己的集成开关，没有 Agent24 集成、knowledge 协议版本这类扩展字段；集成模式下也不会如实反映已禁用的路由。
 - **任务**：KB-C1-01b-a、KB-C1-01（如实声明）、KB-CT-02a §9。
 - **证据**：`docs/agent24/probe-evidence/4b363d15/08-system-capabilities.json`。已测部分一致：无 retrieve 的 key 也能读，共 13 个键。“快照而非健康”仍是静态结论，没做依赖故障注入。

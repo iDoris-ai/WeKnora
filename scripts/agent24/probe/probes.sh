@@ -37,7 +37,7 @@ p1() {
 p2() {
   local h now tv row x c
   J jwt:A PUT "/api/v1/tenants/$TA/api-principal-config" '{"mode":"direct"}'
-  ck "源码取值是 direct_header，矩阵写作 direct（待回写）：发 direct 返回 400" 400 "$ST"
+  ck "发 direct 返回 400（源码取值是 direct_header，矩阵已按此改正）" 400 "$ST"
   f error .error.message
   J jwt:A PUT "/api/v1/tenants/$TA/api-principal-config" '{"mode":"direct_header"}'
   ck "切到 direct_header" 200 "$ST"
@@ -124,8 +124,7 @@ p2() {
   J jwt:A PUT "/api/v1/tenants/$TA/api-principal-config" '{"mode":"tenant"}'
   local u2="记忆、MCP OAuth、沙箱凭据归属未测（需模型或沙箱）；会话归属已测；"
   u2="${u2}审计 actor 取\"最早注册\"还是\"Owner\"未区分（本栈里 A 两者兼是，需另建先注册的非 Owner 用户才能分开）"
-  emit 2 02-signed-token.json "外部主体 signed_token / direct_header" "$u2" "" \
-    "principal mode 的源码取值是 direct_header，矩阵第 2、11 项写作 direct"
+  emit 2 02-signed-token.json "外部主体 signed_token / direct_header" "$u2"
 }
 
 p3() {
@@ -310,7 +309,8 @@ p8() {
   call key:noretr GET /api/v1/system/capabilities
   ck "无 retrieve 的 key 也可读 capabilities" 200 "$ST"
   f keys '.data.capabilities | keys'
-  ck "capabilities 共 13 个键" 13 "$(bj '.data.capabilities | length')"
+  ck "capabilities 共 14 个键" 14 "$(bj '.data.capabilities | length')"
+  ck "含 v0.8.3 新增的 settings.sandbox.remote" true "$(bj '.data.capabilities | has("settings.sandbox.remote")')"
   f unsupported '[.data.capabilities | to_entries[] | select(.value.supported | not) | {(.key): .value.reason}]'
   call key:empty GET /api/v1/system/capabilities
   ck "retrieve key 可读" 200 "$ST"
