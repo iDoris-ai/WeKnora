@@ -9,7 +9,16 @@
 | `run.sh` | 入口：解析项号，统一按升序排好；source `lib.sh`、`probe-09-health.sh`，`probes.sh` 存在时也一并 source |
 | `lib.sh` | 框架：前置核对、setup、请求记录、emit、伪 Ollama、清理与 trap、凭据替换、证据落盘 |
 | `probe-09-health.sh` | 示例探测项（矩阵第 9 项 /health） |
-| `check-redaction.sh` | 脱敏自检 |
+| `check-redaction.sh` | 脱敏自检驱动：参数、临时目录，按 `REQUIRED_MODULES` 检查并 source `redact-NN-*.sh` |
+| `redact-00-lib.sh` | 公共函数与敏感字段名；定义 `TEXT_TARGETS`，不跑规则 |
+| `redact-10-basic.sh` | sk-、JWT、Bearer、Cookie、邮箱、`$HOME`/`$USER`、`.env` 等 |
+| `redact-20-json.sh` | jq 分类、敏感键、解码视图、JSON 原文的规范化副本 |
+| `redact-30-text.sh` | 字段、数组、KV、query、凭据头 |
+| `check-redaction-selftest.sh` | 脱敏自测框架（按 `REQUIRED_SELFTESTS` 逐个在子 shell 里 source `selftest-NN-*.sh`） |
+| `selftest-10-basic.sh` | 基础规则自测 |
+| `selftest-20-json.sh` | jq 路径自测 |
+| `selftest-30-text.sh` | 文本规则自测（不依赖 jq 模块） |
+| `REDACTION.md` | 脱敏规则说明 |
 
 ## 1. 起栈：按受测栈约束
 
@@ -140,12 +149,12 @@ v0.8.2 中，只开关键词的 KB 也需要 embedding：`IndexingStrategy.Needs
 | 凭据清单 | `SECRETS`：收尾时从证据里替换为 `<redacted>`。HMAC 哨兵都带随机后缀，不能由 RID 推出 |
 
 探测项可用的函数：
-- `call` 发请求，`J` 发 JSON 请求。`call` 每次先清空上一条响应；记录里的 `file_path` 只留协议头。
+- `call` 发请求，`J` 发 JSON 请求。`call` 每次先清空上一条响应；记录里的 `file_path` 只留协议头。遇 HTTP 000（传输失败）默认中止整次运行；`ALLOW_000=1` 只放行紧接着的这一次 `call`（含 `J` 再调的 `call`），返回后恢复。预期连不上的探测不要走 `call`，否则整次运行会停。
 - `bj`、`hd`、`has` 读响应体、响应头，判断是否含某串（`has` 按固定字符串匹配）；
 - `f`、`fv` 把字段附到上一条请求记录。`f` 的 jq 表达式输出多个值时合成数组，没有输出或出错时记 null；附加失败直接退出，不会丢掉已有记录；
-- `xh 头名 值` 给紧接着的下一次 `call` 追加一个凭据头（如 `X-External-User-Token`），同样经文件交给 curl。凭据头不要写成 `call` 的 `-H` 参数，那样会出现在 curl 的进程参数里；
+- `xh 头名 值` 给紧接着的下一次 `call` 追加一个凭据头（如 `X-External-User-Token`），同样经文件交给 curl，值同时记入 `SECRETS`。凭据头不要写成 `call` 的 `-H` 参数，那样会出现在 curl 的进程参数里；
 - `sgrep 串 [grep 选项…] [文件…]` 按固定字符串查找，查找串经 `-f` 读入、不上命令行（查凭据时用它）；
-- `ck` 记录对照矩阵的检查，`obs` 记录观察；
+- `ck` 记录对照矩阵的检查；`ck_absent` 同样记录，但输入为空时记 ok=false、actual 为“输入为空，无法判定”；`obs` 记录观察；
 - `emit` 输出证据，可附伪 embedding 说明和待回写差异；
 - `take`、`want` 在 setup 里取值并校验；
 - `sql` 只读查询，`applog` 读 app 日志。
@@ -158,23 +167,13 @@ v0.8.2 中，只开关键词的 KB 也需要 embedding：`IndexingStrategy.Needs
 
 ## 7. 脱敏与清理
 
-`check-redaction.sh [--skip-env] [目录]` 用 grep 扫描证据，参数顺序不限。用 `-a` 和 C locale，二进制文件也会扫描。规则：
-- `sk-` key（要求左边界：行首或前一个字符不是字母、数字、`_`、`-`，所以 `disk-…`、`task-…` 不算）、`enc:v1` 密文、`eyJ` JWT；
-- Bearer（不区分大小写），`Authorization:` 头（Basic、Bearer、Token、ApiKey、Digest），包括 Go 打印 header map 的写法 `Authorization:[Basic …]`；
-- 敏感字段带真实字符串值：字段名含 password、secret、token、credential、refresh、api key（`api_key`、`api-key`、`apiKey`），或以 key 结尾（`key`、`access_key`、`private_key`、`secretKey` 等），允许前后缀、驼峰和大小写不同（如 `signed_token`、`api_key_value`、`hmacSecret`、`Password`）。同时匹配普通和任意层转义的引号，值可以是字符串，也可以是数组的首个字符串元素；值长度 ≥6 才报；布尔值和数字不会命中；
-- `X-API-Key` 头带值；
-- URL 里内嵌的口令（`scheme://user:pw@host`，用户名可以为空，如 `redis://:pw@host`）。口令按 RFC 3986 不含未编码的 `/`，遇到 `/` 就不当作口令，免得路径里带邮箱的 URL 误报；
-- 以上三条带值规则里，只有**整个值**就是占位符（`<redacted…>` 或纯 `*`）才放过，按"字段或头 + 占位符"整段锚定比对，所以 `"api_key":"真值=<redacted>"` 这类只在结尾带占位符的值照样报出；
-- `PROBE-HMAC-` 哨兵、探测口令；
-- Cookie / Set-Cookie，包括 JSON 写法 `"set-cookie": …`；
-- 非 `@probe.invalid` 的邮箱、`$HOME`、本机主机名；
-- `$USER`：用户名短于 5 个字符或是常见词时，只按 `/home/<u>`、`/Users/<u>` 的路径形态匹配；
-- `.env` 中密钥类变量的值。解析时处理 export 前缀、引号和行尾注释。
+`check-redaction.sh [--skip-env] [目录]` 扫描证据，参数顺序不限。它按 `REQUIRED_MODULES` 加载同目录的 `redact-NN-*.sh`（公共函数、与解析无关的规则、jq 路径、文本规则）。每个编号必须恰好有一个文件，缺一个就失败。不认识的名字不加载。模块 source 失败、没有跑到末尾、在模块里 `exit`，或本模块 `report` 的实际次数与它声明的 `MOD_RULES_NN` 不等，都失败。`REQUIRED_MODULES` 必须包含 `00` 和 `10`，目录里有而列表里没有的 `redact-NN-*.sh` 也算失败。叠放的中间片改 `REQUIRED_MODULES` 这一行，只留下本片已有的模块号。命中即失败，只打印规则名和位置，不打印值。真正把 token 挡在证据外的是 finalize 的凭据剔除和这次自检，不是日志摘录的长度（第 13 项只摘录哨兵前后各不超过 100 个字符）。规则、占位符和已知局限见 [REDACTION.md](REDACTION.md)。
 
-几条规则：
-- 读不到 `.env` 时失败，只有显式传 `--skip-env` 才跳过。
-- 不带参数且默认证据目录不存在时，打印说明后以 0 退出，并写明"没有检查任何文件"。
-- 命中时只打印文件名、行号和规则名，不打印命中的值。
+规则自测不依赖证据目录，运行时在临时目录里逐例生成夹具：
+
+```bash
+scripts/agent24/probe/check-redaction-selftest.sh
+```
 
 清理：
 - 临时工作目录、伪 Ollama 进程由 trap 在退出时清理，出错或被中断时也一样。
@@ -234,3 +233,10 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
   - `pending_writeback`：列出已发现、待回写矩阵的差异。
 
 复现要求：需要第二个人在干净环境中复现（新机器，或删掉旧卷重建）。按第 1 节起栈后，运行上面的全量命令，逐项比对 `conclusion.verdict` 和 `checks[].ok`。run id、各种 ID 和时间不同属于正常。复现结果回帖到 iDoris-ai/WeKnora#5。
+
+## 10. 证据里没写全的未测范围
+
+这一节是对已提交证据的补充，证据文件本身不改。
+
+- 第 3 项（hybrid-search）另有未测范围：引擎解析阶段的 12s 内部上限、跨多个 store group 时每组的 30s 内部上限，以及 `/knowledge-search`。
+- 第 13 项（日志是否记录正文）另有未测范围：访问日志的 10KB 截断、local-browser 与 SSE 不记录、`LOG_LEVEL=warn` / `LOG_LEVEL=error` 的分级。
