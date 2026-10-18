@@ -31,7 +31,29 @@ if ! git -C "$ROOT" cat-file -e "${REL_COMMIT}^{commit}" 2>/dev/null; then
 fi
 if ! git -C "$ROOT" diff --quiet "$REL_COMMIT" HEAD -- . ':(exclude)docs/agent24' ':(exclude)scripts/agent24' \
   ':(exclude).github/scripts/agent24-*' ':(exclude).github/workflows/agent24-*'; then
-  echo "前置核对失败：fork 命名空间之外与登记的 release ${REL_TAG} 不同（有产品补丁），tested_dir_note 不成立，先更新登记" >&2
+  # 区分已登记的产品补丁与未登记的差异；两种都拒绝：官方镜像不含任何 fork 补丁，tested_dir_note 不成立。
+  DIFF_PATHS=$(git -C "$ROOT" diff --name-only --no-renames "$REL_COMMIT" HEAD -- . ':(exclude)docs/agent24' \
+    ':(exclude)scripts/agent24' ':(exclude).github/scripts/agent24-*' ':(exclude).github/workflows/agent24-*') \
+    || { echo "前置核对失败：读不到 fork 与 release ${REL_TAG} 的差异路径" >&2; exit 3; }
+  # product_patches 是数组时取全部 .paths[]；是 "none" 或读不到时当作空集。
+  REG_PATHS=$(jq -r '.current_baseline.product.product_patches
+    | if type == "array" then .[] | .paths[]? else empty end' "$BASELINE" 2>/dev/null) || REG_PATHS=""
+  REG_IDS=$(jq -r '.current_baseline.product.product_patches
+    | if type == "array" then [.[] | .id] | join(", ") else "" end' "$BASELINE" 2>/dev/null) || REG_IDS=""
+  UNREG_LIST=""
+  UNREG_N=0
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    if [ -n "$REG_PATHS" ] && printf '%s\n' "$REG_PATHS" | grep -Fxq -- "$p"; then continue; fi
+    UNREG_N=$((UNREG_N + 1))
+    if [ "$UNREG_N" -le 10 ]; then UNREG_LIST=${UNREG_LIST:+$UNREG_LIST, }$p; fi
+  done <<<"$DIFF_PATHS"
+  if [ "$UNREG_N" -eq 0 ]; then
+    echo "前置核对失败：fork 有已登记的产品补丁（${REG_IDS}，见 docs/agent24/PATCH-LEDGER.md），官方 ${REL_TAG} 镜像不含这些补丁，不能用官方镜像出正式证据。需要本地构建镜像的探测模式（尚未实现，见 iDoris-ai/WeKnora#51）。不要为了通过核对去改登记。" >&2
+  else
+    if [ "$UNREG_N" -gt 10 ]; then UNREG_LIST="$UNREG_LIST 等 ${UNREG_N} 个"; fi
+    echo "前置核对失败：fork 命名空间之外有未登记的改动，与登记的 release ${REL_TAG} 不同：${UNREG_LIST}。产品补丁要先登记到 docs/agent24/PATCH-LEDGER.md 和 UPSTREAM-BASELINE.json 的 product_patches。" >&2
+  fi
   exit 3
 fi
 FORMAL_OUT=$ROOT/docs/agent24/probe-evidence/$TESTED_SHA

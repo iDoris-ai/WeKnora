@@ -261,16 +261,40 @@ fi
 rm -f "$STACK_DIR/.env"
 
 # lib.sh：空输入无法判定；xh 把长度够的值放进 SECRETS，finalize 再换成占位符。OUT 只用临时目录。
+# 前置核对不是这一例要测的：在临时 git 仓库里 source lib.sh 的副本，登记的 release 就是该仓库的首个提交，
+# 命名空间外没有差异，核对必然通过；与真实仓库 HEAD 是否带产品补丁无关。
 n=$((n + 1))
 d=$BASE/c$n
-mkdir -p "$d/out" "$d/stack"
+mkdir -p "$d/out" "$d/stack" "$d/repo/scripts/agent24/probe" "$d/repo/docs/agent24"
 printf '%s\n' 'MY_API_KEY=not-in-the-evidence-xyz' >"$d/stack/.env"
 sec=Zq8vN3pLx7Wm
+librc=0
 (
+  set -e
+  r=$d/repo
+  g() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$r" -c user.name=selftest \
+    -c user.email=selftest@invalid -c commit.gpgsign=false "$@"; }
+  cp -R "$HERE"/. "$r/scripts/agent24/probe/"
+  cp "$HERE/../../../docs/agent24/UPSTREAM-BASELINE.json" "$r/docs/agent24/UPSTREAM-BASELINE.json"
+  g init -q
+  g add -A
+  g commit -q -m base
+  c=$(g rev-parse HEAD)
+  printf '{"current_baseline":{"release":{"tag":"v0.0.0","commit":"%s"},"product":{"product_patches":"none"}}}\n' \
+    "$c" >"$r/docs/agent24/UPSTREAM-BASELINE.json"
+  g add -A
+  g commit -q -m baseline
+) >"$d/repo.log" 2>&1 || librc=$?
+if [ "$librc" -ne 0 ]; then
+  printf '不符 lib 空输入与凭据替换：建临时仓库失败 rc=%s\n' "$librc"
+  sed 's/^/  /' "$d/repo.log"
+fi
+(
+  [ "$librc" -eq 0 ] || exit 1
   OUT=$d/out STACK_DIR=$d/stack
   export OUT STACK_DIR
   # shellcheck disable=SC1091
-  source "$HERE/lib.sh"
+  source "$d/repo/scripts/agent24/probe/lib.sh"
   ck_absent "空输入" "" x 0
   grep -F -q '输入为空，无法判定' "$CHK" || exit 1
   grep -F -q '"ok":false' "$CHK" || exit 1
