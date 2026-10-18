@@ -13,7 +13,7 @@
 
 ## 1. 起栈：按受测栈约束
 
-约束以 `docs/agent24/UPSTREAM-BASELINE.json` 的 `current_baseline.test_stack_constraints` 为准，镜像 digest 以同一节的 `v0_8_2_image_digests` 为准。
+约束以 `docs/agent24/UPSTREAM-BASELINE.json` 的 `current_baseline.test_stack_constraints` 为准，镜像 digest 以同一节的 `image_digests` 为准。
 
 默认的 5 个服务只用到 `docker-compose.yml`、`.env.example` 和 `config/`（app 挂载了 `config/config.yaml`）。从 WeKnora 仓库（上游或本 fork 均可）取出 v0.8.2 的这几个文件：
 

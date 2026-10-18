@@ -21,4 +21,12 @@
 | A24-DESIGN-01 | 唯一主对话与知识服务职责、KB-C0–C4 验收设计 | `docs/agent24/ADR-001-SINGLE-CONVERSATION.md`、总体方案 | 用户已确认产品方向，工程接口待评审；上游升级检查无第二聊天、授权与原知识能力回归；本次仅文档 |
 | A24-DESIGN-02 | 默认一站式知识库，隐藏普通用户的技术配置成本 | `docs/agent24/TODO-B-ONE-STOP-KNOWLEDGE.md` | 对照 #1 的初始化/隔离/费用验收；先固定配置，调优后续；本次仅文档 |
 
-当前没有 RAG、解析、数据库、Agent 或 UI 核心修改，产品代码与 v0.8.2 逐字节相同（截至 2026-10-16）。新增 feature 必须补登记：目的、影响路径、测试、能否回馈上游，以及下一次升级如何保留/调整。
+当前没有 RAG、解析、数据库、Agent 或 UI 核心修改，产品代码与 v0.8.3 逐字节相同（截至 2026-10-18；v0.8.2 时期见 2026-10-16 的登记）。新增 feature 必须补登记：目的、影响路径、测试、能否回馈上游，以及下一次升级如何保留/调整。
+
+## 2026-10-18 基线升级到 v0.8.3
+
+1. **吸收方式与结果**：任务 iDoris-ai/WeKnora#43（KB-C0-03）。同步 PR iDoris-ai/WeKnora#44 以普通 merge 吸收上游正式版 `v0.8.3`（`3e22822c1d2397be730c458c7539d0eb8c113a24`），合并提交 `167d24c24b4d8497cc6b31db02507ae52f0aa116`。产品代码等同 v0.8.3（命名空间外与 `3e22822` 逐字节相同），产品补丁截至 2026-10-18 仍为 none。合并前核对：本地合并结果上 Go（vet/test/desktop/build，以及 `-tags anydoc` 的 docparser vet/test 与 server build）与前端（test/type-check/build）全部通过；ParadeDB `v0.25.11` 加迁移 111–118 的备份恢复演练通过（升级后迁移 118 非 dirty；备份在 `v0.22.6` 独立卷恢复，计数一致）。`schema_migrations` 版本从 110（v0.8.2）变为 118。默认 5 服务镜像 digest 已登记到 `UPSTREAM-BASELINE.json` 的 `current_baseline.image_digests`（as_of 2026-10-18）。
+2. **LICENSE**：上游把 `LICENSE` 缩到约 50 行，并删掉了指向 `THIRD_PARTY_NOTICES.md` 的那句。fork 接受上游原样，不改（改了就成为要长期重放的产品补丁）。自建 Lite 制品的发布清单须附 `THIRD_PARTY_NOTICES.md` 与 `licenses/`，并按实际构建依赖核全声明。
+3. **anydoc 例外**：anydoc 的 `cargo audit` 因 zip 8.6.0（RUSTSEC-2026-0367/0368/0369）失败。该问题在 v0.8.2 已存在；anydoc 0.2.4 只在内存里用 `ZipArchive::new(Cursor)` 加 `by_name` 读取，不 extract、不设权限。David 同意 #44 按例外合并。跟进 iDoris-ai/WeKnora#45（首选 cherry-pick 上游 `345855b`，把 zip 升到 9）；#45 若落地，会成为第一个产品补丁，届时在上表登记。
+4. **修正评估文档的前提**：`BASELINE-EVAL-v0.8.3.md`「若升级的必做清单」第 3 条以 KB-CT-02b 为契约回归的前提，这一前提不成立。KB-CT-02b（Agent24#1012）只交付 TS/Rust 对手写 JSON 夹具的校验，不对 WeKnora 服务端运行，证明不了上游行为。所以升级后要在 v0.8.3 受测栈上全量重跑 PR② 的 16 项探测（随后续 PR 提交）。
+5. **后续**：在 v0.8.3 受测栈上重跑探测并提交证据；能力矩阵换 SHA 重核（28 处内容变化的引用）。

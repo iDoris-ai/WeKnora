@@ -247,7 +247,7 @@ precheck() {
     s=${pair%%:*}
     img=$(docker inspect -f '{{.Config.Image}}' "$(cid "$s")")
     id=$(docker inspect -f '{{.Image}}' "$(cid "$s")")   # 按容器实际使用的镜像 ID 查，避免标签已被改指
-    exp=$(jq -r --arg k "${pair#*:}" '.current_baseline.v0_8_2_image_digests[$k]
+    exp=$(jq -r --arg k "${pair#*:}" '.current_baseline.image_digests[$k]
       | if type == "object" then .digest else . end // empty' "$BASELINE")
     [[ $exp == sha256:* ]] || fail3 "UPSTREAM-BASELINE.json 的 current_baseline 里没有 ${pair#*:} 的 digest"
     dg=$(docker image inspect -f '{{json .RepoDigests}}' "$id")
@@ -256,7 +256,7 @@ precheck() {
   done
 
   WANT_DB=$(jq -r '.current_baseline.test_stack_constraints[]
-    | capture("v0\\.8\\.2 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
+    | capture("v[0-9]+\\.[0-9]+\\.[0-9]+ 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
   WANT_COMMIT=$(jq -r '.current_baseline.release.commit // empty' "$BASELINE")
   [ -n "$WANT_DB" ] && [ -n "$WANT_COMMIT" ] || fail3 "登记里缺 schema_migrations 版本或 release.commit"
   schema=$(sql "select version||' dirty='||dirty from schema_migrations") || fail3 "无法连接数据库（psql 失败）"
