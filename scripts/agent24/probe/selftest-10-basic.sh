@@ -261,16 +261,40 @@ fi
 rm -f "$STACK_DIR/.env"
 
 # lib.sh：空输入无法判定；xh 把长度够的值放进 SECRETS，finalize 再换成占位符。OUT 只用临时目录。
+# 前置核对不是这一例要测的：在临时 git 仓库里 source lib.sh 的副本，登记的 release 就是该仓库的首个提交，
+# 命名空间外没有差异，核对必然通过；与真实仓库 HEAD 是否带产品补丁无关。
 n=$((n + 1))
 d=$BASE/c$n
-mkdir -p "$d/out" "$d/stack"
+mkdir -p "$d/out" "$d/stack" "$d/repo/scripts/agent24/probe" "$d/repo/docs/agent24"
 printf '%s\n' 'MY_API_KEY=not-in-the-evidence-xyz' >"$d/stack/.env"
 sec=Zq8vN3pLx7Wm
+librc=0
 (
+  set -e
+  r=$d/repo
+  g() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$r" -c user.name=selftest \
+    -c user.email=selftest@invalid -c commit.gpgsign=false "$@"; }
+  cp -R "$HERE"/. "$r/scripts/agent24/probe/"
+  cp "$HERE/../../../docs/agent24/UPSTREAM-BASELINE.json" "$r/docs/agent24/UPSTREAM-BASELINE.json"
+  g init -q
+  g add -A
+  g commit -q -m base
+  c=$(g rev-parse HEAD)
+  printf '{"current_baseline":{"release":{"tag":"v0.0.0","commit":"%s"},"product":{"product_patches":"none"}}}\n' \
+    "$c" >"$r/docs/agent24/UPSTREAM-BASELINE.json"
+  g add -A
+  g commit -q -m baseline
+) >"$d/repo.log" 2>&1 || librc=$?
+if [ "$librc" -ne 0 ]; then
+  printf '不符 lib 空输入与凭据替换：建临时仓库失败 rc=%s\n' "$librc"
+  sed 's/^/  /' "$d/repo.log"
+fi
+(
+  [ "$librc" -eq 0 ] || exit 1
   OUT=$d/out STACK_DIR=$d/stack
   export OUT STACK_DIR
   # shellcheck disable=SC1091
-  source "$HERE/lib.sh"
+  source "$d/repo/scripts/agent24/probe/lib.sh"
   ck_absent "空输入" "" x 0
   grep -F -q '输入为空，无法判定' "$CHK" || exit 1
   grep -F -q '"ok":false' "$CHK" || exit 1
@@ -286,5 +310,77 @@ if [ "$rc" -ne 0 ] || ! grep -F -q '<redacted>' "$d/out/note.txt" \
   sed 's/^/  /' "$d/log"
 fi
 
-SELFTEST_MIN_10=56
+# lib.sh 前置核对：命名空间外与登记 release 不同时 exit 3，区分已登记补丁与未登记差异。
+# 临时仓库首个提交含 probe 副本、登记文件和命名空间外文件（内容 a）；登记 release 为该提交，
+# 再把该文件改成 b 提交。参数：用例目录、命名空间外文件、product_patches 的 JSON 值。
+mk_patch_repo() {
+  (
+    set -e
+    r=$1/repo
+    g() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$r" -c user.name=selftest \
+      -c user.email=selftest@invalid -c commit.gpgsign=false "$@"; }
+    mkdir -p "$r/scripts/agent24/probe" "$r/docs/agent24" "$(dirname "$r/$2")"
+    cp -R "$HERE"/. "$r/scripts/agent24/probe/"
+    cp "$HERE/../../../docs/agent24/UPSTREAM-BASELINE.json" "$r/docs/agent24/UPSTREAM-BASELINE.json"
+    printf 'a\n' >"$r/$2"
+    g init -q
+    g add -A
+    g commit -q -m base
+    c=$(g rev-parse HEAD)
+    printf '{"current_baseline":{"release":{"tag":"v0.0.0","commit":"%s"},"product":{"product_patches":%s}}}\n' \
+      "$c" "$3" >"$r/docs/agent24/UPSTREAM-BASELINE.json"
+    printf 'b\n' >"$r/$2"
+    g add -A
+    g commit -q -m patch
+  )
+}
+# 在子 shell 里 source 临时仓库的 lib.sh；前置核对失败会先 exit 3，走不到需要 docker 的地方。
+src_patch_repo() {
+  (
+    OUT=$1/out STACK_DIR=$1/stack
+    export OUT STACK_DIR
+    # shellcheck disable=SC1091
+    source "$1/repo/scripts/agent24/probe/lib.sh"
+  )
+}
+
+n=$((n + 1))
+d=$BASE/c$n
+mkdir -p "$d/out" "$d/stack"
+rc=0
+mk_patch_repo "$d" third_party/x.txt '[{"id":"T-PATCH-1","paths":["third_party/x.txt"]}]' >"$d/repo.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  rc=0
+  src_patch_repo "$d" >"$d/log" 2>"$d/err" || rc=$?
+else
+  cp "$d/repo.log" "$d/err"
+  rc=-1
+fi
+if [ "$rc" -ne 3 ] || ! grep -F -q 'fork 有已登记的产品补丁' "$d/err" \
+  || ! grep -F -q 'T-PATCH-1' "$d/err" || grep -F -q '未登记' "$d/err"; then
+  bad=1
+  printf '不符 前置核对：已登记补丁仍拒绝：期望 rc=3 且提示已登记补丁 T-PATCH-1、不含未登记，实际 rc=%s\n' "$rc"
+  sed 's/^/  /' "$d/err"
+fi
+
+n=$((n + 1))
+d=$BASE/c$n
+mkdir -p "$d/out" "$d/stack"
+rc=0
+mk_patch_repo "$d" third_party/y.txt '"none"' >"$d/repo.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  rc=0
+  src_patch_repo "$d" >"$d/log" 2>"$d/err" || rc=$?
+else
+  cp "$d/repo.log" "$d/err"
+  rc=-1
+fi
+if [ "$rc" -ne 3 ] || ! grep -F -q '未登记的改动' "$d/err" \
+  || ! grep -F -q 'third_party/y.txt' "$d/err"; then
+  bad=1
+  printf '不符 前置核对：未登记差异拒绝并列出路径：期望 rc=3 且列出 third_party/y.txt，实际 rc=%s\n' "$rc"
+  sed 's/^/  /' "$d/err"
+fi
+
+SELFTEST_MIN_10=58
 SELFTEST_DONE_10=1

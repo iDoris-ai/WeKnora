@@ -37,8 +37,23 @@
     "product": {
       "branch": "a24/develop",
       "base_commit": "3e22822c1d2397be730c458c7539d0eb8c113a24",
-      "product_patches": "none",
-      "note": "base_commit 是产品代码等同的上游提交，不是 a24/develop 的当前提交；product_patches 截至 decided_on；产品代码与 v0.8.3 逐字节相同（命名空间外与 3e22822 逐字节相同，截至 2026-10-18）；iDoris-ai/WeKnora#45（anydoc 的 zip 升级）若落地，会成为第一个产品补丁"
+      "product_patches": [
+        {
+          "id": "A24-PATCH-01",
+          "issue": "iDoris-ai/WeKnora#45",
+          "summary": "cherry-pick 上游 main 345855b（Tencent/WeKnora#4437）：patched-anydoc 的 zip 依赖从 8.6.0 升到 9（Cargo.lock 锁 9.0.4），修复 RUSTSEC-2026-0367/0368/0369",
+          "upstream_commit": "345855b59cdb3181f6a7e584595bb395957d7e55",
+          "paths": [
+            "scripts/build-anydoc-lib.sh",
+            "third_party/anydoc-go/Cargo.toml",
+            "third_party/anydoc-go/Cargo.lock",
+            "third_party/anydoc-go/README.md"
+          ],
+          "remove_when": "吸收包含 345855b 的上游正式版（预计 v0.8.4）时撤掉；同步 PR 上核对这 4 个文件与上游一致后从本数组删除",
+          "added_on": "2026-10-18"
+        }
+      ],
+      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-18 有一项 A24-PATCH-01（iDoris-ai/WeKnora#45）；除这 4 个路径外，命名空间外仍与 3e22822 逐字节相同"
     },
     "absorbed_upstream_release": {
       "tag": "v0.8.3",
