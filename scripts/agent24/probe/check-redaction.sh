@@ -10,7 +10,7 @@ set -uo pipefail
 # C locale：BSD grep 在 UTF-8 locale 下遇到二进制字节会漏匹配。规则都是 ASCII。
 export LC_ALL=C
 # 叠放的中间片会按本片已有模块改这一行（必须含 00 和 10；目录里有而列表里没有的模块号也会失败）。
-REQUIRED_MODULES="00 10"
+REQUIRED_MODULES="00 10 30"
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 HERE=$(cd "$(dirname "$0")" && pwd)
 SKIP_ENV=false
