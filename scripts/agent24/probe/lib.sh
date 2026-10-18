@@ -4,7 +4,7 @@
 # 凭据不经命令行参数传递（本机其他用户能看到进程参数）：请求头、请求体、HMAC 密钥都经文件或标准输入交给子进程。
 
 # 只访问 127.0.0.1：清掉代理变量，所有 curl 另带 --noproxy '*'；-q 不读用户的 ~/.curlrc（其中可能开了 location 等）。
-unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
+unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY ALLOW_000
 
 BASE=${BASE:-http://127.0.0.1:8080}
 STACK_DIR=${STACK_DIR:-$HOME/weknora-probe-stack}
