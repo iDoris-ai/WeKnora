@@ -1,6 +1,6 @@
 # KB-CT-01 探测框架（PR②）
 
-这套脚本对本机按当前登记的基线（现为 v0.8.3）起的标准栈逐项实测 `docs/agent24/CAPABILITY-MATRIX.md` 中已提供探测函数的能力项，脱敏后输出证据。证据目录按受测 SHA 命名（`probe-evidence/<a24/develop 的 8 位 SHA>`）；每份证据的 `environment.tested_dir_note` 由脚本按登记的 release 生成，脚本同时核对 fork 命名空间之外与该 release 逐字节相同，不同就以 3 停下。旧目录 `4b363d15` 是 v0.8.2 的实测，保留不动。
+这套脚本对本机按当前登记的基线（现为 v0.8.3）起的标准栈逐项实测 `docs/agent24/CAPABILITY-MATRIX.md` 中已提供探测函数的能力项，脱敏后输出证据。证据目录按受测 SHA 命名（`probe-evidence/<受测 HEAD 的 8 位 SHA>`）；每份证据的 `environment.tested_dir_note` 由脚本按登记的 release 生成，脚本同时核对 fork 命名空间之外与该 release 逐字节相同，不同就以 3 停下。旧目录 `4b363d15` 是 v0.8.2 的实测，保留不动。
 
 框架自带一个示例项（第 9 项）。其余探测项放在 `probes.sh` 里，文件存在时由 `run.sh` 自动加载。
 
@@ -29,13 +29,12 @@ cd ~/weknora-probe-stack && cp .env.example .env
 - `APP_PORT=127.0.0.1:8080`；frontend 只需绑 127.0.0.1，端口任意，如 `FRONTEND_PORT=127.0.0.1:18080`（探测只访问 app）。
 - `STORAGE_TYPE=local`、`GIN_MODE=release`、`LANGFUSE_ENABLED=false`；`JWT_SECRET`、`SYSTEM_AES_KEY` 这类密钥填随机值。
 
-起栈按约束的顺序来（shell 里的 `WEKNORA_VERSION` 优先于 `.env`，所以先 unset）：
+起栈按约束的顺序来（每条命令都带 `env -u` 前缀，不依赖 shell 状态）：
 
 ```bash
-unset WEKNORA_VERSION
-docker compose config --images   # 须正好是登记的 5 个引用，不符就停
-docker compose pull              # 之后核对 5 个默认服务的 RepoDigests 都含登记的 digest，不一致就停、不起栈
-docker compose up -d --no-build  # 只起默认的 5 个服务（app、docreader、frontend、postgres、redis），不启用 profile
+env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE docker compose config --images   # 须正好是登记的 5 个引用，不符就停
+env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE docker compose pull              # 之后核对 5 个默认服务的 RepoDigests 都含登记的 digest，不一致就停、不起栈
+env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE docker compose up -d --no-build  # 只起默认的 5 个服务（app、docreader、frontend、postgres、redis），不启用 profile
 ```
 
 起栈后确认各容器的 image ID 等于比对过的镜像。tag 被改指、image ID 不一致时的处置以约束原文为准。不要用 `scripts/start_all.sh`，它默认带 `--pull always`，`--no-pull` 则会用当前 checkout 重建镜像。
