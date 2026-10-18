@@ -34,8 +34,8 @@ ITEMS=${ITEMS% }
 
 FULL=no
 [ "$ITEMS" = "$(echo $(seq 1 16))" ] && FULL=yes
-# 不管本次写到哪里，都先处理正式证据目录旁边 SIGKILL 留下的残留（见 lib.sh 的 recover_out）。
-recover_out "$ROOT/docs/agent24/probe-evidence/4b363d15"
+# 不管本次写到哪里，都先处理正式证据目录（probe-evidence/<受测 SHA>）旁边 SIGKILL 留下的残留（见 lib.sh 的 recover_out）。
+recover_out "$FORMAL_OUT"
 # 只有"全量 + PROBE_EMBED=fake-ollama + 没有显式指定 OUT"才写正式证据目录；其他情况一律写临时目录。
 if [ -z "$OUT_EXPLICIT" ]; then
   if [ "$FULL" != yes ] || [ "$EMBED" != fake-ollama ]; then

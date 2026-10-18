@@ -1,6 +1,6 @@
 # KB-CT-01 探测框架（PR②）
 
-这套脚本对本机 v0.8.2 标准栈逐项实测 `docs/agent24/CAPABILITY-MATRIX.md` 中已提供探测函数的能力项，脱敏后输出证据。目录名 `4b363d15` 指受测 SHA：它是 v0.8.2（`3e8b0bf`）加 2 个只改 docs 和 workflow 的提交，Go 源码与 v0.8.2 相同，所以直接用 v0.8.2 官方镜像。每份证据的 `environment.tested_dir_note` 也写了这一点。
+这套脚本对本机按当前登记的基线（现为 v0.8.3）起的标准栈逐项实测 `docs/agent24/CAPABILITY-MATRIX.md` 中已提供探测函数的能力项，脱敏后输出证据。证据目录按受测 SHA 命名（`probe-evidence/<受测 HEAD 的 8 位 SHA>`）；每份证据的 `environment.tested_dir_note` 由脚本按登记的 release 生成，脚本同时核对 fork 命名空间之外与该 release 逐字节相同，不同就以 3 停下。旧目录 `4b363d15` 是 v0.8.2 的实测，保留不动。
 
 框架自带一个示例项（第 9 项）。其余探测项放在 `probes.sh` 里，文件存在时由 `run.sh` 自动加载。
 
@@ -13,29 +13,28 @@
 
 ## 1. 起栈：按受测栈约束
 
-约束以 `docs/agent24/UPSTREAM-BASELINE.json` 的 `current_baseline.test_stack_constraints` 为准，镜像 digest 以同一节的 `v0_8_2_image_digests` 为准。
+约束以 `docs/agent24/UPSTREAM-BASELINE.json` 的 `current_baseline.test_stack_constraints` 为准，镜像 digest 以同一节的 `image_digests` 为准。
 
-默认的 5 个服务只用到 `docker-compose.yml`、`.env.example` 和 `config/`（app 挂载了 `config/config.yaml`）。从 WeKnora 仓库（上游或本 fork 均可）取出 v0.8.2 的这几个文件：
+默认的 5 个服务只用到 `docker-compose.yml`、`.env.example` 和 `config/`（app 挂载了 `config/config.yaml`）。从 WeKnora 仓库（上游或本 fork 均可）取出 v0.8.3 的这几个文件：
 
 ```bash
 mkdir -p ~/weknora-probe-stack
-git -C <WeKnora 仓库> archive v0.8.2 docker-compose.yml .env.example config \
+git -C <WeKnora 仓库> archive v0.8.3 docker-compose.yml .env.example config \
   | tar -x -C ~/weknora-probe-stack
 cd ~/weknora-probe-stack && cp .env.example .env
 ```
 
 然后改 `.env`：
-- `WEKNORA_VERSION=v0.8.2`。Docker Hub 上的 `latest` 已经是 v0.8.3。
+- `WEKNORA_VERSION=v0.8.3`。Docker Hub 上的 `latest` 会随上游前进，不能依赖。
 - `APP_PORT=127.0.0.1:8080`；frontend 只需绑 127.0.0.1，端口任意，如 `FRONTEND_PORT=127.0.0.1:18080`（探测只访问 app）。
 - `STORAGE_TYPE=local`、`GIN_MODE=release`、`LANGFUSE_ENABLED=false`；`JWT_SECRET`、`SYSTEM_AES_KEY` 这类密钥填随机值。
 
-起栈按约束的顺序来（shell 里的 `WEKNORA_VERSION` 优先于 `.env`，所以先 unset）：
+起栈按约束的顺序来（每条命令都带 `env -u` 前缀，不依赖 shell 状态）：
 
 ```bash
-unset WEKNORA_VERSION
-docker compose config --images   # 须正好是登记的 5 个引用，不符就停
-docker compose pull              # 之后核对 5 个默认服务的 RepoDigests 都含登记的 digest，不一致就停、不起栈
-docker compose up -d --no-build  # 只起默认的 5 个服务（app、docreader、frontend、postgres、redis），不启用 profile
+env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE docker compose config --images   # 须正好是登记的 5 个引用，不符就停
+env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE docker compose pull              # 之后核对 5 个默认服务的 RepoDigests 都含登记的 digest，不一致就停、不起栈
+env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE docker compose up -d --no-build  # 只起默认的 5 个服务（app、docreader、frontend、postgres、redis），不启用 profile
 ```
 
 起栈后确认各容器的 image ID 等于比对过的镜像。tag 被改指、image ID 不一致时的处置以约束原文为准。不要用 `scripts/start_all.sh`，它默认带 `--pull always`，`--no-pull` 则会用当前 checkout 重建镜像。
@@ -47,7 +46,7 @@ docker compose up -d --no-build  # 只起默认的 5 个服务（app、docreader
 
 其他注意事项：
 - 误跑过 `latest` 的数据卷要丢弃重建。Lite 与标准栈的结果不能互相替代。
-- **只支持从 Docker Hub 拉取的官方镜像。** 约束里也允许"从 3e8b0bf 本地构建"，但本地构建的镜像没有 RepoDigests，无法与登记的 digest 比对，前置核对会失败。要支持这种做法，得先另行登记本地构建的镜像 ID 和构建方式；本脚本没有做。
+- **只支持从 Docker Hub 拉取的官方镜像。** 约束里也允许"从 3e22822 本地构建"，但本地构建的镜像没有 RepoDigests，无法与登记的 digest 比对，前置核对会失败。要支持这种做法，得先另行登记本地构建的镜像 ID 和构建方式；本脚本没有做。
 
 ## 2. 前置核对（不符就以退出码 3 停下）
 
@@ -58,7 +57,7 @@ docker compose up -d --no-build  # 只起默认的 5 个服务（app、docreader
 3. 运行中的服务正好是默认的 5 个，所有发布端口都只绑 127.0.0.1（frontend 端口任意，本机是 `127.0.0.1:18080`）。
 4. app 容器的 `STORAGE_TYPE=local`。数据库用户和库名也从 app 容器的 `DB_USER`、`DB_NAME` 读出；psql 连不上时报"无法连接数据库"。
 5. 5 个默认服务（app、frontend、docreader、postgres、redis）的镜像 digest 都与登记值一致：先用 `docker inspect -f '{{.Image}}'` 取容器实际使用的镜像 ID，再查这个 ID 的 `RepoDigests`。登记里读不到 digest 也算失败。
-6. `schema_migrations` 等于登记值（110）。
+6. `schema_migrations` 等于登记值（118）。
 7. 宿主 `127.0.0.1:11434`：
    - `fake-ollama` 模式下必须空闲，否则停下；
    - `none` 模式下有应答时也停下。原因是 `.env` 的 `OLLAMA_BASE_URL` 指向宿主 11434，产品可能会调用宿主上的 Ollama 去拉取不存在的模型。确认无妨时可设 `PROBE_ALLOW_HOST_OLLAMA=1`，此时改为打 WARN，并记进 `environment.warnings`。
@@ -82,7 +81,7 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh 9   # 同上，用伪 Ollam
   - `PROBE_EMBED`：只接受 `none` 和 `fake-ollama`，其他值以退出码 2 退出；
   - `PROBE_ALLOW_HOST_OLLAMA`：见第 2 节第 7 条。
 - **写到哪里**：
-  - 正式证据目录 `docs/agent24/probe-evidence/4b363d15/`：只有同时满足"1–16 项都已提供并全部运行、`PROBE_EMBED=fake-ollama`、没有显式指定 `OUT`"时才写。
+  - 正式证据目录 `docs/agent24/probe-evidence/<受测 SHA>/`：只有同时满足"1–16 项都已提供并全部运行、`PROBE_EMBED=fake-ollama`、没有显式指定 `OUT`"时才写。
   - 没有显式指定 `OUT` 的其他情况，一律写到 `${TMPDIR:-/tmp}/weknora-probe-partial.*`，并打印路径。
   - 显式指定 `OUT` 时，**这个目录会被整体替换**，替换后只剩本次运行的证据。正式证据目录同样整体替换。下面两种情况以退出码 2 拒绝，目录不动：
     - `OUT`（显式指定的目录或正式证据目录）已存在且非空，里面有任何不是证据文件（`NN-*.json`、`13-log-body.txt`）的文件或子目录；

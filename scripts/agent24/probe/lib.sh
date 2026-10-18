@@ -16,12 +16,27 @@ esac
 PROBE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$PROBE_DIR/../../.." && pwd)
 OUT_EXPLICIT=${OUT:+yes}   # 没有显式指定 OUT 且只跑部分项时，run.sh 会改写到临时目录
-OUT=${OUT:-$ROOT/docs/agent24/probe-evidence/4b363d15}
 BASELINE=$ROOT/docs/agent24/UPSTREAM-BASELINE.json
+# 证据身份取自登记的 release 和受测 HEAD，不写死版本。
+command -v jq >/dev/null || { echo "前置核对失败：缺少 jq" >&2; exit 3; }
+REL_TAG=$(jq -er '.current_baseline.release.tag' "$BASELINE" 2>/dev/null) \
+  || { echo "前置核对失败：读不到 ${BASELINE} 的 .current_baseline.release.tag" >&2; exit 3; }
+REL_COMMIT=$(jq -er '.current_baseline.release.commit' "$BASELINE" 2>/dev/null) \
+  || { echo "前置核对失败：读不到 ${BASELINE} 的 .current_baseline.release.commit" >&2; exit 3; }
+TESTED_SHA=$(git -C "$ROOT" rev-parse --short=8 HEAD) || { echo "前置核对失败：读不到 HEAD" >&2; exit 3; }
+if ! git -C "$ROOT" cat-file -e "${REL_COMMIT}^{commit}" 2>/dev/null; then
+  echo "前置核对失败：本地缺 release 提交 ${REL_COMMIT}（浅克隆时先 git fetch --deepen=500）" >&2; exit 3
+fi
+if ! git -C "$ROOT" diff --quiet "$REL_COMMIT" HEAD -- . ':(exclude)docs/agent24' ':(exclude)scripts/agent24' \
+  ':(exclude).github/scripts/agent24-*' ':(exclude).github/workflows/agent24-*'; then
+  echo "前置核对失败：fork 命名空间之外与登记的 release ${REL_TAG} 不同（有产品补丁），tested_dir_note 不成立，先更新登记" >&2
+  exit 3
+fi
+FORMAL_OUT=$ROOT/docs/agent24/probe-evidence/$TESTED_SHA
+OUT=${OUT:-$FORMAL_OUT}
 DEFAULT_SERVICES="app docreader frontend postgres redis"
 ALLOW_HOST_OLLAMA=${PROBE_ALLOW_HOST_OLLAMA:-0}   # =1 时 none 模式允许宿主 11434 上有服务（只打 WARN）
-TESTED_DIR_NOTE="受测目录名 4b363d15 = v0.8.2（3e8b0bf）+ 2 个只改 docs/agent24 与 .github/workflows 的提交"
-TESTED_DIR_NOTE="${TESTED_DIR_NOTE}（9d4e79f、4b363d1），Go 源码与 v0.8.2 相同"
+TESTED_DIR_NOTE="受测目录名 ${TESTED_SHA} = 受测 HEAD ${TESTED_SHA}；fork 命名空间之外与 ${REL_TAG}（${REL_COMMIT:0:7}）逐字节相同，所以直接用 ${REL_TAG} 官方镜像"
 FAKE_MODEL=probe-fake-embed:latest
 SECRETS=()
 
@@ -247,7 +262,7 @@ precheck() {
     s=${pair%%:*}
     img=$(docker inspect -f '{{.Config.Image}}' "$(cid "$s")")
     id=$(docker inspect -f '{{.Image}}' "$(cid "$s")")   # 按容器实际使用的镜像 ID 查，避免标签已被改指
-    exp=$(jq -r --arg k "${pair#*:}" '.current_baseline.v0_8_2_image_digests[$k]
+    exp=$(jq -r --arg k "${pair#*:}" '.current_baseline.image_digests[$k]
       | if type == "object" then .digest else . end // empty' "$BASELINE")
     [[ $exp == sha256:* ]] || fail3 "UPSTREAM-BASELINE.json 的 current_baseline 里没有 ${pair#*:} 的 digest"
     dg=$(docker image inspect -f '{{json .RepoDigests}}' "$id")
@@ -256,7 +271,7 @@ precheck() {
   done
 
   WANT_DB=$(jq -r '.current_baseline.test_stack_constraints[]
-    | capture("v0\\.8\\.2 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
+    | capture("v[0-9]+\\.[0-9]+\\.[0-9]+ 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
   WANT_COMMIT=$(jq -r '.current_baseline.release.commit // empty' "$BASELINE")
   [ -n "$WANT_DB" ] && [ -n "$WANT_COMMIT" ] || fail3 "登记里缺 schema_migrations 版本或 release.commit"
   schema=$(sql "select version||' dirty='||dirty from schema_migrations") || fail3 "无法连接数据库（psql 失败）"
