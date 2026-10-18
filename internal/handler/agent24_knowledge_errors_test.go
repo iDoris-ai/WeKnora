@@ -10,6 +10,7 @@ import (
 	"time"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -157,31 +158,44 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 	expired, cancel2 := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel2()
 	bg := context.Background()
+	vendor := func(code int) error { return &api.HTTPError{StatusCode: code, Body: "vendor secret"} }
+	transport := &api.TransportError{Op: "send request", Err: errors.New("dial")}
 	cases := []struct {
+		name   string
 		ctx    context.Context
 		err    error
 		code   agent24KnowledgeCode
 		reason string
 	}{
-		{expired, errors.New("x"), agent24CodeTimeout, ""},
-		{bg, context.DeadlineExceeded, agent24CodeTimeout, ""},
-		{bg, apperrors.NewVectorStoreUnavailableError("s"), agent24CodeUnavailable, "dependency"},
-		{bg, apperrors.NewServiceUnavailableError("s"), agent24CodeUnavailable, "dependency"},
-		{bg, &apperrors.AppError{Code: apperrors.ErrTimeout}, agent24CodeTimeout, ""},
-		{bg, apperrors.NewTooManyRequestsError("s"), agent24CodeUnavailable, "overloaded"},
-		{bg, apperrors.NewNotFoundError("s"), agent24CodeInternal, ""},
-		{bg, (*apperrors.AppError)(nil), agent24CodeInternal, ""},
-		{bg, errors.New("secret text"), agent24CodeInternal, ""},
+		{"live deadline", bg, context.DeadlineExceeded, agent24CodeUnavailable, "dependency"},
+		{"expired deadline", expired, context.DeadlineExceeded, agent24CodeTimeout, ""},
+		{"live vector", bg, apperrors.NewVectorStoreUnavailableError("s"), agent24CodeUnavailable, "dependency"},
+		{"expired vector", expired, apperrors.NewVectorStoreUnavailableError("s"), agent24CodeTimeout, ""},
+		{"live apptimeout", bg, &apperrors.AppError{Code: apperrors.ErrTimeout}, agent24CodeUnavailable, "dependency"},
+		{"expired apptimeout", expired, &apperrors.AppError{Code: apperrors.ErrTimeout}, agent24CodeTimeout, ""},
+		{"expired svc", expired, apperrors.NewServiceUnavailableError("s"), agent24CodeUnavailable, "dependency"},
+		{"expired 429", expired, apperrors.NewTooManyRequestsError("s"), agent24CodeUnavailable, "overloaded"},
+		{"not found", bg, apperrors.NewNotFoundError("s"), agent24CodeInternal, ""},
+		{"nil apperr", bg, (*apperrors.AppError)(nil), agent24CodeInternal, ""},
+		{"http 429", bg, vendor(429), agent24CodeUnavailable, "overloaded"},
+		{"http 503", bg, vendor(503), agent24CodeUnavailable, "dependency"},
+		{"http 400", bg, vendor(400), agent24CodeInternal, ""},
+		{"live transport", bg, transport, agent24CodeUnavailable, "dependency"},
+		{"expired transport", expired, transport, agent24CodeTimeout, ""},
+		{"expired other", expired, errors.New("x"), agent24CodeInternal, ""},
+		{"secret", bg, errors.New("secret text"), agent24CodeInternal, ""},
 	}
 	for _, tc := range cases {
 		e, gone := classifyAgent24KnowledgeExecError(tc.ctx, tc.err)
-		require.False(t, gone)
-		require.Equal(t, tc.code, e.Code)
-		require.Equal(t, tc.reason, e.Reason)
-		require.NotContains(t, e.Error(), "secret text")
+		require.False(t, gone, tc.name)
+		require.Equal(t, tc.code, e.Code, tc.name)
+		require.Equal(t, tc.reason, e.Reason, tc.name)
+		_, _, _, raw := agent24WriteErr(t, e, agent24KnowledgeEcho{})
+		require.NotContains(t, raw, "vendor secret", tc.name)
+		require.NotContains(t, raw, "secret text", tc.name)
 	}
-	e, _ = classifyAgent24KnowledgeExecError(bg, errors.New("secret text"))
-	_, env, _, raw := agent24WriteErr(t, e, agent24KnowledgeEcho{})
-	require.Equal(t, "internal error", env["message"])
-	require.NotContains(t, raw, "secret text")
+
+	status, env, _, _ := agent24WriteErr(t, nil, agent24KnowledgeEcho{})
+	require.Equal(t, 500, status)
+	require.Equal(t, "internal", env["code"])
 }

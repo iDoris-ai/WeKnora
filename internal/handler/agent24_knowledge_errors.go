@@ -123,6 +123,9 @@ type agent24KnowledgeEcho struct {
 }
 
 func writeAgent24KnowledgeError(c *gin.Context, e *agent24KnowledgeError, echo agent24KnowledgeEcho) {
+	if e == nil {
+		e = agent24Internal()
+	}
 	meta, ok := agent24KnowledgeCodeMeta[e.Code]
 	if !ok {
 		e = agent24Internal()
