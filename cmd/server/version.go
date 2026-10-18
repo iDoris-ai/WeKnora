@@ -1,8 +1,10 @@
 package main
 
 // Agent24 fork product patch A24-KB-01: `--version` prints the
-// ldflags-injected build metadata and exits before any config, database or
-// container initialization.
+// ldflags-injected build metadata and returns from main before config,
+// database or container setup. It is not side-effect free: package init() of
+// imported packages still runs (internal/logger creates log directories and,
+// with LLM_DEBUG_LOG set, starts its old-file cleanup), as on any server start.
 
 import (
 	"fmt"

@@ -41,7 +41,9 @@ import (
 )
 
 func main() {
-	// Agent24 A24-KB-01: answer --version before any config/DB/container init.
+	// Agent24 A24-KB-01: answer --version before reading config, opening the
+	// database or building the container. Package init() of imported packages
+	// (e.g. internal/logger with LLM_DEBUG_LOG or LOG_PATH set) has already run.
 	if handleVersionFlag(os.Args[1:], os.Stdout) {
 		return
 	}
