@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# 证据脱敏自检：用 grep 哨兵扫描证据目录（含二进制文件，-a），命中任何凭据或本机身份信息就失败。
-# 只打印"文件:行号 规则名"，不打印命中的值。
-# 用法：check-redaction.sh [--skip-env] [证据目录]（参数顺序不限；默认目录 probe-evidence/<HEAD 的 8 位 SHA>）
+# 证据脱敏自检。按 REQUIRED_MODULES 检查并 source 同目录 redact-NN-*.sh。
+# 每个编号必须恰好有一个文件。缺了就失败，不再静默少跑一组规则。
+# 每个模块在末尾声明 MOD_DONE_NN=1 和 MOD_RULES_NN（本模块 report 的确切次数），逐模块核对。
+# 模块里执行 exit（任何退出码）都判 FAIL、以 1 退出。
+# 用法：check-redaction.sh [--skip-env] [证据目录]（参数顺序不限）
+#   默认目录 docs/agent24/probe-evidence/<HEAD 的 8 位 SHA>。
 #   读不到 $STACK_DIR/.env 时失败；只有显式传 --skip-env 才跳过 .env 比对。
 set -uo pipefail
-# C locale：BSD grep 在 UTF-8 locale 下遇到二进制字节会漏匹配；规则都是 ASCII，用 C locale 扫描。
+# C locale：BSD grep 在 UTF-8 locale 下遇到二进制字节会漏匹配。规则都是 ASCII。
 export LC_ALL=C
+# 叠放的中间片会按本片已有模块改这一行（必须含 00 和 10；目录里有而列表里没有的模块号也会失败）。
+REQUIRED_MODULES="00 10"
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+HERE=$(cd "$(dirname "$0")" && pwd)
 SKIP_ENV=false
 DIR_ARG=""
 for arg in "$@"; do
@@ -24,7 +30,6 @@ ENVF=${STACK_DIR:-$HOME/weknora-probe-stack}/.env
 bad=0
 if [ ! -d "$DIR" ]; then
   if [ -z "$DIR_ARG" ]; then
-    # 默认的正式证据目录尚不存在（例如目前只有示例项）：说清楚，不当作失败。
     echo "SKIP 默认证据目录不存在：$DIR"
     echo "     要自检，请把证据目录作为参数传入，"
     echo "     例如 run.sh 只跑部分项时打印的临时目录：check-redaction.sh /tmp/weknora-probe-partial.XXXXXX"
@@ -35,102 +40,118 @@ if [ ! -d "$DIR" ]; then
   exit 2
 fi
 
-report() {   # report 规则名 命中列表（文件:行号）
-  if [ -n "$2" ]; then
-    bad=1
-    echo "FAIL $1"
-    sed 's/^/  /' <<<"$2"
-  else
-    echo "ok   $1"
-  fi
-}
-scan() {   # scan 规则名 grep 参数…
-  local name=$1
-  shift
-  report "$name" "$(grep -rna "$@" "$DIR" | cut -d: -f1,2)"
-}
-# scan_value 规则名 前缀正则 值正则 [后缀正则]（不区分大小写）：取出"前缀 + 值 + 后缀"，
-# 只有值整体就是占位符（<redacted…> 或纯 *）时才放过——按"前缀 + 占位符 + 后缀"整段锚定比对，
-# 所以 "真值=<redacted>" 这类只在结尾带占位符的值照样报出。
-PH='(<redacted[^"\\<>]*>|\*+)'
-scan_value() {
-  local name=$1 pre=$2 val=$3 suf=${4:-}
-  report "$name" "$(grep -rnaoiE "$pre$val$suf" "$DIR" | grep -viE "^[^:]*:[0-9]+:$pre$PH$suf\$" | cut -d: -f1,2)"
-}
+W=$(mktemp -d "${TMPDIR:-/tmp}/weknora-redaction.XXXXXX") || exit 2
+# 驱动自己的每个结论都先置 _drv_end=1。没置位就退出，说明是模块里执行了 exit（不论退出码）：
+# 一律 FAIL 并以 1 退出，不让 exit 0 越过哨兵、次数核对和最终结论。
+_drv_end=0
+drv_exit() { _drv_end=1; exit "$1"; }
+trap '_drv_st=$?; rm -rf "$W"; if [ "$_drv_end" != 1 ]; then echo "FAIL 驱动未正常结束（模块提前退出）"; exit 1; fi; exit "$_drv_st"' EXIT
 
-# sk- 要求左边界（行首或非字母数字、非 _ -），disk-…、task-… 这类词不算。
-scan "API key（sk- 前缀）" -E '(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{16,}'
-scan "API key 密文（enc:v1）" -F 'enc:v1'
-scan "JWT（eyJ 开头）" -E 'eyJ[A-Za-z0-9_-]{8,}'
-scan "Bearer 凭据（不区分大小写）" -iE 'bearer +[A-Za-z0-9._~+/=-]{8,}'
-scan "Authorization 头（Basic / Bearer / Token / ApiKey / Digest）" \
-  -iE 'authorization\\*"? *[:=] *\[? *\\*"? *(basic|bearer|token|api-?key|digest) +[A-Za-z0-9._~+/=-]{6,}'
-scan "租户 HMAC（PROBE-HMAC- 哨兵）" -F 'PROBE-HMAC-'
-scan "探测口令（probe-<24 位十六进制>）" -E 'probe-[0-9a-f]{24}'
-scan "Cookie / Set-Cookie（含 JSON 写法）" -iE '(set-)?cookie\\*"?[[:space:]]*:'
-# 敏感字段带真实字符串值：字段名含 password、secret、token、credential、refresh、api key（api_key、api-key、apiKey），
-# 或以 key 结尾（key、access_key、private_key、secretKey 等）；允许前后缀、驼峰、大小写不同。
-# 同时匹配普通和任意层转义的引号，值可以是字符串或数组的首个字符串元素；值长度 ≥6，整体是占位符才放过。
-# 布尔、数字不带引号，不会命中。
-FIELD_NAME='[A-Za-z0-9_-]*(password|passwd|secret|token|credential|refresh|api[_-]?key)[A-Za-z0-9_-]*|[A-Za-z0-9_-]*key'
-FIELD_PRE='\\*"('"$FIELD_NAME"')\\*"[[:space:]]*:[[:space:]]*(\[[[:space:]]*)?\\*"'
-scan_value "敏感字段带值（password/secret/token/credential/refresh/api key/…key 类字段名）" "$FIELD_PRE" '[^"\\]{6,}'
-scan_value "X-API-Key 头带值" 'x-api-key\\*"?[[:space:]]*[:=][[:space:]]*\\*"?' '[^"\\[:space:],}]{6,}'
-# URL 里的口令（scheme://user:pw@host，用户名可以为空，如 redis://:pw@host），口令整体是占位符才放过。
-# 口令按 RFC 3986 不含未编码的 /，所以遇到 / 就不算 userinfo（否则路径里带邮箱的 URL 会误报）。
-scan_value "URL 内嵌口令（scheme://user:pw@）" '[a-z][a-z0-9+.-]*://[^/[:space:]"@:]*:' '[^/[:space:]"@]+' '@'
-report "非 @probe.invalid 的邮箱" "$(grep -rnaoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$DIR" \
-  | grep -v '@probe\.invalid$' | cut -d: -f1,2)"
-scan "本机 \$HOME" -F "$HOME"
-# 用户名短于 5 个字符或是常见词时，整词匹配会误报，只按路径形态 /home/<u>、/Users/<u> 匹配。
-me=${USER:-$(id -un)}
-case $me in
-  admin | root | user | users | guest | test | tester | ubuntu | debian | probe | runner | build | deploy | docker | service)
-    short=true ;;
-  *) [ ${#me} -lt 5 ] && short=true || short=false ;;
-esac
-if [ "$short" = true ]; then
-  scan "本机用户名 \$USER(路径形态)" -E "/(home|Users)/$(sed 's/[][\.*^$/]/\\&/g' <<<"$me")([/\"' ]|$)"
-else
-  scan "本机用户名 \$USER" -wF "$me"
+# bash 3.2 在 set -u 下展开空数组会报未绑定；先看个数，非空才展开。bash 5 同样安全。
+mods=()
+missing=0
+# 00（公共函数）和 10（基础规则）每一片都有，列表里少了它们就失败。
+for nn in 00 10; do
+  case " $REQUIRED_MODULES " in
+    *" $nn "*) ;;
+    *) echo "FAIL 缺少脱敏模块 ${nn}（REQUIRED_MODULES 必须包含 00 和 10）"; missing=1 ;;
+  esac
+done
+# 目录里有 redact-NN-*.sh 但 NN 不在列表里：多半是叠放时漏改了 REQUIRED_MODULES。
+shopt -s nullglob
+present=("$HERE"/redact-[0-9][0-9]-*.sh)
+shopt -u nullglob
+if [ "${#present[@]}" -gt 0 ]; then
+  for m in "${present[@]}"; do
+    bn=$(basename "$m")
+    nn=${bn#redact-}
+    nn=${nn%%-*}
+    case " $REQUIRED_MODULES " in
+      *" $nn "*) ;;
+      *) echo "FAIL 脱敏模块 $nn 不在 REQUIRED_MODULES 里：$bn"; missing=1 ;;
+    esac
+  done
 fi
-for h in $(printf '%s\n' "$(hostname)" "$(hostname -s)" | sort -u); do
-  scan "本机主机名 $h" -iwF "$h"
+for nn in $REQUIRED_MODULES; do
+  shopt -s nullglob
+  found=("$HERE"/redact-"$nn"-*.sh)
+  shopt -u nullglob
+  if [ "${#found[@]}" -eq 0 ]; then
+    echo "FAIL 缺少脱敏模块 $nn"
+    missing=1
+    continue
+  fi
+  if [ "${#found[@]}" -ne 1 ]; then
+    echo "FAIL 脱敏模块 $nn 不唯一"
+    missing=1
+    continue
+  fi
+  mods[${#mods[@]}]="${found[0]}"
+done
+if [ "$missing" -ne 0 ] || [ "${#mods[@]}" -eq 0 ]; then
+  [ "$missing" -eq 0 ] && echo "FAIL 缺少脱敏模块"
+  drv_exit 1
+fi
+names=
+for m in "${mods[@]}"; do
+  names="${names:+$names }$(basename "$m")"
+done
+echo "加载脱敏模块：$names"
+mod_nn() { printf '%s\n' "$(basename "$1")" | sed -n 's/^redact-\([0-9][0-9]\)-.*/\1/p'; }
+# 加载前先清掉所有模块的哨兵、声明次数和驱动记下的实际次数（环境里可能预设）。
+for m in "${mods[@]}"; do
+  nn=$(mod_nn "$m")
+  unset "MOD_DONE_$nn" "MOD_RULES_$nn" "_drv_rn_$nn"
+done
+# 加载循环只负责 source 和检查返回码，再记下本模块的实际 report 次数。
+# 模块顶层的 break/continue 会跳出或跳过这个循环，提前 return 会少跑规则；
+# 所以哨兵和次数不在这里核对，而是循环结束后按模块列表逐个再核一遍。
+for m in "${mods[@]}"; do
+  bn=$(basename "$m")
+  nn=$(mod_nn "$m")
+  REPORT_N=0
+  # shellcheck disable=SC1090
+  source "$m"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL 模块加载出错：$bn"
+    drv_exit 1
+  fi
+  printf -v "_drv_rn_$nn" '%s' "$REPORT_N"
+done
+# 逐模块核对：本模块必须有完成哨兵、驱动记下了实际次数，且实际次数恰好等于声明的 MOD_RULES_NN。
+for m in "${mods[@]}"; do
+  bn=$(basename "$m")
+  nn=$(mod_nn "$m")
+  dv="MOD_DONE_$nn"
+  rnv="_drv_rn_$nn"
+  if [ "${!dv:-}" != 1 ] || [ -z "${!rnv:-}" ]; then
+    echo "FAIL 模块未完成：${bn}（缺完成哨兵或没有走完加载循环，模块顶层有 break/continue/return？）"
+    drv_exit 1
+  fi
+  REPORT_N=${!rnv}
+  rvn="MOD_RULES_$nn"
+  want=${!rvn:-}
+  # 只认 1–4 位、无前导 0 的十进制数，比较用字符串相等，不经过 [ -lt ] 的整数范围。
+  case $want in
+    [0-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]) ;;
+    *)
+      echo "FAIL 模块未声明规则次数（MOD_RULES_${nn} 须是 0–9999 的整数）：$bn"
+      drv_exit 1
+      ;;
+  esac
+  if [ "$REPORT_N" != "$want" ]; then
+    if [ "$REPORT_N" -lt "$want" ] 2>/dev/null; then
+      echo "FAIL 规则未跑够：$bn 实际 ${REPORT_N}，声明 ${want}"
+    else
+      echo "FAIL 规则次数多于声明：$bn 实际 ${REPORT_N}，声明 ${want}"
+    fi
+    drv_exit 1
+  fi
 done
 
-# .env 里密钥类变量的值（只比对，不输出）。处理 export 前缀、单双引号和行尾注释。
-env_value() {
-  local v=${1#*=}
-  case $v in
-    \"*) v=${v#\"}; v=${v%%\"*} ;;
-    \'*) v=${v#\'}; v=${v%%\'*} ;;
-    *)
-      v=${v%%[[:space:]]#*}
-      v=${v%"${v##*[![:space:]]}"} ;;
-  esac
-  printf '%s' "$v"
-}
-if [ -r "$ENVF" ]; then
-  n=0
-  env_hits=""
-  while IFS= read -r line; do
-    line=${line#export }
-    v=$(env_value "$line")
-    [ ${#v} -ge 6 ] || continue
-    n=$((n + 1))
-    # 值经 -f 从文件描述符读入，不上命令行。
-    hits=$(grep -rnaF -f <(printf '%s\n' "$v") "$DIR" | cut -d: -f1,2 | sed "s/\$/ (${line%%=*})/")
-    [ -n "$hits" ] && env_hits+="$hits"$'\n'
-  done < <(grep -E '^(export[[:space:]]+)?[A-Z0-9_]*(SECRET|PASSWORD|_KEY|TOKEN|AES|SIGNING)[A-Z0-9_]*=' "$ENVF")
-  report ".env 密钥值比对（${n} 个非空值）" "${env_hits%$'\n'}"
-elif [ "$SKIP_ENV" = true ]; then
-  echo "WARN 按 --skip-env 跳过 .env 比对"
-else
-  echo "FAIL 读不到 ${ENVF}（确需跳过请显式传 --skip-env）"
-  bad=1
-fi
-
-if [ $bad = 0 ]; then
+_drv_end=1
+if [ "$bad" -eq 0 ]; then
   echo "脱敏自检通过：$DIR"
 else
   echo "脱敏自检失败：$DIR" >&2
