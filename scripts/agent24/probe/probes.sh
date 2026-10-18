@@ -310,7 +310,8 @@ p8() {
   call key:noretr GET /api/v1/system/capabilities
   ck "无 retrieve 的 key 也可读 capabilities" 200 "$ST"
   f keys '.data.capabilities | keys'
-  ck "capabilities 共 13 个键" 13 "$(bj '.data.capabilities | length')"
+  ck "capabilities 共 14 个键" 14 "$(bj '.data.capabilities | length')"
+  ck "含 v0.8.3 新增的 settings.sandbox.remote" true "$(bj '.data.capabilities | has("settings.sandbox.remote")')"
   f unsupported '[.data.capabilities | to_entries[] | select(.value.supported | not) | {(.key): .value.reason}]'
   call key:empty GET /api/v1/system/capabilities
   ck "retrieve key 可读" 200 "$ST"
