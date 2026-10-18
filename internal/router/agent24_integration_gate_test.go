@@ -5,13 +5,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func TestAgent24IntegrationGate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(agent24IntegrationGate())
+	applyAgent24IntegrationGate(r)
 	ok := func(c *gin.Context) { c.Status(http.StatusOK) }
 	for _, rt := range [][2]string{
 		{"GET", "/health"},
@@ -45,6 +46,12 @@ func TestAgent24IntegrationGate(t *testing.T) {
 		{"GET", "/api/v1/system/info", 404},
 		{"POST", "/health", 404},
 		{"GET", "/index.html", 404},
+		// Trailing-slash variants must not be redirected around the gate.
+		{"POST", "/api/v1/auth/login/", 404},
+		{"GET", "/api/v1/knowledge-bases/kb1/", 404},
+		{"GET", "/files/", 404},
+		{"GET", "/health/", 404},
+		{"GET", "/api/v1/system/capabilities/", 404},
 	}
 	for _, hdr := range [][2]string{{"Authorization", "Bearer x"}, {"X-API-Key", "sk-x"}} {
 		for _, tc := range cases {
@@ -55,9 +62,42 @@ func TestAgent24IntegrationGate(t *testing.T) {
 			if w.Code != tc.want {
 				t.Errorf("%s %s with %s: got %d, want %d", tc.method, tc.path, hdr[0], w.Code, tc.want)
 			}
-			if tc.want == 404 && w.Body.Len() != 0 {
-				t.Errorf("%s %s with %s: 404 body must be empty, got %q", tc.method, tc.path, hdr[0], w.Body.String())
+			if tc.want == 404 && (w.Body.Len() != 0 || w.Header().Get("Location") != "") {
+				t.Errorf("%s %s with %s: 404 must have empty body and no Location, got %q %q",
+					tc.method, tc.path, hdr[0], w.Body.String(), w.Header().Get("Location"))
 			}
 		}
+	}
+}
+
+func TestAgent24IntegrationGatePrecedesCORS(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	applyAgent24IntegrationGate(r)
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders: []string{"Content-Type", "Authorization", "X-API-Key"},
+	}))
+	ok := func(c *gin.Context) { c.Status(http.StatusOK) }
+	r.POST("/api/v1/auth/register", ok)
+	r.GET("/health", ok)
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/auth/register", nil)
+	req.Header.Set("Origin", "https://example.org")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("preflight OPTIONS /api/v1/auth/register: got %d, want 404", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "https://example.org")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("Access-Control-Allow-Origin") == "" {
+		t.Errorf("GET /health: got %d, ACAO %q; want 200 with CORS header",
+			w.Code, w.Header().Get("Access-Control-Allow-Origin"))
 	}
 }

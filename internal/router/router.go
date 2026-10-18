@@ -101,6 +101,8 @@ type RouterParams struct {
 func NewRouter(params RouterParams) *gin.Engine {
 	r := gin.New()
 	r.ContextWithFallback = true
+	// Agent24 A24-KB-04: integration-mode route allowlist; must be the first middleware and precede every route.
+	installAgent24IntegrationMode(r, params.Config)
 	// 清理 FormFile/MultipartForm 解析产生的 multipart 临时文件，避免容器 /tmp 持续增长。
 	r.Use(middleware.MultipartFormCleanup())
 
@@ -141,9 +143,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
-
-	// Agent24 A24-KB-04: integration-mode route allowlist; must precede every route.
-	installAgent24IntegrationMode(r, params.Config)
 
 	// 健康检查（不需要认证）
 	r.GET("/health", func(c *gin.Context) {

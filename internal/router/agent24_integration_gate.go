@@ -33,6 +33,14 @@ func agent24IntegrationGate() gin.HandlerFunc {
 	}
 }
 
+// applyAgent24IntegrationGate configures r for integration mode: no automatic
+// path redirects, and the allowlist gate as a global middleware.
+func applyAgent24IntegrationGate(r *gin.Engine) {
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
+	r.Use(agent24IntegrationGate())
+}
+
 // installAgent24IntegrationMode must run before any route is registered.
 func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) {
 	ctx := context.Background()
@@ -46,7 +54,7 @@ func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) {
 	if err := handler.ValidateAgent24IntegrationConfig(cfg); err != nil {
 		logger.Fatalf(ctx, "%v", err)
 	}
-	r.Use(agent24IntegrationGate())
+	applyAgent24IntegrationGate(r)
 	logger.Infof(ctx, "Agent24 knowledge integration mode: only %d allowlisted routes are served",
 		len(agent24IntegrationAllowlist))
 }
