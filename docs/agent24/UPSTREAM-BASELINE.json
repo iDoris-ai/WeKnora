@@ -56,18 +56,18 @@
         "开始第一个产品补丁的 task 分支之前（按计划改动的路径清单判断；开 PR 时用 git diff --name-only --no-renames origin/a24/develop...<补丁分支> | grep -v -E '^(docs/agent24/|scripts/agent24/|\\.github/(scripts|workflows)/agent24-)' 复核，输出非空就停下：先完成升级并合入 a24/develop，再 rebase；--no-renames 不可省，否则从命名空间外移进来的文件只显示新路径；复核在 current_baseline 落后于上游最新正式版时适用，同步 PR（head 为 upstream-release）不适用）",
         "导入任何非测试资料、或让开发者以外的人访问任何实例之前（设立此条时的理由：v0.8.2 曾在鉴权前把 json、form、text/ 类 POST/PUT/PATCH 请求的请求体整体无上限读入内存，ParadeDB 新镜像带的 pgvector 0.8.4 修了 HNSW 缓冲区溢出与 vacuum 索引损坏；二者均已随 v0.8.3 吸收）",
         "任何对外制品（Lite 包、镜像）出货之前",
-        "需要启用 minio、langfuse 或 full compose profile 时（v0.8.2 钉的 quay.io MinIO 镜像已不能匿名拉取）"
+        "需要启用 minio、langfuse 或 full compose profile 时（设立时的理由：v0.8.2 钉的 quay.io MinIO 镜像已不能匿名拉取；v0.8.3 的 minio 改用 pgsty/minio，启用前仍按评估文档核对）"
       ],
       "procedure": [
-        "届时最新正式版不是 v0.8.3 时，先补一份 v0.8.2 到该版本的差异评估",
+        "届时最新正式版不是已评估过的版本时，先补一份当前基线到该版本的差异评估",
         "按同步 issue 的五步开同步 PR",
-        "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go 与前端回归（升级前先在当前基线记录失败清单）、契约回归（KB-CT-02b 完成之前，以新 SHA 上重跑 PR② 探测并重核能力矩阵代替）、LICENSE 核对、KB-LITE-01b 重新测量",
+        "按 BASELINE-EVAL-v0.8.3.md「若升级的必做清单」执行：备份与恢复演练、Go 与前端回归（升级前先在当前基线记录失败清单）、契约回归（在新 SHA 的受测栈上全量重跑 PR② 的 16 项探测并重核能力矩阵；KB-CT-02b 只校验手写夹具、不对服务端运行，不能代替；见 PATCH-LEDGER 2026-10-18 一节）、LICENSE 核对、KB-LITE-01b 重新测量",
         "更新本文件与 PATCH-LEDGER"
       ],
       "gate": "凡 Target repo 为 WeKnora、会改动命名空间之外路径的任务，建卡时写入“基线已升级（#9 已吸收）”依赖；已于 2026-10-16 UTC 写进 Agent24#1001（KB-C1-01、C1-01b-a、C1-01b-b、C1-01c、C1-03、OBS-01、SVC-POLICY-01 等）、#1002（KB-C2-01、C2-02）、#1003（KB-LITE-01a，按规则判断 LITE-01b）正文的进入条件，时点 2 挂 #1001 真实数据验收，时点 3 挂 #1003 出货验收（WeKnora#11；任务级依赖以三个 epic 正文为准，基线数据与时点以本文件为准）；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
       "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason",
       "review_triggers": [
-        "上游发布影响 v0.8.2 的安全公告时",
+        "上游发布影响当前基线（v0.8.3）的安全公告时",
         "到 reevaluate_by 时"
       ],
       "review_note": "review_triggers 与 reevaluate_by 只触发重新评估，结论可以是继续留守，不属于 triggers（必须先升级的时点）",
@@ -75,9 +75,9 @@
       "owner": "David（stoptheworld-java，即“用户”）"
     },
     "test_stack_constraints": [
-      "在 .env 里设 WEKNORA_VERSION=v0.8.3（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 会随上游前进，不能依赖），每条 docker compose 命令前加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE（shell 变量优先于 .env，不依赖 shell 状态；项目根目录不得有 docker-compose.override.y*ml、compose.override.y*ml，.env 不设 COMPOSE_FILE、COMPOSE_PROFILES），docker compose config --images 须正好是评估文档列出的 5 个引用，docker compose config 里 app 的 STORAGE_TYPE 须为 local、app 与 frontend 端口的 host_ip 须为 127.0.0.1（用 grep 过滤 STORAGE_TYPE|host_ip|published|- mode: 时须正好七行、两组 - mode/host_ip: 127.0.0.1/published，端口映射不带 IP 时不输出 host_ip、只写容器端口时不输出 published；只看这几项，完整输出含 .env 里的密钥，不贴进证据），不符就停；再 docker compose pull，5 个默认服务的 RepoDigests 都须含 image_digests 登记的 digest（为空也算不一致），不一致就停、不起栈；比对通过后再 docker compose up -d --no-build，起栈后确认各容器的 image ID 等于比对过的镜像，不一致就停栈、数据卷丢弃重建（误拉更新的版本时 app 一启动就迁移到更高版本、不可回退）；tag 被改指时可 docker pull <仓库>@<登记 digest> 再 docker tag 打回，之后不再对该服务 pull；只有 postgres、redis 可以重新登记",
+      "在 .env 里设 WEKNORA_VERSION=v0.8.3（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 会随上游前进，不能依赖），每条 docker compose 命令前加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE（shell 变量优先于 .env，不依赖 shell 状态；项目根目录不得有 docker-compose.override.y*ml、compose.override.y*ml，.env 不设 COMPOSE_FILE、COMPOSE_PROFILES），docker compose config --images 须正好是这 5 个引用：wechatopenai/weknora-ui:v0.8.3、wechatopenai/weknora-app:v0.8.3、wechatopenai/weknora-docreader:v0.8.3、paradedb/paradedb:v0.25.11-pg17、redis:7.0-alpine，docker compose config 里 app 的 STORAGE_TYPE 须为 local、app 与 frontend 端口的 host_ip 须为 127.0.0.1（用 grep 过滤 STORAGE_TYPE|host_ip|published|- mode: 时须正好七行、两组 - mode/host_ip: 127.0.0.1/published，端口映射不带 IP 时不输出 host_ip、只写容器端口时不输出 published；只看这几项，完整输出含 .env 里的密钥，不贴进证据），不符就停；再 docker compose pull，5 个默认服务的 RepoDigests 都须含 image_digests 登记的 digest（为空也算不一致），不一致就停、不起栈；比对通过后再 docker compose up -d --no-build，起栈后确认各容器的 image ID 等于比对过的镜像，不一致就停栈、数据卷丢弃重建（误拉更新的版本时 app 一启动就迁移到更高版本、不可回退）；tag 被改指时可 docker pull <仓库>@<登记 digest> 再 docker tag 打回，之后不再对该服务 pull；只有 postgres、redis 可以重新登记",
       "不用 scripts/start_all.sh，含 --no-pull：默认 up --pull always；--no-pull 走 up --build -d，用当前 checkout 重建并覆盖 v0.8.3 tag（本地构建的镜像 digest 不会等于登记值），还设 START_OLLAMA=true 在宿主机拉起 Ollama",
-      "从 3e22822 本地构建（只在拉不到官方镜像时）：在 3e22822 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.3-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.3-local；命令见评估文档。每条 docker compose 命令前同样加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE，用 docker compose config --images 核对引用（三个 :v0.8.3-local 加 postgres、redis）、用 docker compose config 核对 STORAGE_TYPE 与端口 host_ip（同第一条：须正好七行，只看这几项），再只 docker compose pull postgres redis（打回过 tag 的服务同样不再 pull），这两个按登记 digest 比对通过后再 docker compose up -d --no-build，起栈后核对容器 image ID；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
+      "从 3e22822 本地构建（只在拉不到官方镜像时）：在 3e22822 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.3-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.3-local；命令同评估文档，但把其中的 3e8b0bf、v0.8.2 换成 3e22822、v0.8.3。每条 docker compose 命令前同样加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE，用 docker compose config --images 核对引用（三个 :v0.8.3-local 加 paradedb/paradedb:v0.25.11-pg17、redis:7.0-alpine）、用 docker compose config 核对 STORAGE_TYPE 与端口 host_ip（同第一条：须正好七行，只看这几项），再只 docker compose pull postgres redis（打回过 tag 的服务同样不再 pull），这两个按登记 digest 比对通过后再 docker compose up -d --no-build，起栈后核对容器 image ID；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
       "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local，起栈后用 docker exec WeKnora-app printenv STORAGE_TYPE 留证，不是 local 就停栈",
       "误跑过 latest 的数据卷丢弃重建；证据记录 schema_migrations 版本（v0.8.3 为 118）",
       "APP_PORT=127.0.0.1:8080；frontend 只需绑 127.0.0.1，端口任意（如 FRONTEND_PORT=127.0.0.1:18080；探测只访问 app，不影响结论），证据记录 docker port 输出，app 与 frontend 只能是 127.0.0.1、其余容器没有端口，docker ps -a --filter label=com.docker.compose.project=<项目名>（项目名取 WeKnora-app 容器的 com.docker.compose.project label）列出的正好是 5 个默认容器（不按 WeKnora- 前缀过滤，dex 不带这个前缀），否则停栈",
@@ -105,6 +105,6 @@
         "as_of": "2026-10-18"
       }
     },
-    "image_digests_note": "v0.8.3 默认 5 服务镜像：app wechatopenai/weknora-app:v0.8.3、ui wechatopenai/weknora-ui:v0.8.3、docreader wechatopenai/weknora-docreader:v0.8.3、postgres paradedb/paradedb:v0.25.11-pg17、redis redis:7.0-alpine；每项的 as_of 是查得日期；postgres 与 redis 是明确的可变 tag，docker compose pull 会重新解析所有 tag，任一项比对不一致时都可 docker pull <仓库>@<登记 digest> 后 docker tag 回原 tag，之后不再对该服务 pull；只有 postgres、redis 可以在查明 tag 被改指后重新登记，app、ui、docreader 不重新登记"
+    "image_digests_note": "v0.8.3 默认 5 服务镜像：app wechatopenai/weknora-app:v0.8.3、ui wechatopenai/weknora-ui:v0.8.3、docreader wechatopenai/weknora-docreader:v0.8.3、postgres paradedb/paradedb:v0.25.11-pg17、redis redis:7.0-alpine；digest 是 2026-10-18 在本机 docker compose pull 后从 docker image inspect 的 RepoDigests 读出的多架构 index digest，未另行对 registry API 复核；每项的 as_of 是查得日期；postgres 与 redis 是明确的可变 tag，docker compose pull 会重新解析所有 tag，任一项比对不一致时都可 docker pull <仓库>@<登记 digest> 后 docker tag 回原 tag，之后不再对该服务 pull；只有 postgres、redis 可以在查明 tag 被改指后重新登记，app、ui、docreader 不重新登记"
   }
 }

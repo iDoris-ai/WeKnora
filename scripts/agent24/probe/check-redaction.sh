@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 证据脱敏自检：用 grep 哨兵扫描证据目录（含二进制文件，-a），命中任何凭据或本机身份信息就失败。
 # 只打印"文件:行号 规则名"，不打印命中的值。
-# 用法：check-redaction.sh [--skip-env] [证据目录]（参数顺序不限；默认目录 docs/agent24/probe-evidence/4b363d15）
+# 用法：check-redaction.sh [--skip-env] [证据目录]（参数顺序不限；默认目录 probe-evidence/<HEAD 的 8 位 SHA>）
 #   读不到 $STACK_DIR/.env 时失败；只有显式传 --skip-env 才跳过 .env 比对。
 set -uo pipefail
 # C locale：BSD grep 在 UTF-8 locale 下遇到二进制字节会漏匹配；规则都是 ASCII，用 C locale 扫描。
@@ -19,7 +19,7 @@ for arg in "$@"; do
     exit 2
   fi
 done
-DIR=${DIR_ARG:-$ROOT/docs/agent24/probe-evidence/4b363d15}
+DIR=${DIR_ARG:-$ROOT/docs/agent24/probe-evidence/$(git -C "$ROOT" rev-parse --short=8 HEAD)}
 ENVF=${STACK_DIR:-$HOME/weknora-probe-stack}/.env
 bad=0
 if [ ! -d "$DIR" ]; then
