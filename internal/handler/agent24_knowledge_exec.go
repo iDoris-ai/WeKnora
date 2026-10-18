@@ -24,13 +24,10 @@ func agent24KnowledgeDeadline(requestedMS int64) (time.Duration, int) {
 	return time.Duration(ms) * time.Millisecond, int(ms)
 }
 
-// classifyAgent24KnowledgeExecError maps an execution error to the envelope.
-// clientGone means the caller aborted and no response must be written (R7.1).
-// An explicit non-deadline cause wins and is not overridden by an expired ctx;
-// timeout means only the caller's deadline (CONTRACT-READONLY-v1 §6, R3.4).
-// Known limit: the fan-out does not keep per-branch causes, so "all branches
-// hit the deadline" and "dependency failure mixed with expiry" are not
-// distinguishable here; partial results and branch causes are a later slice.
+// classifyAgent24KnowledgeExecError: clientGone means the caller aborted, write
+// nothing (R7.1). Explicit non-deadline causes win over an expired ctx; timeout
+// means only the caller's deadline (§6, R3.4). The fan-out keeps no per-branch
+// causes, so mixed failures are not separable here (partial: a later slice).
 func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24KnowledgeError, bool) {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return nil, true

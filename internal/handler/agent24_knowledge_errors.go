@@ -60,13 +60,6 @@ type agent24KnowledgeError struct {
 	Extra     map[string]any
 }
 
-func (e *agent24KnowledgeError) Error() string {
-	if e.Reason == "" {
-		return string(e.Code)
-	}
-	return string(e.Code) + ": " + e.Reason
-}
-
 func agent24InvalidRequest() *agent24KnowledgeError {
 	return &agent24KnowledgeError{Code: agent24CodeInvalidRequest}
 }
