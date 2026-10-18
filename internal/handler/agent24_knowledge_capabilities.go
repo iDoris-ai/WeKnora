@@ -16,8 +16,6 @@ import (
 
 const (
 	agent24KnowledgeProtocolVersion = 1
-	// Integration-mode allowlist (KB-C1-01) is not implemented yet.
-	agent24KnowledgeMode = "standalone"
 	// Maximum server_version length in bytes (CONTRACT-READONLY-v1 §9 R9.2).
 	agent24ServerVersionMaxBytes = 128
 )
@@ -60,9 +58,15 @@ type DeploymentIntegration struct {
 
 // BuildAgent24KnowledgeCapability returns the current truthful declaration.
 func BuildAgent24KnowledgeCapability() Agent24KnowledgeCapability {
+	// The mode is validated at startup (router), so an error cannot occur here;
+	// fall back to standalone anyway.
+	mode, err := Agent24KnowledgeModeFromEnv()
+	if err != nil {
+		mode = Agent24KnowledgeModeStandalone
+	}
 	return Agent24KnowledgeCapability{
 		ProtocolVersions: []int{agent24KnowledgeProtocolVersion},
-		Mode:             agent24KnowledgeMode,
+		Mode:             mode,
 		// search/read integration endpoints (KB-C1-01c) are not implemented.
 		// Non-nil so it serializes as [] rather than null.
 		SupportedOperations: []string{},

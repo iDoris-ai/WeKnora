@@ -142,6 +142,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
 
+	// Agent24 A24-KB-04: integration-mode route allowlist; must precede every route.
+	installAgent24IntegrationMode(r, params.Config)
+
 	// 健康检查（不需要认证）
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
