@@ -114,14 +114,21 @@ call() {
   : >"$W/xauth"
   ST=$(curl -q --noproxy '*' -s -m "${TMO:-30}" -o "$W/body" -D "$W/hdr" -w '%{http_code}' -X "$m" \
     -H @"$W/auth" "$@" "$BASE$p")
+  # 传输失败默认中止。bash 3.2 非 posix 下，ALLOW_000=1 call/J 只对这一次调用（含 J 再调的 call）可见，返回后恢复。
+  if [ "$ST" = "000" ] && [ "${ALLOW_000:-}" != 1 ]; then
+    die "传输失败，HTTP 000：$m $p"
+  fi
   # 记录里的 file_path 只留协议头（与 obs 一致），不落具体资源 ID。
   p=$(sed -E 's#file_path=([A-Za-z]+)(%3A%2F%2F|://)[^&]*#file_path=\1://…#' <<<"$p")
   jq -nc --arg a "$a" --arg m "$m" --arg p "$p" --arg s "$ST" \
     '{actor:$a,method:$m,path:$p,status:($s|tonumber)}' >>"$REC"
 }
 # 额外的凭据头（如 X-External-User-Token）：xh 头名 值。只对紧接着的下一次 call 生效，同样经 $W/auth 交给 curl，
-# 不要写成 call 的 -H 参数（那样会出现在 curl 的进程参数里）。
-xh() { printf '%s: %s\n' "$1" "$2" >>"$W/xauth"; }
+# 不要写成 call 的 -H 参数（那样会出现在 curl 的进程参数里）。值同时记入 SECRETS，收尾时替换。
+xh() {
+  printf '%s: %s\n' "$1" "$2" >>"$W/xauth"
+  SECRETS+=("$2")
+}
 # J 主体 方法 路径 JSON [curl 参数…]：请求体（可能含口令）写进 $W/req，经 --data-binary @文件 发送。
 J() {
   local a=$1 m=$2 p=$3
@@ -164,6 +171,15 @@ ck() {
   [[ $3 =~ ^($2)$ ]] && ok=true
   jq -nc --arg d "$1" --arg e "$2" --arg a "$3" --argjson ok $ok \
     '{check:$d,expect:$e,actual:$a,ok:$ok}' >>"$CHK"
+}
+# ck_absent 描述 输入 实际值 期望：反向检查（“不出现”）在输入为空时无法判定。
+ck_absent() {
+  if [ -z "$2" ]; then
+    jq -nc --arg d "$1" --arg e "$4" --arg a "输入为空，无法判定" \
+      '{check:$d,expect:$e,actual:$a,ok:false}' >>"$CHK"
+  else
+    ck "$1" "$4" "$3"
+  fi
 }
 obs() { jq -nc --arg d "$1" --arg a "$2" '{observation:$d,value:$a}' >>"$NOTE"; }
 reset_rec() { : >"$REC"; : >"$CHK"; : >"$NOTE"; }

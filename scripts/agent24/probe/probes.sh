@@ -64,7 +64,7 @@ p2() {
   J jwt:A PUT "/api/v1/tenants/$TA/api-principal-config" "{\"mode\":\"signed_token\",\"hmac_secret\":\"$HMAC\"}"
   f resp '.data | {mode, has_hmac_secret}'
   ck "配置 signed_token" 200 "$ST"
-  ck "响应不回显 HMAC 明文" false "$(has "$HMAC")"
+  ck_absent "响应不回显 HMAC 明文" "$(cat "$W/body")" "$(has "$HMAC")" false
   for x in a b; do
     J jwt:A POST "/api/v1/tenants/$TA/api-principal-test-token" "{\"external_user_id\":\"probe-ext-$x\"}"
     take "TK_$x" .data.token "签发主体 $x 的 token"
@@ -118,7 +118,8 @@ p2() {
   ck "审计 actor 是租户 Owner A（本栈无法区分'最早注册'与'Owner'），不是 key/主体" true \
     "$([ "${row%%|*}" = "$U_A" ] && echo true || echo false)"
   ck "审计 details 带 api_key_id" true "$(jq 'has("api_key_id")' <<<"${row#*|}" 2>/dev/null)"
-  ck "审计不记外部主体 probe-ext-a" false "$(grep -q probe-ext-a <<<"$row" && echo true || echo false)"
+  ck_absent "审计不记外部主体 probe-ext-a" "$row" \
+    "$(grep -q probe-ext-a <<<"$row" && echo true || echo false)" false
   obs "读取校验（只读 SQL）：audit_logs 中该条 details 的键" "$(jq -c 'keys' <<<"${row#*|}" 2>/dev/null)"
   J jwt:A PUT "/api/v1/tenants/$TA/api-principal-config" '{"mode":"tenant"}'
   local u2="记忆、MCP OAuth、沙箱凭据归属未测（需模型或沙箱）；会话归属已测；"
@@ -164,8 +165,9 @@ p3() {
   u3="${U}；revision 映射为静态结论"
   if [ "$EMBED" = fake-ollama ]; then
     # 取消：伪 Ollama 对 PROBE-SLOW 延迟 8 秒，客户端 1 秒后断开，看服务端怎么处理。
+    # 预期 curl 超时得到 HTTP 000。ALLOW_000=1 只放行这一次。
     slow="PROBE-SLOW-CANCEL-$RID"
-    TMO=1 J key:empty POST "/api/v1/knowledge-bases/$KBF/hybrid-search" "{\"query_text\":\"$slow\"}"
+    TMO=1 ALLOW_000=1 J key:empty POST "/api/v1/knowledge-bases/$KBF/hybrid-search" "{\"query_text\":\"$slow\"}"
     obs "取消：客户端 1 秒超时断开时 curl 记到的状态码（000 表示未收到响应）" "$ST"
     sleep 3
     log=$(applog "$t0" | grep -F "$slow")
@@ -187,7 +189,7 @@ p3() {
 }
 
 p4() {
-  local s nc cid bc u=""
+  local s nc bc u=""
   call key:empty GET "/api/v1/knowledge/$D_ALPHA"
   ck "retrieve key 读 knowledge 元数据" 200 "$ST"
   f meta '.data | {parse_status, has_file_hash: (.file_hash != ""), has_file_path: (.file_path != ""), error_message}'
@@ -428,9 +430,16 @@ count_in_response() {
 
 # Langfuse 是否启用：LANGFUSE_ENABLED 非空时按它判断，否则 public/secret key 都非空就自动启用（config.go:79-84）。
 langfuse_state() {
-  local raw en pk sk on=false
+  local raw en pk sk on=false rc
   raw=$(docker exec "$(cid app)" sh -c \
     'printf "%s|%s|%s" "$LANGFUSE_ENABLED" "${LANGFUSE_PUBLIC_KEY:+1}" "${LANGFUSE_SECRET_KEY:+1}"')
+  rc=$?
+  # 取不到时不要写成“追踪启用=false”：那会把出口未测说成已确认关闭。
+  if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
+    LF_DESC="取不到（docker exec 失败）"
+    LF_UNTESTED="Langfuse 状态取不到，追踪出口未测"
+    return
+  fi
   IFS='|' read -r en pk sk <<<"$raw"
   if [ -n "$en" ]; then
     case $(tr 'A-Z' 'a-z' <<<"$en") in 1 | true | t | yes | y | on) on=true ;; esac
@@ -482,7 +491,8 @@ p13() {
   ck "hmac_secret 明文进 request_body" '[1-9][0-9]*' "$(sgrep "$hm" "$L" | grep -c 'request_body=')"
   ck "本次登录行的 password 字段被打码" true \
     "$(grep -F "$me" "$L" | grep -F 'path=/api/v1/auth/login' | grep -q '"password":"\*\*\*"' && echo true || echo false)"
-  ck "口令明文不出现在日志" 0 "$(sgrep "$PW" -c "$L")"
+  # 日志文件是空的时，0 次不能证明口令没出现。
+  ck_absent "口令明文不出现在日志" "$([ -s "$L" ] && printf x)" "$(sgrep "$PW" -c "$L")" 0
   obs "容器 LOG_LEVEL" "$lv"
   langfuse_state
   obs "Langfuse 配置（只记是否非空）" "$LF_DESC"
@@ -527,7 +537,7 @@ p15() {
     | grep -E '^ +(host|port):' | sed 's/^ *//' | sort | tr -d '"' | tr '\n' ';')
   ck "容器内 config.yaml 默认监听 0.0.0.0:8080" 'host: 0\.0\.0\.0;port: 8080;' "$srv"
   listen=$(docker exec "$app" sh -c 'cat /proc/net/tcp /proc/net/tcp6' | grep -cE ' 0+:1F90 0+:0000 0A ')
-  ck "容器内实际监听通配地址 :8080（/proc/net/tcp{,6}，1F90=8080）" '[1-9]' "$listen"
+  ck "容器内实际监听通配地址 :8080（/proc/net/tcp{,6}，1F90=8080）" '[1-9][0-9]*' "$listen"
   obs "宿主侧发布地址（受测栈约束要求只绑 127.0.0.1，已由前置核对保证）" "$(docker port "$app" 8080/tcp | head -1)"
   obs "GIN_MODE" "$(docker exec "$app" sh -c 'echo $GIN_MODE')"
   emit 15 15-lite-listen.json "监听地址（标准栈）" \
