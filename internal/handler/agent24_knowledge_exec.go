@@ -64,11 +64,15 @@ func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24
 		}
 		return agent24Internal(), false
 	}
-	// An inner HTTP timeout or child-context expiry is a dependency failure,
-	// not the caller's deadline.
-	var transportErr *api.TransportError
-	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &transportErr) {
+	// A deadline error is the caller's deadline only if the request ctx expired;
+	// otherwise it is an inner HTTP or child-context timeout (a dependency).
+	if errors.Is(err, context.DeadlineExceeded) {
 		return deadlineOr(), false
+	}
+	// Any other transport failure (refused, reset) is a dependency failure.
+	var transportErr *api.TransportError
+	if errors.As(err, &transportErr) {
+		return agent24Unavailable("dependency"), false
 	}
 	return agent24Internal(), false
 }

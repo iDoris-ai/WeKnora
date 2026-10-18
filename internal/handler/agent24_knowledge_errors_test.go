@@ -160,6 +160,7 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 	bg := context.Background()
 	vendor := func(code int) error { return &api.HTTPError{StatusCode: code, Body: "vendor secret"} }
 	transport := &api.TransportError{Op: "send request", Err: errors.New("dial")}
+	timedOut := &api.TransportError{Op: "send request", Err: context.DeadlineExceeded}
 	cases := []struct {
 		name   string
 		ctx    context.Context
@@ -181,7 +182,9 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		{"http 503", bg, vendor(503), agent24CodeUnavailable, "dependency"},
 		{"http 400", bg, vendor(400), agent24CodeInternal, ""},
 		{"live transport", bg, transport, agent24CodeUnavailable, "dependency"},
-		{"expired transport", expired, transport, agent24CodeTimeout, ""},
+		{"expired transport", expired, transport, agent24CodeUnavailable, "dependency"},
+		{"expired transport deadline", expired, timedOut, agent24CodeTimeout, ""},
+		{"live transport deadline", bg, timedOut, agent24CodeUnavailable, "dependency"},
 		{"expired other", expired, errors.New("x"), agent24CodeInternal, ""},
 		{"secret", bg, errors.New("secret text"), agent24CodeInternal, ""},
 	}
