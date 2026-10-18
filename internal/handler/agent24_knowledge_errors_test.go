@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func agent24WriteErr(t *testing.T, e *agent24KnowledgeError, echo agent24KnowledgeEcho) (int, map[string]any, map[string]any, string) {
+func agent24WriteErr(
+	t *testing.T, e *agent24KnowledgeError, echo agent24KnowledgeEcho,
+) (int, map[string]any, map[string]any, string) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -34,7 +36,10 @@ func TestAgent24KnowledgeErrorEnvelope(t *testing.T) {
 		reason    string
 	}{
 		{agent24InvalidRequest(), 400, "invalid_request", "invalid request", false, ""},
-		{agent24UnsupportedProtocolVersion([]int{1}), 400, "invalid_request", "invalid request", false, "unsupported_protocol_version"},
+		{
+			agent24UnsupportedProtocolVersion([]int{1}), 400, "invalid_request", "invalid request",
+			false, "unsupported_protocol_version",
+		},
 		{agent24Unauthorized("credential_expired"), 401, "unauthorized", "unauthorized", false, "credential_expired"},
 		{agent24Forbidden("empty_scope"), 403, "forbidden", "forbidden", false, "empty_scope"},
 		{agent24NotFound(), 404, "not_found", "not found", false, ""},
@@ -43,7 +48,10 @@ func TestAgent24KnowledgeErrorEnvelope(t *testing.T) {
 		{agent24Unavailable(""), 503, "unavailable", "service unavailable", true, ""},
 		{agent24Unavailable("overloaded"), 503, "unavailable", "service unavailable", true, "overloaded"},
 		{agent24Unavailable("index_failed"), 503, "unavailable", "service unavailable", false, "index_failed"},
-		{agent24Unavailable("unsupported_kb_type"), 503, "unavailable", "service unavailable", false, "unsupported_kb_type"},
+		{
+			agent24Unavailable("unsupported_kb_type"), 503, "unavailable", "service unavailable",
+			false, "unsupported_kb_type",
+		},
 		{agent24Internal(), 500, "internal", "internal error", false, ""},
 		// Invalid reasons fall back to internal without reason.
 		{agent24Unauthorized("bogus"), 500, "internal", "internal error", false, ""},
@@ -93,7 +101,10 @@ func TestAgent24KnowledgeParseCommon(t *testing.T) {
 		{"trailing", `{"protocol_version":1,"request_id":"r","generation":1} {}`, false, "", nil, nil},
 		{"missing pv", `{"request_id":"r","generation":1}`, false, "", "r", int64(1)},
 		{"pv string", `{"protocol_version":"1","request_id":"r","generation":1}`, false, "", "r", int64(1)},
-		{"pv 2", `{"protocol_version":2,"request_id":"r","generation":3}`, false, "unsupported_protocol_version", "r", int64(3)},
+		{
+			"pv 2", `{"protocol_version":2,"request_id":"r","generation":3}`,
+			false, "unsupported_protocol_version", "r", int64(3),
+		},
 		{"rid long", `{"protocol_version":1,"request_id":"` + long + `","generation":1}`, false, "", nil, int64(1)},
 		{"rid empty", `{"protocol_version":1,"request_id":"","generation":1}`, false, "", nil, int64(1)},
 		{"rid number", `{"protocol_version":1,"request_id":5,"generation":1}`, false, "", nil, int64(1)},

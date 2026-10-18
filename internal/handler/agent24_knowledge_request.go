@@ -33,7 +33,9 @@ func agent24JSONInt64(raw json.RawMessage) (int64, bool) {
 
 // parseAgent24KnowledgeCommon decodes the body and validates protocol_version,
 // request_id and generation, echoing whichever of the latter two is valid.
-func parseAgent24KnowledgeCommon(body []byte) (map[string]json.RawMessage, agent24KnowledgeEcho, *agent24KnowledgeError) {
+func parseAgent24KnowledgeCommon(
+	body []byte,
+) (map[string]json.RawMessage, agent24KnowledgeEcho, *agent24KnowledgeError) {
 	var echo agent24KnowledgeEcho
 	var fields map[string]json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(body))

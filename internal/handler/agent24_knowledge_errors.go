@@ -37,13 +37,19 @@ var agent24KnowledgeCodeMeta = map[agent24KnowledgeCode]struct {
 }
 
 var (
-	agent24UnauthorizedReasons = map[string]bool{"credential_missing": true, "credential_invalid": true,
-		"credential_expired": true, "credential_revoked": true}
-	agent24ForbiddenReasons = map[string]bool{"empty_scope": true, "operation_not_allowed": true,
-		"operation_disabled": true, "policy_denied": true}
+	agent24UnauthorizedReasons = map[string]bool{
+		"credential_missing": true, "credential_invalid": true,
+		"credential_expired": true, "credential_revoked": true,
+	}
+	agent24ForbiddenReasons = map[string]bool{
+		"empty_scope": true, "operation_not_allowed": true,
+		"operation_disabled": true, "policy_denied": true,
+	}
 	// Value: retryable.
-	agent24UnavailableReasons = map[string]bool{"not_ready": true, "dependency": true, "overloaded": true,
-		"index_building": true, "index_pending": true, "unsupported_kb_type": false, "index_failed": false}
+	agent24UnavailableReasons = map[string]bool{
+		"not_ready": true, "dependency": true, "overloaded": true,
+		"index_building": true, "index_pending": true, "unsupported_kb_type": false, "index_failed": false,
+	}
 )
 
 // agent24KnowledgeError is a classified error; it never holds raw error text.
@@ -66,8 +72,10 @@ func agent24InvalidRequest() *agent24KnowledgeError {
 }
 
 func agent24UnsupportedProtocolVersion(supported []int) *agent24KnowledgeError {
-	return &agent24KnowledgeError{Code: agent24CodeInvalidRequest, Reason: "unsupported_protocol_version",
-		Extra: map[string]any{"supported": append([]int{}, supported...)}}
+	return &agent24KnowledgeError{
+		Code: agent24CodeInvalidRequest, Reason: "unsupported_protocol_version",
+		Extra: map[string]any{"supported": append([]int{}, supported...)},
+	}
 }
 
 func agent24Unauthorized(reason string) *agent24KnowledgeError {
