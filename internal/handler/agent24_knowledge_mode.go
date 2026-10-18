@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-04 (KB-C1-01, CONTRACT-READONLY-v1 R1.5/R2.7/R9.3).
+// Agent24 fork product patch A24-KB-04 (KB-C1-01, CONTRACT-READONLY-v1 R9.3).
 //
 // AGENT24_KNOWLEDGE_MODE selects standalone (default) or integration. In
 // integration mode the router denies every route outside a fixed allowlist

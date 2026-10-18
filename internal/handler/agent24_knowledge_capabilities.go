@@ -20,9 +20,8 @@ const (
 	agent24ServerVersionMaxBytes = 128
 )
 
-// Declared limits only: they are not enforced until KB-C1-01c implements the
-// search/read endpoints. While supported_operations is empty, clients do not
-// connect, so these values cannot be relied upon yet.
+// Declared values only: these limits take no effect until KB-C1-01c implements
+// the search/read endpoints; supported_operations stays empty until then.
 const (
 	agent24KnowledgeMaxResults      = 50
 	agent24KnowledgeMaxConcurrency  = 4

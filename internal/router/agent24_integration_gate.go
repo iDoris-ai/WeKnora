@@ -5,6 +5,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -41,20 +42,21 @@ func applyAgent24IntegrationGate(r *gin.Engine) {
 	r.Use(agent24IntegrationGate())
 }
 
-// installAgent24IntegrationMode must run before any route is registered.
-func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) {
-	ctx := context.Background()
+// installAgent24IntegrationMode must run before any route is registered. It
+// returns an error for an invalid mode or an unsafe integration config.
+func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) error {
 	mode, err := handler.Agent24KnowledgeModeFromEnv()
 	if err != nil {
-		logger.Fatalf(ctx, "%v", err)
+		return fmt.Errorf("agent24 knowledge mode: %w", err)
 	}
 	if mode != handler.Agent24KnowledgeModeIntegration {
-		return
+		return nil
 	}
 	if err := handler.ValidateAgent24IntegrationConfig(cfg); err != nil {
-		logger.Fatalf(ctx, "%v", err)
+		return fmt.Errorf("agent24 integration config: %w", err)
 	}
 	applyAgent24IntegrationGate(r)
-	logger.Infof(ctx, "Agent24 knowledge integration mode: only %d allowlisted routes are served",
+	logger.Infof(context.Background(), "Agent24 knowledge integration mode: only %d allowlisted routes are served",
 		len(agent24IntegrationAllowlist))
+	return nil
 }
