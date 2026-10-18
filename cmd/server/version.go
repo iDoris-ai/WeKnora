@@ -18,7 +18,7 @@ import (
 func handleVersionFlag(args []string, w io.Writer) bool {
 	for _, arg := range args {
 		if arg == "--version" || arg == "-version" {
-			fmt.Fprintf(w, "WeKnora %s (commit %s, edition %s, built %s, %s)\n",
+			_, _ = fmt.Fprintf(w, "WeKnora %s (commit %s, edition %s, built %s, %s)\n",
 				handler.Version, handler.CommitID, handler.Edition, handler.BuildTime, handler.GoVersion)
 			return true
 		}

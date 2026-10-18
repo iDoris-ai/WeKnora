@@ -1,10 +1,12 @@
 // Agent24 fork product patch A24-KB-01 (CONTRACT-READONLY-v1 §9).
 //
 // Declares the Agent24 knowledge integration capability under
-// data.integration.agent24_knowledge of GET /system/capabilities. This is a
-// fork-only file so upstream merges only touch the small hook in
-// deployment_capabilities.go. The declaration is truthful: it states what is
-// supported, never health or readiness.
+// data.integration.agent24_knowledge of GET /system/capabilities. New code
+// lives in fork-only agent24_* files; the upstream files touched are the
+// field and return value in deployment_capabilities.go and the first lines of
+// cmd/server/main.go (--version). The declaration states what is supported,
+// never health or readiness.
+
 package handler
 
 import (
