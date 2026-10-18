@@ -37,6 +37,8 @@ type DeploymentCapability struct {
 type DeploymentCapabilitiesData struct {
 	Edition      string                          `json:"edition"`
 	Capabilities map[string]DeploymentCapability `json:"capabilities"`
+	// Agent24 fork A24-KB-01: see agent24_knowledge_capabilities.go.
+	Integration DeploymentIntegration `json:"integration"`
 }
 
 // DeploymentFeatureAvailability mirrors injected backend handlers/services.
@@ -119,6 +121,7 @@ func BuildDeploymentCapabilities(
 			"settings.sandbox.host":   sandboxHost,
 			"settings.sandbox.remote": sandboxRemote,
 		},
+		Integration: DeploymentIntegration{Agent24Knowledge: BuildAgent24KnowledgeCapability()},
 	}
 }
 

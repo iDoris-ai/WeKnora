@@ -41,6 +41,10 @@ import (
 )
 
 func main() {
+	// Agent24 A24-KB-01: answer --version before any config/DB/container init.
+	if handleVersionFlag(os.Args[1:], os.Stdout) {
+		return
+	}
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
