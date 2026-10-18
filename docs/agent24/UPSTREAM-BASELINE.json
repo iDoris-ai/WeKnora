@@ -82,9 +82,24 @@
           ],
           "remove_when": "fork 自有功能，不随上游撤掉；上游升级时保留新增的 agent24_* 文件，不会冲突",
           "added_on": "2026-10-19"
+        },
+        {
+          "id": "A24-KB-02",
+          "issue": "iDoris-ai/WeKnora#37",
+          "summary": "Knowledge 集成的按操作就绪端点 POST /api/v1/agent24/knowledge/ready（KB-C1-01b-b，CONTRACT-READONLY-v1 §8）；复用 A24-KB-03 的信封与公共解析",
+          "upstream_commit": null,
+          "paths": [
+            "internal/container/container.go",
+            "internal/handler/agent24_knowledge_ready.go",
+            "internal/handler/agent24_knowledge_ready_test.go",
+            "internal/router/agent24_knowledge_routes.go",
+            "internal/router/router.go"
+          ],
+          "remove_when": "fork 自有功能，不随上游撤掉；上游升级时保留新增的 agent24_* 文件，冲突只可能在 router.go 的 RouterParams 字段与注册行、container.go 的 Provide 行",
+          "added_on": "2026-10-19"
         }
       ],
-      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-19 有三项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）与 A24-KB-03（iDoris-ai/WeKnora#38，4 个新增路径）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
+      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-19 有四项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，4 个新增路径）与 A24-KB-02（iDoris-ai/WeKnora#37，5 个路径）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
     },
     "absorbed_upstream_release": {
       "tag": "v0.8.3",

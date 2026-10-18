@@ -65,6 +65,7 @@ type RouterParams struct {
 	AuthHandler                  *handler.AuthHandler
 	InitializationHandler        *handler.InitializationHandler
 	SystemHandler                *handler.SystemHandler
+	Agent24KnowledgeReadyHandler *handler.Agent24KnowledgeReadyHandler // A24-KB-02
 	MCPServiceHandler            *handler.MCPServiceHandler
 	MCPCredentialsHandler        *handler.MCPCredentialsHandler
 	MCPOAuthHandler              *handler.MCPOAuthHandler
@@ -327,6 +328,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
+		RegisterAgent24KnowledgeRoutes(v1, params.Agent24KnowledgeReadyHandler, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route
 		// template that does not actually exist (typo / path drift). A
