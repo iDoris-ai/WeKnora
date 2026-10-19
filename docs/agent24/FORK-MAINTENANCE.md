@@ -1,6 +1,6 @@
 # WeKnora fork：分支角色与上游维护
 
-本仓库是 `iDoris-ai/WeKnora`，上游为 `Tencent/WeKnora`。本次只建立仓库、文档与同步基础设施，不启动知识产品实现或恢复 Agent24 暂停路线。
+本仓库是 `iDoris-ai/WeKnora`，上游为 `Tencent/WeKnora`。首个提交只建立了仓库、文档与同步基础设施；之后的产品补丁（截至 2026-10-19：安全修复 A24-PATCH-01 与 Knowledge 集成 A24-KB-01～04）逐项登记在 `PATCH-LEDGER.md` 和 `UPSTREAM-BASELINE.json` 的 `current_baseline.product.product_patches`。
 
 ## 三个长期分支
 
@@ -10,7 +10,7 @@
 | `upstream-main` | 与上游开发分支 `main` 的 commit 一致 | 纯镜像；不添加产品改动 |
 | `a24/develop` | 从正式 Release 起步的二次开发集成分支；本仓库默认分支 | 保存 Agent24 文档、适配和 feature；通过正常 merge 吸收正式版 |
 
-初始正式版为 `v0.8.2`；完整初始 SHA 见 `UPSTREAM-BASELINE.json` 的 `initial_snapshot`。当前产品基线与必须先升级的时点见同一文件的 `current_baseline`（`upgrade_before.triggers`；重新评估的日期与触发另见 `reevaluate_by`、`review_triggers`）和 PATCH-LEDGER 开头；镜像的实时状态以 `git ls-remote` 为准。研究方案里的旧 main SHA 保留为当时证据，不能混称产品发布基线。
+初始正式版为 `v0.8.2`；完整初始 SHA 见 `UPSTREAM-BASELINE.json` 的 `initial_snapshot`。当前产品基线为 `v0.8.3`，2026-10-18 按下面的流程经同步 PR #44 正常 merge 吸收（合并提交 `167d24c`，见 `current_baseline.absorbed_upstream_release`）。当前产品基线与必须先升级的时点见同一文件的 `current_baseline`（`upgrade_before.triggers`；重新评估的日期与触发另见 `reevaluate_by`、`review_triggers`）和 PATCH-LEDGER 开头；镜像的实时状态以 `git ls-remote` 为准。研究方案里的旧 main SHA 保留为当时证据，不能混称产品发布基线。
 
 ## 同步规则
 
@@ -20,16 +20,16 @@
 gh workflow run agent24-upstream-sync.yml -R iDoris-ai/WeKnora --ref a24/develop
 ```
 
-1. 查询上游正式 Release 和 main；先确认两条镜像均可快进，再 atomic push，使镜像指向上游 commit，不创建额外提交。
-2. 产品分支尚未包含正式版时，开或更新一个由工作流创建的 `[upstream-sync]` issue，写明正式版 SHA 与评审步骤；**工作流不开同步 PR**。评审人审完后自己开 `upstream-release → a24/develop` 同步 PR；该 PR 打开期间不推进 `upstream-release`，合并后工作流关闭 issue。开发版仅跟踪，不自动进入产品。
+1. 查询上游正式 Release 和 main；先确认两条镜像均可快进，再经守卫检查（见下文「推镜像前的守卫」）后 atomic push，使镜像指向上游 commit，不创建额外提交。本仓库里以某条镜像为 head 的 PR 打开期间，本次不推进那条镜像（跨仓的同名分支不算）。
+2. 产品分支尚未包含正式版时，开或更新一个由工作流创建的 `[upstream-sync]` issue，写明正式版 SHA 与评审步骤；**工作流不开同步 PR**。评审人审完后自己开 `upstream-release → a24/develop` 同步 PR；该 PR 打开期间不推进 `upstream-release`，工作流（可推时）推进 `upstream-main` 后就结束，不更新也不关闭 issue；合并后的下一次运行发现产品分支已包含正式版，关闭 issue。工作流只认自己（`github-actions[bot]`）开的、标题以 `[upstream-sync] ` 开头的 issue，同名的人工 issue 不会被改写。开发版仅跟踪，不自动进入产品。
 3. 同步 PR 必须完成适配/权限/取消/引用/迁移/恢复检查及评审后正常 merge。工作流没有自动批准或合并权限行为。同步 PR 由评审人在审完上游对 `.github/` 的改动后才开，开的那一刻适用检查即以评审人身份运行；未执行或未通过不算完成。
-4. 上游正式版 tag 名不是 `v` 开头的版本号形式（`^v[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z.]+)?$`，例如 `v0.8.3`、`v1.0.0-rc.1`）时失败停止：tag 名会写进评审人照抄执行的命令，不能带 shell 元字符。非快进、改写 tag、冲突、权限不足或上游 API 错误均失败停止，查看 Actions 日志处理；不 reset、强推、rebase 已共享历史或把上游文件整树覆盖到产品分支。六小时是检查周期，不是实时同步保证；失败期间旧版本仍保留。
+4. 上游正式版 tag 名不是 `v` 开头的版本号形式（`^v[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z.]+)?$`，例如 `v0.8.3`、`v1.0.0-rc.1`）时失败停止：tag 名会写进评审人照抄执行的命令，不能带 shell 元字符。守卫自测或守卫不通过、非快进、改写 tag、权限不足或上游 API 错误均失败停止，查看 Actions 日志处理（工作流本身不做 merge，冲突在评审人开的同步 PR 上逐项解决）；不 reset、强推、rebase 已共享历史或把上游文件整树覆盖到产品分支。六小时是检查周期，不是实时同步保证；失败期间旧版本仍保留。同步通道不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason（`current_baseline.upgrade_before.never`）。
 
 镜像随上游移动；同步 PR 打开期间它的 head 不会被同步工作流推进，但评审期间若没有打开的同步 PR，`upstream-release` 可能前进，所以 issue 的步骤要求先暂停同步工作流并核对镜像 SHA。评审/验收必须针对当前精确 head，不能复用旧批准。长期改动不得放在镜像分支。产品开发用短期 task 分支，PR base 为 `a24/develop`；上游镜像不是 task PR 的 base，除同步 PR 外也不要作为任何 PR 的 head（本仓库里以镜像为 head 的 PR 打开期间，同步工作流不推进该镜像）。
 
 ## 同步凭据
 
-内置 `GITHUB_TOKEN` 无法获得 `workflows` 权限，推送改动了 `.github/workflows/` 的上游提交会被拒（2026-10-13 起的失败即此原因）。工作流因此**只在推镜像时**改用组织 App 的短期令牌；查询 PR 与开、改、关同步 issue 仍用内置 `GITHUB_TOKEN`（job 权限 `contents: read`、`pull-requests: read`、`issues: write`）。工作流不再开 PR，仓库设置 "Allow GitHub Actions to create and approve pull requests" 可以关闭，建议关闭。
+内置 `GITHUB_TOKEN` 无法获得 `workflows` 权限，推送改动了 `.github/workflows/` 的上游提交会被拒（2026-10-13 起的失败即此原因）。工作流因此**只有 git 操作**（checkout、fetch 与推镜像）用组织 App 的短期令牌；`gh` 命令（查询上游正式 Release、查询 PR、开改关同步 issue）仍用内置 `GITHUB_TOKEN`（job 权限 `contents: read`、`pull-requests: read`、`issues: write`）。工作流不再开 PR，仓库设置 "Allow GitHub Actions to create and approve pull requests" 可以关闭，建议关闭。
 
 - App：iDoris-ai 组织下的私有 GitHub App「iDoris WeKnora Sync」，只安装到本仓库。仓库权限仅 Contents RW、Workflows RW、Metadata R；不订阅 webhook，不申请组织或账号权限。
 - 凭据只放在 Environment `upstream-sync`，其部署分支策略只允许 `a24/develop`：Environment variable `WEKNORA_SYNC_APP_CLIENT_ID` 存 App 的 Client ID，Environment secret `WEKNORA_SYNC_APP_PRIVATE_KEY` 存 App 私钥（PEM 全文）。不要放成仓库级或组织级 secret：镜像推送与评审后运行的同步 PR 检查都会运行上游工作流，它们能读到本仓库可见的全部仓库级与组织级 secret，但跑在其它 ref 上，进不了这个 Environment。
@@ -46,7 +46,7 @@ gh workflow run agent24-upstream-sync.yml -R iDoris-ai/WeKnora --ref a24/develop
 - 出现 `create` 触发；
 - 文件名或内容不是合法 UTF-8、无法解析、出现 YAML 合并键 `<<`（按反转义后的键值判断，`"<<"`、`"\x3c\x3c"` 等任何写法都算；Psych 会合并而 GitHub 不支持，读法不同就拦）、含多个 YAML 文档、同一映射里有重复键（含 `on` 与 `"on"`、`on` 与 `true` 这类解析后相同的键）或非普通标量的键、任何带标签的节点（如 `!!binary`）、工作流文件不是普通文件（目录、子模块、符号链接）、`.github` 或 `.github/workflows` 不是普通目录，或结构无法识别。
 
-今天上游 main 与 v0.8.3 都能通过。触发时先确认上游改动的意图，再决定是否手动推送或调整守卫。修改守卫后运行 `bash .github/scripts/agent24-mirror-trigger-guard-test.sh`，全部用例须为 PASS。同步工作流每次运行都会先在 runner 上跑这个测试脚本（Self-test 步骤），任何用例失败就停止，不推镜像。脚本还会取出工作流里推进镜像的那一步，在本地临时仓库上原样运行，验证非快进时失败停止、两条镜像都不动、推送不带强推。`schedule`、`workflow_run`、`pull_request_target` 等事件使用默认分支 `a24/develop` 上已评审的定义，不在检查范围内。
+2026-10-16 第一次手动运行（Actions run 38924672104）时，上游 main 与 v0.8.3 都能通过。触发时先确认上游改动的意图，再决定是否手动推送或调整守卫。修改守卫后运行 `bash .github/scripts/agent24-mirror-trigger-guard-test.sh`，全部用例须为 PASS。同步工作流每次运行都会先在 runner 上跑这个测试脚本（Self-test 步骤），任何用例失败就停止，不推镜像。脚本还会取出工作流里推进镜像的那一步，在本地临时仓库上原样运行，验证非快进时失败停止、两条镜像都不动、推送不带强推，以及以某条镜像为 head 的同仓 PR 打开时只推进另一条。`schedule`、`workflow_run`、`pull_request_target` 等事件使用默认分支 `a24/develop` 上已评审的定义，不在检查范围内。
 
 ## 防止覆盖我们的 feature
 
@@ -56,10 +56,13 @@ UI 在 fork 的 Vue 前端开发；Agent24 只放宿主壳、受限 IPC、provid
 
 ## 首个提交与范围
 
+首个提交（`9d4e79fa`）：
+
 - `WEKNORA-INTEGRATION-PROPOSAL.md`：当前总体方案及分发、切换、Sidecar/界面嵌入补充。
 - `FORK-MAINTENANCE.md` / `UPSTREAM-BASELINE.json`：分支职责、更新、初始证据与当前基线。
-- `BASELINE-EVAL-v0.8.3.md`：v0.8.2 与 v0.8.3 的差异评估和基线决定。
 - `PATCH-LEDGER.md`：补丁/扩展登记起点。
 - `agent24-upstream-sync.yml`：定时镜像快进，并在有新正式版时开或更新同步 issue；不是产品 feature。
 
-提交作者为 `jhfnetboy <jhfnetboy@gmail.com>`；提交与 PR 描述使用中文。上游同步 PR 不绕过任何后续设置的 required CI / 外部评审门。
+之后新增的 fork 自有文件：`ADR-001-SINGLE-CONVERSATION.md`、`TODO-B-ONE-STOP-KNOWLEDGE.md`（产品设计）；`.github/scripts/agent24-mirror-trigger-guard.rb` 与 `-test.sh`（推镜像前的守卫及其自测）；`BASELINE-EVAL-v0.8.3.md`（v0.8.2 与 v0.8.3 的差异评估和基线决定）；`CAPABILITY-MATRIX.md`、`scripts/agent24/probe/` 与 `probe-evidence/`（能力矩阵、探测框架与证据）。
+
+首个提交的作者为 `jhfnetboy <jhfnetboy@gmail.com>`；提交与 PR 描述使用中文。上游同步 PR 不绕过任何后续设置的 required CI / 外部评审门。
