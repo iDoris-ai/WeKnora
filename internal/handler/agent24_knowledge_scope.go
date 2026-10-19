@@ -4,41 +4,52 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"slices"
 
 	"gorm.io/gorm"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+const agent24ScopeBatch = 500
 
 type agent24DefaultScopeResolver struct {
 	kbs interfaces.KnowledgeBaseService
 }
 
-// Resolve keeps caller-tenant KBs only: integration mode does not consume org sharing (R2.7), so
-// cross-tenant KBs are always omitted. Tenant Viewer role is enforced by the route's g.Viewer().
+// Resolve keeps caller-tenant KBs only (integration mode does not consume org sharing, R2.7; Viewer: g.Viewer()).
+// ids (deduped) pass the in-memory API key filter, then batched IN lookups, re-sorted into ids order.
+// Batches keep each statement under bind-parameter limits (Postgres 65535, old SQLite 999): one oversized
+// IN would fail as a retryable 503 forever.
 func (r agent24DefaultScopeResolver) Resolve(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
 	tenantID := types.CallerFromContext(ctx).TenantID
-	out := make([]*types.KnowledgeBase, 0, len(ids))
+	if tenantID == 0 {
+		return nil, nil
+	}
+	pos, allowed := make(map[string]int, len(ids)), make([]string, 0, len(ids))
 	for _, id := range ids {
-		if types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, id) != nil {
-			continue
+		if types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, id) == nil {
+			pos[id], allowed = len(pos), append(allowed, id)
 		}
-		kb, err := r.kbs.GetKnowledgeBaseByID(ctx, id)
-		if errors.Is(err, repository.ErrKnowledgeBaseNotFound) {
-			continue
-		}
+	}
+	var kbs []*types.KnowledgeBase
+	for batch := range slices.Chunk(allowed, agent24ScopeBatch) {
+		got, err := r.kbs.GetKnowledgeBasesByIDsOnly(ctx, batch)
 		if err != nil {
 			return nil, err
 		}
-		if tenantID != 0 && kb.TenantID == tenantID {
-			out = append(out, kb)
-		}
+		kbs = append(kbs, got...)
 	}
-	return out, nil
+	kbs = slices.DeleteFunc(kbs, func(kb *types.KnowledgeBase) bool {
+		if kb == nil {
+			return true
+		}
+		_, asked := pos[kb.ID] // a row matched only by DB collation is not in Q
+		return !asked || kb.TenantID != tenantID
+	})
+	slices.SortFunc(kbs, func(a, b *types.KnowledgeBase) int { return pos[a.ID] - pos[b.ID] })
+	return kbs, nil
 }
 
 type agent24DBIndexReader struct{ db *gorm.DB }

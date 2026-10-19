@@ -95,9 +95,8 @@ func agent24State(ok bool) agent24OperationState {
 	return agent24OperationState{State: "not_ready", Reason: "dependency"}
 }
 
-// agent24KBIndexFacts counts non-deleting, non-deleted docs; Building = pending/processing. Active build is
-// approximated by parse_status completed/finalizing; source revision -> index build mapping: KB-C1-01c.
-// HasTextChunks = an enabled text chunk of a completed/finalizing/cancelled doc.
+// agent24KBIndexFacts counts non-deleting docs; Building = pending/processing; Active = completed/finalizing
+// (index build proxy until KB-C1-01c); HasTextChunks = enabled text chunk of a completed/finalizing/cancelled doc.
 type agent24KBIndexFacts struct {
 	Docs, Active, Building int
 	HasTextChunks          bool
@@ -139,13 +138,8 @@ func agent24ParseScope(raw json.RawMessage) ([]string, bool) {
 		json.Unmarshal(scope["knowledge_base_ids"], &ids) != nil || len(ids) == 0 || slices.Contains(ids, "") {
 		return nil, false
 	}
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if !slices.Contains(out, id) {
-			out = append(out, id)
-		}
-	}
-	return out, true
+	seen := make(map[string]bool, len(ids)) // keeps first occurrences, in order
+	return slices.DeleteFunc(ids, func(id string) bool { dup := seen[id]; seen[id] = true; return dup }), true
 }
 
 // Ready reports liveness and per-operation readiness, plus per-KB readiness for a scope.
