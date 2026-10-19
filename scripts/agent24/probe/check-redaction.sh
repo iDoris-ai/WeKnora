@@ -4,7 +4,8 @@
 # 每个模块在末尾声明 MOD_DONE_NN=1 和 MOD_RULES_NN（本模块 report 的确切次数），逐模块核对。
 # 模块里执行 exit（任何退出码）都判 FAIL、以 1 退出。
 # 用法：check-redaction.sh [--skip-env] [证据目录]（参数顺序不限）
-#   不带目录时逐个检查 docs/agent24/probe-evidence/ 下的全部子目录（隐藏目录跳过）。
+#   不带目录时逐个检查 docs/agent24/probe-evidence/ 下的全部子目录（隐藏目录跳过）；
+#   该目录存在但不可读或不可进入时失败，不存在或没有子目录时 SKIP 并以 0 退出。
 #   读不到 $STACK_DIR/.env 时失败；只有显式传 --skip-env 才跳过 .env 比对。
 set -uo pipefail
 # C locale：BSD grep 在 UTF-8 locale 下遇到二进制字节会漏匹配。规则都是 ASCII。
@@ -29,6 +30,14 @@ done
 # 隐藏目录（replace_out 留下的 .<名>.new.*、.<名>.old.* 残留，见 README §3）不是证据，跳过并打印出来。
 if [ -z "$DIR_ARG" ]; then
   EVROOT=$ROOT/docs/agent24/probe-evidence
+  # 不存在：检出里没有任何证据，没有可扫的东西，按下面的 SKIP 处理。
+  # 存在但不是目录、不可读或不可进入：nullglob 会展开为空，和「没有子目录」分不开，必须判失败。
+  if [ -e "$EVROOT" ] || [ -L "$EVROOT" ]; then
+    if [ ! -d "$EVROOT" ] || [ ! -r "$EVROOT" ] || [ ! -x "$EVROOT" ]; then
+      echo "FAIL 证据根目录不可读或不可进入，无法枚举证据子目录：$EVROOT"
+      exit 1
+    fi
+  fi
   shopt -s nullglob
   subs=("$EVROOT"/*/)
   hidden=("$EVROOT"/.[!.]*/)
@@ -37,7 +46,7 @@ if [ -z "$DIR_ARG" ]; then
     for h in "${hidden[@]}"; do echo "跳过隐藏目录：${h%/}"; done
   fi
   if [ "${#subs[@]}" -eq 0 ]; then
-    echo "SKIP $EVROOT 下没有证据子目录"
+    if [ -d "$EVROOT" ]; then echo "SKIP $EVROOT 下没有证据子目录"; else echo "SKIP $EVROOT 不存在（检出里没有证据）"; fi
     echo "     本次没有检查任何文件。"
     exit 0
   fi

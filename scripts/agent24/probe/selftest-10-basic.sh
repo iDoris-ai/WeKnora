@@ -440,6 +440,29 @@ if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q "$R_SK" \
   printf '不符 无参扫描全部子目录（第二个失败）：期望 rc=1、报出 bbbb2222、第一个仍通过，实际 rc=%s\n' "$rc"
   sed 's/^/  /' "$d/out"
 fi
+# probe-evidence 存在且有证据子目录、但不可读不可进入：glob 展开为空，不能当成「没有子目录」放行。
+if [ "$(id -u)" -eq 0 ]; then
+  n=$((n + 1))
+  printf 'SKIP 无参扫描证据根目录不可读（root 下跳过）\n'
+else
+  n=$((n + 1))
+  d=$BASE/c$n
+  rc=0
+  mk_ev_root "$d" || rc=-1
+  if [ "$rc" -eq 0 ]; then
+    chmod 000 "$d/root/docs/agent24/probe-evidence"
+    "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1
+    rc=$?
+    chmod 755 "$d/root/docs/agent24/probe-evidence" 2>/dev/null || true
+  fi
+  if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q '证据根目录不可读' \
+    || grep -q '^SKIP' "$d/out"; then
+    bad=1
+    printf '不符 无参扫描证据根目录不可读：期望 rc=1 且 FAIL 含证据根目录不可读、不得 SKIP，实际 rc=%s\n' "$rc"
+    sed 's/^/  /' "$d/out"
+  fi
+  rm -rf "$d/root"
+fi
 
-SELFTEST_MIN_10=61
+SELFTEST_MIN_10=62
 SELFTEST_DONE_10=1
