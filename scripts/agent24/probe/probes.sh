@@ -331,8 +331,9 @@ p10() {
   call jwt:V GET /api/v1/knowledge-bases
   ck "同租户 Viewer 看到全部 KB（无 per-user ACL）" true "$(kb_ids_have "$KB1" "$KB2")"
   obs "SystemAdmin 用户数（只读 SQL）" "$(sql 'select count(*) from users where is_system_admin')"
-  local u="平台 API key 跨租户读取未测：v0.8.2 无 API 创建 SystemAdmin，"
-  u="${u}只能设 WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL 后重启 app（本次不改环境、不改库）；组织共享与跨租户超管未测"
+  local u="平台 API key 跨租户读取未测：/system/admin 整组（含提升 SystemAdmin 的 /promote、v0.8.3 新增的 /users 与 /users/status）"
+  u="${u}只允许 SystemAdmin 调用，本栈 SystemAdmin 为 0，无法经 API 从零创建；"
+  u="${u}只能先注册用户、再设 WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL 后重启 app（本次不改环境、不改库）；组织共享与跨租户超管未测"
   emit 10 10-tenant-isolation.json "租户隔离" "$u"
 }
 

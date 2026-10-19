@@ -66,13 +66,15 @@ env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES 
 3. 运行中的服务正好是默认的 5 个，所有发布端口都只绑 127.0.0.1（frontend 端口任意，本机是 `127.0.0.1:18080`）。
 4. app 容器的 `STORAGE_TYPE=local`。数据库用户和库名也从 app 容器的 `DB_USER`、`DB_NAME` 读出；psql 连不上时报"无法连接数据库"。
 5. 5 个默认服务（app、frontend、docreader、postgres、redis）的镜像 digest 都与登记值一致：先用 `docker inspect -f '{{.Image}}'` 取容器实际使用的镜像 ID，再查这个 ID 的 `RepoDigests`。登记里读不到 digest 也算失败。
-6. `schema_migrations` 等于登记值（118）。
+6. `schema_migrations` 等于登记值：取自 `docs/agent24/UPSTREAM-BASELINE.json` 的 `current_baseline.test_stack_constraints` 里「<登记的 release.tag> 为 N」这一句，不写死版本号。
 7. 宿主 `127.0.0.1:11434`：
    - `fake-ollama` 模式下必须空闲，否则停下；
    - `none` 模式下有应答时也停下。原因是 `.env` 的 `OLLAMA_BASE_URL` 指向宿主 11434，产品可能会调用宿主上的 Ollama 去拉取不存在的模型。确认无妨时可设 `PROBE_ALLOW_HOST_OLLAMA=1`，此时改为打 WARN，并记进 `environment.warnings`。
-8. `/system/info` 的 `commit_id`（至少 7 位前缀）、`db_version` 与登记一致。这个接口要鉴权，所以只能在注册并登录第一个测试用户之后核对；不符同样以 3 退出，不再写入其他数据。
+8. `/system/info` 的 `commit_id`（至少 7 位前缀）与登记的 `release.commit` 一致，`version` 等于登记的 `release.tag`（接口返回的不带 `v` 前缀，比较时补上），`db_version` 等于第 6 条的登记值。这个接口要鉴权，所以只能在注册并登录第一个测试用户之后核对；不符同样以 3 退出，不再写入其他数据。
 
 第 1–7 项都在写入任何数据之前完成。核对结果写进每个证据文件的 `environment`，包括全部 `docker port` 输出。
+
+在这些检查之前，`lib.sh` 被 source 时还会核对 fork 命名空间之外与登记的 release 逐字节相同；有差异就以 3 停下，已登记的产品补丁也一样（官方镜像不含 fork 补丁）。所以 A24-PATCH-01 登记期间，在 `a24/develop` 上跑前置核对必然 exit 3，这是预期行为，不要为了通过去改登记。探测重跑要等 iDoris-ai/WeKnora#51（本地构建镜像的探测模式）落地，或 v0.8.4 吸收上游修复、撤掉该补丁之后。注意 A24-KB-01～04（Knowledge 集成，长期保留）同样在命名空间之外，撤掉 A24-PATCH-01 之后核对仍会 exit 3，届时只能靠 #51。
 
 ## 3. 运行方式
 
@@ -167,7 +169,7 @@ v0.8.2 中，只开关键词的 KB 也需要 embedding：`IndexingStrategy.Needs
 
 ## 7. 脱敏与清理
 
-`check-redaction.sh [--skip-env] [目录]` 扫描证据，参数顺序不限。它按 `REQUIRED_MODULES` 加载同目录的 `redact-NN-*.sh`（公共函数、与解析无关的规则、jq 路径、文本规则）。每个编号必须恰好有一个文件，缺一个就失败。不认识的名字不加载。模块 source 失败、没有跑到末尾、在模块里 `exit`，或本模块 `report` 的实际次数与它声明的 `MOD_RULES_NN` 不等，都失败。`REQUIRED_MODULES` 必须包含 `00` 和 `10`，目录里有而列表里没有的 `redact-NN-*.sh` 也算失败。叠放的中间片改 `REQUIRED_MODULES` 这一行，只留下本片已有的模块号。命中即失败，只打印规则名和位置，不打印值。真正把 token 挡在证据外的是 finalize 的凭据剔除和这次自检，不是日志摘录的长度（第 13 项只摘录哨兵前后各不超过 100 个字符）。规则、占位符和已知局限见 [REDACTION.md](REDACTION.md)。
+`check-redaction.sh [--skip-env] [目录]` 扫描证据，参数顺序不限；不带目录时逐个扫描 `docs/agent24/probe-evidence/` 下的全部子目录，任何一个失败即失败。它按 `REQUIRED_MODULES` 加载同目录的 `redact-NN-*.sh`（公共函数、与解析无关的规则、jq 路径、文本规则）。每个编号必须恰好有一个文件，缺一个就失败。不认识的名字不加载。模块 source 失败、没有跑到末尾、在模块里 `exit`，或本模块 `report` 的实际次数与它声明的 `MOD_RULES_NN` 不等，都失败。`REQUIRED_MODULES` 必须包含 `00` 和 `10`，目录里有而列表里没有的 `redact-NN-*.sh` 也算失败。叠放的中间片改 `REQUIRED_MODULES` 这一行，只留下本片已有的模块号。命中即失败，只打印规则名和位置，不打印值。真正把 token 挡在证据外的是 finalize 的凭据剔除和这次自检，不是日志摘录的长度（第 13 项只摘录哨兵前后各不超过 100 个字符）。规则、占位符和已知局限见 [REDACTION.md](REDACTION.md)。
 
 规则自测不依赖证据目录，运行时在临时目录里逐例生成夹具：
 

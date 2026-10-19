@@ -294,9 +294,10 @@ precheck() {
     digests+="$s=$img@$exp;"
   done
 
-  # 只认"<当前登记 tag> 为 N"，旧版本残留的句子不会被读出。
+  # 只认"<当前登记 tag> 为 N"，旧版本残留的句子不会被读出。tag 里的点号换成 [.]：替换串里的反斜杠
+  # 不一定留得住（随 jq 版本），留不住时点号仍是通配，v0x8x3 也会被认成 v0.8.3。
   WANT_DB=$(jq -r --arg t "$REL_TAG" '.current_baseline.test_stack_constraints[]
-    | capture(($t | gsub("\\."; "\\.")) + " 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
+    | capture(($t | gsub("\\."; "[.]")) + " 为 (?<n>[0-9]+)").n' "$BASELINE" | head -1)
   WANT_COMMIT=$(jq -r '.current_baseline.release.commit // empty' "$BASELINE")
   [ -n "$WANT_DB" ] && [ -n "$WANT_COMMIT" ] || fail3 "登记里缺 schema_migrations 版本或 release.commit"
   schema=$(sql "select version||' dirty='||dirty from schema_migrations") || fail3 "无法连接数据库（psql 失败）"
