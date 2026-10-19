@@ -463,6 +463,46 @@ else
   fi
   rm -rf "$d/root"
 fi
+# probe-evidence 不存在：已入库的目录不见了，不能当成「检出里没有证据」SKIP 放行。
+n=$((n + 1))
+d=$BASE/c$n
+rc=0
+mk_ev_root "$d" || rc=-1
+if [ "$rc" -eq 0 ]; then
+  rm -rf "$d/root/docs/agent24/probe-evidence"
+  "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1
+  rc=$?
+fi
+if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q '证据根目录不可读' \
+  || grep -q '^SKIP' "$d/out"; then
+  bad=1
+  printf '不符 无参扫描证据根目录不存在：期望 rc=1 且 FAIL 含证据根目录不可读、不得 SKIP，实际 rc=%s\n' "$rc"
+  sed 's/^/  /' "$d/out"
+fi
+rm -rf "$d/root"
+# 上级目录 docs/agent24 不可进入：[ -e ] 因权限返回假，不能当成「不存在」SKIP 放行。
+if [ "$(id -u)" -eq 0 ]; then
+  n=$((n + 1))
+  printf 'SKIP 无参扫描上级目录不可进入（root 下跳过）\n'
+else
+  n=$((n + 1))
+  d=$BASE/c$n
+  rc=0
+  mk_ev_root "$d" || rc=-1
+  if [ "$rc" -eq 0 ]; then
+    chmod 000 "$d/root/docs/agent24"
+    "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1
+    rc=$?
+    chmod 755 "$d/root/docs/agent24" 2>/dev/null || true
+  fi
+  if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q '证据根目录不可读' \
+    || grep -q '^SKIP' "$d/out"; then
+    bad=1
+    printf '不符 无参扫描上级目录不可进入：期望 rc=1 且 FAIL 含证据根目录不可读、不得 SKIP，实际 rc=%s\n' "$rc"
+    sed 's/^/  /' "$d/out"
+  fi
+  rm -rf "$d/root"
+fi
 
-SELFTEST_MIN_10=62
+SELFTEST_MIN_10=64
 SELFTEST_DONE_10=1

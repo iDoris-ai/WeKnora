@@ -5,7 +5,8 @@
 # 模块里执行 exit（任何退出码）都判 FAIL、以 1 退出。
 # 用法：check-redaction.sh [--skip-env] [证据目录]（参数顺序不限）
 #   不带目录时逐个检查 docs/agent24/probe-evidence/ 下的全部子目录（隐藏目录跳过）；
-#   该目录存在但不可读或不可进入时失败，不存在或没有子目录时 SKIP 并以 0 退出。
+#   该目录必须存在、是目录、可读、可进入，否则失败（上级目录不可进入同样失败）；
+#   只有能枚举但没有（非隐藏）子目录时 SKIP 并以 0 退出。
 #   读不到 $STACK_DIR/.env 时失败；只有显式传 --skip-env 才跳过 .env 比对。
 set -uo pipefail
 # C locale：BSD grep 在 UTF-8 locale 下遇到二进制字节会漏匹配。规则都是 ASCII。
@@ -30,13 +31,11 @@ done
 # 隐藏目录（replace_out 留下的 .<名>.new.*、.<名>.old.* 残留，见 README §3）不是证据，跳过并打印出来。
 if [ -z "$DIR_ARG" ]; then
   EVROOT=$ROOT/docs/agent24/probe-evidence
-  # 不存在：检出里没有任何证据，没有可扫的东西，按下面的 SKIP 处理。
-  # 存在但不是目录、不可读或不可进入：nullglob 会展开为空，和「没有子目录」分不开，必须判失败。
-  if [ -e "$EVROOT" ] || [ -L "$EVROOT" ]; then
-    if [ ! -d "$EVROOT" ] || [ ! -r "$EVROOT" ] || [ ! -x "$EVROOT" ]; then
-      echo "FAIL 证据根目录不可读或不可进入，无法枚举证据子目录：$EVROOT"
-      exit 1
-    fi
+  # probe-evidence/ 已入库，正常检出一定存在。不存在、不是目录、不可读或不可进入（包括上级目录不可进入时
+  # [ -e ] 因权限返回假）一律判失败：nullglob 会展开为空，和「没有子目录」分不开，不能 SKIP 放行。
+  if [ ! -d "$EVROOT" ] || [ ! -r "$EVROOT" ] || [ ! -x "$EVROOT" ]; then
+    echo "FAIL 证据根目录不可读、不可进入或不存在，无法枚举证据子目录：$EVROOT"
+    exit 1
   fi
   shopt -s nullglob
   subs=("$EVROOT"/*/)
@@ -46,7 +45,7 @@ if [ -z "$DIR_ARG" ]; then
     for h in "${hidden[@]}"; do echo "跳过隐藏目录：${h%/}"; done
   fi
   if [ "${#subs[@]}" -eq 0 ]; then
-    if [ -d "$EVROOT" ]; then echo "SKIP $EVROOT 下没有证据子目录"; else echo "SKIP $EVROOT 不存在（检出里没有证据）"; fi
+    echo "SKIP $EVROOT 下没有证据子目录"
     echo "     本次没有检查任何文件。"
     exit 0
   fi
