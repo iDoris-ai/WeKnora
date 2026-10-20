@@ -4,7 +4,9 @@
 # 每个模块在末尾声明 MOD_DONE_NN=1 和 MOD_RULES_NN（本模块 report 的确切次数），逐模块核对。
 # 模块里执行 exit（任何退出码）都判 FAIL、以 1 退出。
 # 用法：check-redaction.sh [--skip-env] [证据目录]（参数顺序不限）
-#   默认目录 docs/agent24/probe-evidence/<HEAD 的 8 位 SHA>。
+#   不带目录时逐个检查 docs/agent24/probe-evidence/ 下的全部子目录（隐藏目录跳过）；
+#   该目录必须存在、是目录、可读、可进入，否则失败（上级目录不可进入同样失败）；
+#   只有能枚举但没有（非隐藏）子目录时 SKIP 并以 0 退出。
 #   读不到 $STACK_DIR/.env 时失败；只有显式传 --skip-env 才跳过 .env 比对。
 set -uo pipefail
 # C locale：BSD grep 在 UTF-8 locale 下遇到二进制字节会漏匹配。规则都是 ASCII。
@@ -25,17 +27,51 @@ for arg in "$@"; do
     exit 2
   fi
 done
-DIR=${DIR_ARG:-$ROOT/docs/agent24/probe-evidence/$(git -C "$ROOT" rev-parse --short=8 HEAD)}
-ENVF=${STACK_DIR:-$HOME/weknora-probe-stack}/.env
-bad=0
-if [ ! -d "$DIR" ]; then
-  if [ -z "$DIR_ARG" ]; then
-    echo "SKIP 默认证据目录不存在：$DIR"
-    echo "     要自检，请把证据目录作为参数传入，"
-    echo "     例如 run.sh 只跑部分项时打印的临时目录：check-redaction.sh /tmp/weknora-probe-partial.XXXXXX"
+# 不带目录参数：逐个检查 probe-evidence 下的全部子目录，每个在子进程里单独跑，任何一个失败即以 1 失败。
+# 隐藏目录（replace_out 留下的 .<名>.new.*、.<名>.old.* 残留，见 README §3）不是证据，跳过并打印出来。
+if [ -z "$DIR_ARG" ]; then
+  EVROOT=$ROOT/docs/agent24/probe-evidence
+  # probe-evidence/ 已入库，正常检出一定存在。不存在、不是目录、不可读或不可进入（包括上级目录不可进入时
+  # [ -e ] 因权限返回假）一律判失败：nullglob 会展开为空，和「没有子目录」分不开，不能 SKIP 放行。
+  if [ ! -d "$EVROOT" ] || [ ! -r "$EVROOT" ] || [ ! -x "$EVROOT" ]; then
+    echo "FAIL 证据根目录不可读、不可进入或不存在，无法枚举证据子目录：$EVROOT"
+    exit 1
+  fi
+  shopt -s nullglob
+  subs=("$EVROOT"/*/)
+  hidden=("$EVROOT"/.[!.]*/)
+  shopt -u nullglob
+  if [ "${#hidden[@]}" -gt 0 ]; then
+    for h in "${hidden[@]}"; do echo "跳过隐藏目录：${h%/}"; done
+  fi
+  if [ "${#subs[@]}" -eq 0 ]; then
+    echo "SKIP $EVROOT 下没有证据子目录"
     echo "     本次没有检查任何文件。"
     exit 0
   fi
+  self=$HERE/$(basename "$0")
+  all=0
+  for s in "${subs[@]}"; do
+    s=${s%/}
+    echo "== $s"
+    if [ "$SKIP_ENV" = true ]; then bash "$self" --skip-env "$s"; else bash "$self" "$s"; fi
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "FAIL 证据目录未通过（rc=${rc}）：$s"
+      all=1
+    fi
+  done
+  if [ "$all" -ne 0 ]; then
+    echo "脱敏自检失败：$EVROOT 下有未通过的证据目录" >&2
+    exit 1
+  fi
+  echo "脱敏自检通过：$EVROOT 下全部 ${#subs[@]} 个证据目录"
+  exit 0
+fi
+DIR=$DIR_ARG
+ENVF=${STACK_DIR:-$HOME/weknora-probe-stack}/.env
+bad=0
+if [ ! -d "$DIR" ]; then
   echo "证据目录不存在：$DIR" >&2
   exit 2
 fi

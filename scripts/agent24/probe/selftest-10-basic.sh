@@ -382,5 +382,127 @@ if [ "$rc" -ne 3 ] || ! grep -F -q '未登记的改动' "$d/err" \
   sed 's/^/  /' "$d/err"
 fi
 
-SELFTEST_MIN_10=58
+# 已登记路径按整行比对：根目录 Cargo.toml 只是已登记 third_party/anydoc-go/Cargo.toml 的子串，
+# 仍算未登记的改动（lib.sh 改成 grep -Fq 时这一例会失败）。
+n=$((n + 1))
+d=$BASE/c$n
+mkdir -p "$d/out" "$d/stack"
+rc=0
+mk_patch_repo "$d" Cargo.toml '[{"id":"T-PATCH-2","paths":["third_party/anydoc-go/Cargo.toml"]}]' \
+  >"$d/repo.log" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  rc=0
+  src_patch_repo "$d" >"$d/log" 2>"$d/err" || rc=$?
+else
+  cp "$d/repo.log" "$d/err"
+  rc=-1
+fi
+if [ "$rc" -ne 3 ] || ! grep -F -q '未登记的改动' "$d/err" || ! grep -F -q 'Cargo.toml' "$d/err" \
+  || grep -F -q '已登记的产品补丁' "$d/err"; then
+  bad=1
+  printf '不符 前置核对：子串不算已登记：期望 rc=3 且报未登记的改动 Cargo.toml，实际 rc=%s\n' "$rc"
+  sed 's/^/  /' "$d/err"
+fi
+
+# check-redaction.sh 不带目录：逐个扫描 probe-evidence 下的全部子目录，任何一个失败即失败；隐藏目录跳过。
+# 驱动按自身位置找仓库根，所以复制到临时目录的同样结构里运行。参数：用例目录。
+mk_ev_root() {
+  local r=$1/root
+  mkdir -p "$r/scripts/agent24/probe" "$r/docs/agent24/probe-evidence/aaaa1111" \
+    "$r/docs/agent24/probe-evidence/bbbb2222" "$r/docs/agent24/probe-evidence/.bbbb2222.old.x" || return 1
+  cp "$HERE/check-redaction.sh" "$HERE"/redact-[0-9][0-9]-*.sh "$r/scripts/agent24/probe/" || return 1
+  printf '%s\n' 'plain note' >"$r/docs/agent24/probe-evidence/aaaa1111/f.txt"
+  printf '%s\n' 'plain note' >"$r/docs/agent24/probe-evidence/bbbb2222/f.txt"
+  printf '%s\n' 'key sk-SelftestHiddenDirAbcdef123456' >"$r/docs/agent24/probe-evidence/.bbbb2222.old.x/f.txt"
+}
+n=$((n + 1))
+d=$BASE/c$n
+rc=0
+mk_ev_root "$d" || rc=-1
+[ "$rc" -eq 0 ] && { "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1; rc=$?; }
+if [ "$rc" -ne 0 ] || grep -q '^FAIL' "$d/out" || ! grep -F -q '脱敏自检通过：' "$d/out" \
+  || [ "$(grep -c '^脱敏自检通过：.*/probe-evidence/[ab]\{4\}[0-9]\{4\}$' "$d/out")" != 2 ] \
+  || ! grep -F -q '跳过隐藏目录' "$d/out"; then
+  bad=1
+  printf '不符 无参扫描全部子目录（全部通过）：期望 rc=0、两个子目录都通过、隐藏目录跳过，实际 rc=%s\n' "$rc"
+  sed 's/^/  /' "$d/out"
+fi
+n=$((n + 1))
+d=$BASE/c$n
+rc=0
+mk_ev_root "$d" || rc=-1
+printf '%s\n' 'key sk-SelftestSecondDirAbcdef123456' >"$d/root/docs/agent24/probe-evidence/bbbb2222/f.txt"
+[ "$rc" -eq 0 ] && { "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1; rc=$?; }
+if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q "$R_SK" \
+  || ! grep -F -q '证据目录未通过' "$d/out" || ! grep -F -q 'bbbb2222' "$d/out" \
+  || ! grep -F -q '脱敏自检通过：' "$d/out" || grep -F -q 'SelftestSecondDir' "$d/out"; then
+  bad=1
+  printf '不符 无参扫描全部子目录（第二个失败）：期望 rc=1、报出 bbbb2222、第一个仍通过，实际 rc=%s\n' "$rc"
+  sed 's/^/  /' "$d/out"
+fi
+# probe-evidence 存在且有证据子目录、但不可读不可进入：glob 展开为空，不能当成「没有子目录」放行。
+if [ "$(id -u)" -eq 0 ]; then
+  n=$((n + 1))
+  printf 'SKIP 无参扫描证据根目录不可读（root 下跳过）\n'
+else
+  n=$((n + 1))
+  d=$BASE/c$n
+  rc=0
+  mk_ev_root "$d" || rc=-1
+  if [ "$rc" -eq 0 ]; then
+    chmod 000 "$d/root/docs/agent24/probe-evidence"
+    "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1
+    rc=$?
+    chmod 755 "$d/root/docs/agent24/probe-evidence" 2>/dev/null || true
+  fi
+  if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q '证据根目录不可读' \
+    || grep -q '^SKIP' "$d/out"; then
+    bad=1
+    printf '不符 无参扫描证据根目录不可读：期望 rc=1 且 FAIL 含证据根目录不可读、不得 SKIP，实际 rc=%s\n' "$rc"
+    sed 's/^/  /' "$d/out"
+  fi
+  rm -rf "$d/root"
+fi
+# probe-evidence 不存在：已入库的目录不见了，不能当成「检出里没有证据」SKIP 放行。
+n=$((n + 1))
+d=$BASE/c$n
+rc=0
+mk_ev_root "$d" || rc=-1
+if [ "$rc" -eq 0 ]; then
+  rm -rf "$d/root/docs/agent24/probe-evidence"
+  "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1
+  rc=$?
+fi
+if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q '证据根目录不可读' \
+  || grep -q '^SKIP' "$d/out"; then
+  bad=1
+  printf '不符 无参扫描证据根目录不存在：期望 rc=1 且 FAIL 含证据根目录不可读、不得 SKIP，实际 rc=%s\n' "$rc"
+  sed 's/^/  /' "$d/out"
+fi
+rm -rf "$d/root"
+# 上级目录 docs/agent24 不可进入：[ -e ] 因权限返回假，不能当成「不存在」SKIP 放行。
+if [ "$(id -u)" -eq 0 ]; then
+  n=$((n + 1))
+  printf 'SKIP 无参扫描上级目录不可进入（root 下跳过）\n'
+else
+  n=$((n + 1))
+  d=$BASE/c$n
+  rc=0
+  mk_ev_root "$d" || rc=-1
+  if [ "$rc" -eq 0 ]; then
+    chmod 000 "$d/root/docs/agent24"
+    "$d/root/scripts/agent24/probe/check-redaction.sh" --skip-env >"$d/out" 2>&1
+    rc=$?
+    chmod 755 "$d/root/docs/agent24" 2>/dev/null || true
+  fi
+  if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q '证据根目录不可读' \
+    || grep -q '^SKIP' "$d/out"; then
+    bad=1
+    printf '不符 无参扫描上级目录不可进入：期望 rc=1 且 FAIL 含证据根目录不可读、不得 SKIP，实际 rc=%s\n' "$rc"
+    sed 's/^/  /' "$d/out"
+  fi
+  rm -rf "$d/root"
+fi
+
+SELFTEST_MIN_10=64
 SELFTEST_DONE_10=1

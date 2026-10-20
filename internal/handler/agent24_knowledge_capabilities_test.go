@@ -22,6 +22,7 @@ func sortedKeys(m map[string]any) []string {
 }
 
 func TestAgent24KnowledgeCapabilityWireShape(t *testing.T) {
+	t.Setenv(Agent24KnowledgeModeEnv, "")
 	data := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{
 		Agents:  true,
 		API:     true,
