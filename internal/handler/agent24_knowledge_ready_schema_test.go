@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -57,6 +58,17 @@ func agent24Validate(sch *jsonschema.Schema, body []byte) error {
 	return sch.Validate(v)
 }
 
+// agent24EveryKB resolves every requested id to a KB: this test checks the response shape, and
+// E's tenant and API key filtering is covered by TestAgent24DefaultScopeAndIndex.
+type agent24EveryKB struct{}
+
+func (agent24EveryKB) Resolve(_ context.Context, ids []string) (kbs []*types.KnowledgeBase, _ error) {
+	for _, id := range ids {
+		kbs = append(kbs, &types.KnowledgeBase{ID: id})
+	}
+	return kbs, nil
+}
+
 func TestAgent24KnowledgeReadySchemaPositive(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	reqSchema, respSchema := agent24ReadySchemas(t)
@@ -65,12 +77,7 @@ func TestAgent24KnowledgeReadySchemaPositive(t *testing.T) {
 		"chunks": {Docs: 3, Active: 1, HasTextChunks: true}, "building": {Docs: 2, Building: 1},
 		"failed": {Docs: 2}, "unsupported": {Docs: 2, Active: 2},
 	}
-	resolver := fakeAgent24Scope(func(ids []string) (kbs []*types.KnowledgeBase, _ error) {
-		for _, id := range ids {
-			kbs = append(kbs, &types.KnowledgeBase{ID: id})
-		}
-		return kbs, nil
-	})
+	resolver := agent24EveryKB{}
 	scope := []string{"empty", "chunks", "building", "failed", "unsupported"}
 	kbReasons := []string{`"index_building"`, `"index_failed"`, `"unsupported_kb_type"`}
 	cases := []struct {
