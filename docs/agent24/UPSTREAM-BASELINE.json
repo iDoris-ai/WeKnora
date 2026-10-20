@@ -91,8 +91,12 @@
           "paths": [
             "internal/container/container.go",
             "internal/handler/agent24_knowledge_ready.go",
+            "internal/handler/agent24_knowledge_ready_schema_test.go",
             "internal/handler/agent24_knowledge_ready_test.go",
             "internal/handler/agent24_knowledge_scope.go",
+            "internal/handler/testdata/agent24_knowledge/README.md",
+            "internal/handler/testdata/agent24_knowledge/common.schema.json",
+            "internal/handler/testdata/agent24_knowledge/ready.schema.json",
             "internal/router/agent24_knowledge_routes.go",
             "internal/router/router.go"
           ],
@@ -118,7 +122,7 @@
           "added_on": "2026-10-19"
         }
       ],
-      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-19 有五项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，4 个新增路径）、A24-KB-02（iDoris-ai/WeKnora#37，6 个路径）与 A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
+      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-19 有五项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，4 个新增路径）、A24-KB-02（iDoris-ai/WeKnora#37，10 个路径）与 A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
     },
     "absorbed_upstream_release": {
       "tag": "v0.8.3",
