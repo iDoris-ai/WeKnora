@@ -28,7 +28,8 @@ func wantMAC(key []byte, parts ...string) string {
 }
 
 func TestAgent24KnowledgeTagKeyFromEnv(t *testing.T) {
-	k32 := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	raw := []byte("0123456789abcdef0123456789abcdef")
+	k32 := base64.StdEncoding.EncodeToString(raw)
 	k31 := base64.StdEncoding.EncodeToString(make([]byte, 31))
 	cases := []struct {
 		name, val string
@@ -52,7 +53,7 @@ func TestAgent24KnowledgeTagKeyFromEnv(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.Len(t, key, 32)
+			assert.Equal(t, raw, key)
 		})
 	}
 }
