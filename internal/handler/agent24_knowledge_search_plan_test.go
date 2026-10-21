@@ -134,6 +134,16 @@ func TestAgent24PlanSearch(t *testing.T) {
 			{ScoreSpace: "emb:e1|vs:s1", KnowledgeBaseIDs: []string{"v"}},
 		}},
 	}, kerr)
+
+	// The smallest mixed case: two KBs, two score spaces.
+	_, kerr = agent24PlanSearch(ready, mixed[:2], make([]agent24KBIndexFacts, 2))
+	assert.Equal(t, &agent24KnowledgeError{
+		Code: agent24CodeInvalidRequest, Reason: "mixed_score_space",
+		Extra: map[string]any{"groups": []agent24ScoreSpaceGroup{
+			{ScoreSpace: "emb:e1", KnowledgeBaseIDs: []string{"a"}},
+			{ScoreSpace: "emb:e2", KnowledgeBaseIDs: []string{"b"}},
+		}},
+	}, kerr)
 }
 
 func TestAgent24SearchOutcome(t *testing.T) {
