@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"os"
 	"testing"
 
@@ -36,6 +37,7 @@ func TestAgent24KnowledgeModeFromEnv(t *testing.T) {
 }
 
 func TestValidateAgent24IntegrationConfig(t *testing.T) {
+	t.Setenv(Agent24KnowledgeTagKeyEnv, base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	f, tr := false, true
 	cases := []struct {
 		name    string
