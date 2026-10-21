@@ -27,6 +27,8 @@ type Agent24KnowledgeReadyProbe interface {
 	RetrieveEngine(ctx context.Context) error
 }
 
+var agent24ReadyProbeTimeout = 2 * time.Second // one deadline for the probes and the scope lookup; tests shorten it
+
 type agent24DefaultReadyProbe struct {
 	db       *gorm.DB
 	registry interfaces.RetrieveEngineRegistry
@@ -37,8 +39,6 @@ func (p agent24DefaultReadyProbe) Storage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
 	return sqlDB.PingContext(ctx)
 }
 
@@ -46,8 +46,13 @@ func (p agent24DefaultReadyProbe) RetrieveEngine(ctx context.Context) error {
 	if p.registry != nil && len(p.registry.GetAllRetrieveEngineServices()) > 0 {
 		return nil
 	}
+	tenantID := types.CallerFromContext(ctx).TenantID
+	if tenantID == 0 {
+		return errors.New("no caller tenant")
+	}
 	var count int64
-	if err := p.db.WithContext(ctx).Model(&types.VectorStore{}).Limit(1).Count(&count).Error; err != nil {
+	q := p.db.WithContext(ctx).Model(&types.VectorStore{}).Where("tenant_id = ?", tenantID)
+	if err := q.Limit(1).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
@@ -168,8 +173,10 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 		}
 	}
 	ctx := c.Request.Context()
-	storageErr := h.probe.Storage(ctx)
-	engineErr := h.probe.RetrieveEngine(ctx)
+	pctx, cancel := context.WithTimeout(ctx, agent24ReadyProbeTimeout)
+	defer cancel()
+	storageErr := h.probe.Storage(pctx)
+	engineErr := h.probe.RetrieveEngine(pctx)
 	if storageErr != nil || engineErr != nil {
 		logger.Warnf(ctx, "agent24 knowledge ready: storage=%v retrieve_engine=%v", storageErr, engineErr)
 	}
@@ -185,11 +192,11 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 		},
 	}
 	if ids != nil {
-		kbs, err := h.scope.Resolve(ctx, ids)
+		kbs, err := h.scope.Resolve(pctx, ids)
 		var out []gin.H
 		for i := 0; err == nil && i < len(kbs); i++ {
 			var f agent24KBIndexFacts
-			if f, err = h.index.Facts(ctx, kbs[i]); err == nil {
+			if f, err = h.index.Facts(pctx, kbs[i]); err == nil {
 				out = append(out, gin.H{
 					"knowledge_base_id": kbs[i].ID, "score_space": agent24ScoreSpace(kbs[i]),
 					"search": agent24KBState(search, f), "read": agent24KBState(read, f),
