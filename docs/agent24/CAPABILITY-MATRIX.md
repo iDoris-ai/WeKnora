@@ -258,7 +258,7 @@
 17. **v0.8.3 改变的行为**（#989 按 v0.8.2 写，没有这些）：hybrid-search 可选 `rerank`、响应带 `meta`，store 部分失败时静默返回部分结果，主 KB 没有 embedding 模型时改用范围内其他 KB 的模型（第 3 项）；`/knowledge-search` 的 AppError 保留原状态码（第 3 项）；注册改为“不等于 `self_serve` 就拒”（第 12 项）；令牌写库失败直接报错、查库出错不再当成已吊销、停用账号同事务吊销全部 token（第 11 项）；访问日志请求体只读 10KB+1、脱敏多了 `assertion`，postgres 关键词检索不再 `.Debug()` 打 SQL（第 13 项）。以上都是静态结论，没有实测。
 18. **v0.8.3 新增的接口面**（#989 没有）：retrieve 档的 `/knowledge-bases/:id/images`、`/gallery-config`、`/image-attrs/schema`、跨 KB 的 `POST /wiki-search`（第 1、4、13 项）；按主体归属的 `POST /mcp-services/:id/oauth/assertion`（第 2 项）；SystemAdmin 的 model-catalog、`/users`、`/users/status`（第 10、11 项）。都未探测，集成模式的允许列表要逐一表态。
 
-#989 里还有几条不在本表 16 项之内，本 PR 不覆盖，留给对应任务：主 SPA 不支持嵌入（`internal/router/static.go:53` 的 `frame-ancestors 'self'`、前端 token 存在 localStorage）、鉴权后路由对 JWT 没有集成模式总开关（例如 `internal/router/routes_agent.go:24`、`routes_chat.go:51`）、`WEKNORA_SANDBOX_MODE` 是死配置、`release-lite.yml` 不按 tag 检出。
+#989 里还有几条不在本表 16 项之内，本 PR 不覆盖，留给对应任务：主 SPA 不支持嵌入（`internal/router/static.go:53` 的 `frame-ancestors 'self'`、前端 token 存在 localStorage）、鉴权后路由对 JWT 没有集成模式总开关（例如 `internal/router/routes_agent.go:24`、`routes_chat.go:51`）、`WEKNORA_SANDBOX_MODE` 是死配置、`release-lite.yml` 不按 tag 检出。其中 `WEKNORA_SANDBOX_MODE` 的结论：Go 代码不读这个变量；集成模式下 sandbox 相关路由（终端/desktop WebSocket 与需要鉴权的 sandbox 接口）都被 A24-KB-04 的允许列表挡住，不依赖它；`.env.lite.example` 是上游文件，不改。
 
 ## 未核实
 
