@@ -49,5 +49,8 @@ func ValidateAgent24IntegrationConfig(cfg *config.Config) error {
 		return errors.New("agent24 integration mode forbids cross-tenant access: " +
 			"set tenant.enable_cross_tenant_access to false")
 	}
+	if _, err := Agent24KnowledgeTagKeyFromEnv(); err != nil {
+		return err
+	}
 	return nil
 }
