@@ -193,6 +193,39 @@ func TestAgent24KnowledgeReadyProbeDeadline(t *testing.T) {
 	}
 }
 
+type blockingAgent24Scope struct{}
+
+func (blockingAgent24Scope) Resolve(ctx context.Context, _ []string) ([]*types.KnowledgeBase, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A stuck scope lookup is bounded by the same deadline as the probes.
+func TestAgent24KnowledgeReadyScopeDeadline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	prev := agent24ReadyProbeTimeout
+	agent24ReadyProbeTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { agent24ReadyProbeTimeout = prev })
+	body := `{"protocol_version":1,"request_id":"r1","generation":7,"scope":{"knowledge_base_ids":["kb-a"]}}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	h := &Agent24KnowledgeReadyHandler{probe: fakeAgent24ReadyProbe{}, scope: blockingAgent24Scope{}}
+	done := make(chan struct{})
+	go func() { h.Ready(c); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ready handler did not bound the scope lookup")
+	}
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	details := got["error"].(map[string]any)["details"].(map[string]any)
+	assert.Equal(t, "unavailable", got["error"].(map[string]any)["code"])
+	assert.Equal(t, "dependency", details["reason"])
+}
+
 type fakeAgent24Index map[string]agent24KBIndexFacts
 
 func (f fakeAgent24Index) Facts(_ context.Context, kb *types.KnowledgeBase) (agent24KBIndexFacts, error) {
