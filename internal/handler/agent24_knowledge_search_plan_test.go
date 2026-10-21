@@ -258,3 +258,22 @@ func TestAgent24SearchOutcome(t *testing.T) {
 		assert.Equal(t, tc.err, err, tc.name)
 	}
 }
+
+// Exact decimal reading: no rounding, any magnitude clamped, linear in the literal's length.
+func TestAgent24JSONPositiveInt(t *testing.T) {
+	for raw, want := range map[string]int{
+		"1": 1, "7": 7, "50": 50, "51": 50, "8e3": 50, "8000.0": 50, "100e-2": 1, "4.0e1": 40, "1E1": 10,
+		"9223372036854775808": 50, "1e99999999999": 50, strings.Repeat("9", 200000): 50,
+		"0.0000000001e10": 1,
+	} {
+		got, ok := agent24JSONPositiveInt([]byte(raw), 50)
+		assert.Equal(t, []any{want, true}, []any{got, ok}, raw)
+	}
+	for _, raw := range []string{
+		"0", "-1", "-0", "0.0", "0e5", "0.5", "1.5", "5e-1", "1e-99999999999", "1." + strings.Repeat("0", 80) + "1",
+		"0." + strings.Repeat("9", 100), "51.5", `"5"`, "null", "true", "[1]",
+	} {
+		_, ok := agent24JSONPositiveInt([]byte(raw), 50)
+		assert.False(t, ok, raw)
+	}
+}

@@ -8,7 +8,8 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"math/big"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -87,9 +88,9 @@ func parseAgent24SearchRequest(body []byte) (agent24SearchRequest, agent24Knowle
 	}}, echo, nil
 }
 
-// agent24JSONPositiveInt reads a JSON number that is an integer >= 1 and clamps it to limit (R3.3). As in
-// JSON Schema 2020-12, 8e3 and 8000.0 are integers, and any magnitude is clamped, not rejected; only a
-// literal beyond big.Float's exponent range (about 1e646456993) is rejected.
+// agent24JSONPositiveInt reads a JSON number that is exactly an integer >= 1 and clamps it to limit (R3.3).
+// As in JSON Schema 2020-12, 8e3 and 8000.0 are integers; any magnitude is clamped, not rejected. The
+// literal is read digit by digit, in time linear in its length, with no rounding.
 func agent24JSONPositiveInt(raw json.RawMessage, limit int) (int, bool) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -98,18 +99,32 @@ func agent24JSONPositiveInt(raw json.RawMessage, limit int) (int, bool) {
 		return 0, false
 	}
 	n, ok := v.(json.Number)
-	if !ok {
+	if !ok || strings.HasPrefix(string(n), "-") {
 		return 0, false
 	}
-	f, _, err := big.ParseFloat(n.String(), 10, 256, big.ToNearestEven)
-	if err != nil || !f.IsInt() || f.Cmp(big.NewFloat(1)) < 0 {
-		return 0, false
+	mant, expPart, _ := strings.Cut(strings.ToLower(string(n)), "e")
+	intPart, frac, _ := strings.Cut(mant, ".")
+	var exp int64
+	if expPart != "" {
+		var err error
+		if exp, err = strconv.ParseInt(expPart, 10, 32); err != nil { // beyond int32: only the sign matters
+			exp = 1 << 31
+			if strings.HasPrefix(expPart, "-") {
+				exp = -exp
+			}
+		}
 	}
-	if f.Cmp(big.NewFloat(float64(limit))) > 0 {
+	digits := strings.TrimLeft(intPart+frac, "0")
+	trimmed := strings.TrimRight(digits, "0")
+	exp += int64(len(digits)-len(trimmed)) - int64(len(frac)) // value = trimmed × 10^exp
+	if trimmed == "" || exp < 0 {
+		return 0, false // zero, or a fractional part
+	}
+	if int64(len(trimmed))+exp > int64(len(strconv.Itoa(limit))) {
 		return limit, true
 	}
-	i, _ := f.Int64()
-	return int(i), true
+	i, _ := strconv.Atoi(trimmed + strings.Repeat("0", int(exp)))
+	return min(i, limit), true
 }
 
 // agent24PlanSearch groups E (kbs, request order; facts[i] belongs to kbs[i]) by score space and
