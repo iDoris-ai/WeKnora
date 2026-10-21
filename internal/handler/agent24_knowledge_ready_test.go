@@ -349,7 +349,9 @@ func TestAgent24DefaultScopeAndIndex(t *testing.T) {
 			ID: "dr", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ManualKnowledgeStatusDraft,
 		},
 		&types.Knowledge{ID: "k2", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusCompleted},
-		&types.Chunk{ID: "c2", TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "k2", ChunkType: "text", IsEnabled: true},
+		&types.Chunk{
+			ID: "c2", TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "k2", ChunkType: "text", IsEnabled: true,
+		},
 	}
 	wants := []agent24KBIndexFacts{
 		{},
