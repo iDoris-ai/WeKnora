@@ -51,7 +51,8 @@ func (p agent24DefaultReadyProbe) RetrieveEngine(ctx context.Context) error {
 		return errors.New("no caller tenant")
 	}
 	var count int64
-	if err := p.db.WithContext(ctx).Model(&types.VectorStore{}).Where("tenant_id = ?", tenantID).Limit(1).Count(&count).Error; err != nil {
+	q := p.db.WithContext(ctx).Model(&types.VectorStore{}).Where("tenant_id = ?", tenantID)
+	if err := q.Limit(1).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
