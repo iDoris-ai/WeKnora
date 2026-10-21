@@ -6,7 +6,9 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
+	"math/big"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -74,22 +76,47 @@ func parseAgent24SearchRequest(body []byte) (agent24SearchRequest, agent24Knowle
 		bf["max_results"] == nil || bf["max_concurrency"] == nil {
 		return agent24SearchRequest{}, echo, agent24InvalidRequest()
 	}
-	d, ok1 := agent24JSONInt64(bf["deadline_ms"])
-	r, ok2 := agent24JSONInt64(bf["max_results"])
-	c, ok3 := agent24JSONInt64(bf["max_concurrency"])
-	if !ok1 || !ok2 || !ok3 || d < 1 || r < 1 || c < 1 {
+	d, ok1 := agent24JSONPositiveInt(bf["deadline_ms"], agent24KnowledgeMaxDeadlineMS)
+	r, ok2 := agent24JSONPositiveInt(bf["max_results"], agent24KnowledgeMaxResults)
+	c, ok3 := agent24JSONPositiveInt(bf["max_concurrency"], agent24KnowledgeMaxConcurrency)
+	if !ok1 || !ok2 || !ok3 {
 		return agent24SearchRequest{}, echo, agent24InvalidRequest()
 	}
 	return agent24SearchRequest{Query: query, KBIDs: ids, Budget: agent24SearchBudget{
-		DeadlineMS:     int(min(d, int64(agent24KnowledgeMaxDeadlineMS))),
-		MaxResults:     int(min(r, int64(agent24KnowledgeMaxResults))),
-		MaxConcurrency: int(min(c, int64(agent24KnowledgeMaxConcurrency))),
+		DeadlineMS: d, MaxResults: r, MaxConcurrency: c,
 	}}, echo, nil
 }
 
+// agent24JSONPositiveInt reads a JSON number that is an integer >= 1 and clamps it to limit (R3.3). As in
+// JSON Schema 2020-12, 8e3 and 8000.0 are integers, and any magnitude is clamped, not rejected; only a
+// literal beyond big.Float's exponent range (about 1e646456993) is rejected.
+func agent24JSONPositiveInt(raw json.RawMessage, limit int) (int, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if dec.Decode(&v) != nil {
+		return 0, false
+	}
+	n, ok := v.(json.Number)
+	if !ok {
+		return 0, false
+	}
+	f, _, err := big.ParseFloat(n.String(), 10, 256, big.ToNearestEven)
+	if err != nil || !f.IsInt() || f.Cmp(big.NewFloat(1)) < 0 {
+		return 0, false
+	}
+	if f.Cmp(big.NewFloat(float64(limit))) > 0 {
+		return limit, true
+	}
+	i, _ := f.Int64()
+	return int(i), true
+}
+
 // agent24PlanSearch groups E (kbs, request order; facts[i] belongs to kbs[i]) by score space and
-// classifies each KB with agent24KBState. More than one score space is mixed_score_space (R3.6).
-func agent24PlanSearch(kbs []*types.KnowledgeBase, facts []agent24KBIndexFacts) (
+// classifies each KB with agent24KBState under op, the operations.search state (ready or not_ready; a
+// disabled operation is rejected before E, R6.4). More than one score space is mixed_score_space (R3.6).
+// An empty KB is a successful branch only while op is ready; otherwise it fails as dependency (R3.4).
+func agent24PlanSearch(op agent24OperationState, kbs []*types.KnowledgeBase, facts []agent24KBIndexFacts) (
 	agent24SearchPlan, *agent24KnowledgeError,
 ) {
 	var groups []agent24ScoreSpaceGroup
@@ -116,7 +143,7 @@ func agent24PlanSearch(kbs []*types.KnowledgeBase, facts []agent24KBIndexFacts) 
 	}
 	for i, kb := range kbs {
 		plan.Scope = append(plan.Scope, kb.ID)
-		st := agent24KBState(agent24OperationState{State: "ready"}, facts[i])
+		st := agent24KBState(op, facts[i])
 		switch {
 		case st.State == "ready" && facts[i].Docs == 0:
 			plan.Empty = append(plan.Empty, kb.ID)
@@ -125,7 +152,7 @@ func agent24PlanSearch(kbs []*types.KnowledgeBase, facts []agent24KBIndexFacts) 
 		default:
 			plan.Failures = append(plan.Failures, agent24SearchFailure{
 				KnowledgeBaseID: kb.ID, Code: "unavailable",
-				Reason: st.Reason, Retryable: st.Reason == "index_building",
+				Reason: st.Reason, Retryable: agent24UnavailableReasons[st.Reason],
 			})
 		}
 	}
@@ -133,8 +160,10 @@ func agent24PlanSearch(kbs []*types.KnowledgeBase, facts []agent24KBIndexFacts) 
 }
 
 // agent24SearchOutcome applies R3.4/R3.5 once the single retrieval call over plan.Searchable has run.
-// searchErr is its classified error (nil: it succeeded, or Searchable is empty). It returns the
-// completeness and partial_failures of a 200, or the top-level error.
+// searchErr is its classified error (nil: it succeeded, or Searchable is empty). The caller must also set
+// it when the call returned results with a swallowed partial failure (upstream retainPartialResults), or a
+// degraded search would read as complete. It returns the completeness and partial_failures of a 200, or
+// the top-level error. Empty KBs stay successful when the call fails: they were never searched (R3.4).
 func agent24SearchOutcome(plan agent24SearchPlan, searchErr *agent24KnowledgeError) (
 	string, []agent24SearchFailure, *agent24KnowledgeError,
 ) {

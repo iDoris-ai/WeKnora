@@ -16,6 +16,7 @@ func TestAgent24ParseSearchRequest(t *testing.T) {
 		return `{"protocol_version":1,"request_id":"r1","generation":3,` + strings.Join(fields, ",") + `}`
 	}
 	rid, gen := "r1", int64(3)
+	q := `"query":"q"`
 	echo := agent24KnowledgeEcho{RequestID: &rid, Generation: &gen}
 
 	req, gotEcho, kerr := parseAgent24SearchRequest([]byte(body(`"query":"报销"`, scope, budget)))
@@ -31,7 +32,16 @@ func TestAgent24ParseSearchRequest(t *testing.T) {
 	assert.Nil(t, kerr)
 	assert.Equal(t, agent24SearchBudget{DeadlineMS: 30000, MaxResults: 1, MaxConcurrency: 4}, req.Budget)
 
-	q := `"query":"q"`
+	// JSON Schema 2020-12 integers of any magnitude are clamped, not rejected (R3.3).
+	req, _, kerr = parseAgent24SearchRequest([]byte(body(q, scope,
+		`"budget":{"deadline_ms":9223372036854775808,"max_results":8e3,"max_concurrency":3.0}`)))
+	assert.Nil(t, kerr)
+	assert.Equal(t, agent24SearchBudget{DeadlineMS: 30000, MaxResults: 50, MaxConcurrency: 3}, req.Budget)
+	long := `"` + strings.Repeat("é", agent24IDMaxRunes) + `"`
+	req, _, kerr = parseAgent24SearchRequest([]byte(body(q, `"scope":{"knowledge_base_ids":[`+long+`]}`, budget)))
+	assert.Nil(t, kerr)
+	assert.Len(t, req.KBIDs, 1)
+
 	for name, b := range map[string]string{
 		"query missing":      body(scope, budget),
 		"query empty":        body(`"query":""`, scope, budget),
@@ -39,14 +49,20 @@ func TestAgent24ParseSearchRequest(t *testing.T) {
 		"query too long":     body(`"query":"`+strings.Repeat("é", 4097)+`"`, scope, budget),
 		"scope missing":      body(q, budget),
 		"scope empty":        body(q, `"scope":{"knowledge_base_ids":[]}`, budget),
+		"scope id too long": body(q, `"scope":{"knowledge_base_ids":["a",`+
+			`"`+strings.Repeat("é", agent24IDMaxRunes+1)+`"]}`, budget),
 		"budget missing":     body(q, scope),
 		"budget null":        body(q, scope, `"budget":null`),
 		"budget key missing": body(q, scope, `"budget":{"deadline_ms":1,"max_results":1}`),
 		"budget extra key": body(q, scope,
 			`"budget":{"deadline_ms":1,"max_results":1,"max_concurrency":1,"x":1}`),
-		"budget zero":             body(q, scope, `"budget":{"deadline_ms":0,"max_results":1,"max_concurrency":1}`),
-		"budget negative":         body(q, scope, `"budget":{"deadline_ms":1,"max_results":-1,"max_concurrency":1}`),
-		"budget fraction":         body(q, scope, `"budget":{"deadline_ms":1,"max_results":1.5,"max_concurrency":1}`),
+		"budget zero":     body(q, scope, `"budget":{"deadline_ms":0,"max_results":1,"max_concurrency":1}`),
+		"budget negative": body(q, scope, `"budget":{"deadline_ms":1,"max_results":-1,"max_concurrency":1}`),
+		"budget fraction": body(q, scope, `"budget":{"deadline_ms":1,"max_results":1.5,"max_concurrency":1}`),
+		"budget fraction above": body(q, scope,
+			`"budget":{"deadline_ms":30000.5,"max_results":1,"max_concurrency":1}`),
+		"budget below one": body(q, scope,
+			`"budget":{"deadline_ms":1,"max_results":1,"max_concurrency":5e-1}`),
 		"budget string":           body(q, scope, `"budget":{"deadline_ms":1,"max_results":"5","max_concurrency":1}`),
 		"unknown top-level field": body(q, scope, budget, `"filters":{}`),
 	} {
@@ -80,7 +96,8 @@ func TestAgent24PlanSearch(t *testing.T) {
 	facts := []agent24KBIndexFacts{
 		{Docs: 2, Active: 1, HasTextChunks: true}, {}, {Docs: 1, Building: 1}, {Docs: 1}, {Docs: 1, Active: 1},
 	}
-	plan, kerr := agent24PlanSearch(kbs, facts)
+	ready := agent24OperationState{State: "ready"}
+	plan, kerr := agent24PlanSearch(ready, kbs, facts)
 	assert.Nil(t, kerr)
 	assert.Equal(t, agent24SearchPlan{
 		Scope: []string{"a", "b", "c", "d", "e"}, ScoreSpace: "emb:e1",
@@ -92,12 +109,22 @@ func TestAgent24PlanSearch(t *testing.T) {
 		},
 	}, plan)
 
+	// Infrastructure not ready: every KB fails as dependency, the empty one too (R3.4).
+	plan, kerr = agent24PlanSearch(agent24State(false), kbs[:2], facts[:2])
+	assert.Nil(t, kerr)
+	dep := func(id string) agent24SearchFailure {
+		return agent24SearchFailure{KnowledgeBaseID: id, Code: "unavailable", Reason: "dependency", Retryable: true}
+	}
+	assert.Equal(t, agent24SearchPlan{
+		Scope: []string{"a", "b"}, ScoreSpace: "emb:e1", Failures: []agent24SearchFailure{dep("a"), dep("b")},
+	}, plan)
+
 	// Groups keep first-occurrence order and list only E; facts do not matter.
 	mixed := []*types.KnowledgeBase{
 		agent24TestKB("a", "e1", ""), agent24TestKB("b", "e2", ""),
 		agent24TestKB("c", "e1", ""), agent24TestKB("d", "", ""), agent24TestKB("v", "e1", "s1"),
 	}
-	_, kerr = agent24PlanSearch(mixed, make([]agent24KBIndexFacts, len(mixed)))
+	_, kerr = agent24PlanSearch(ready, mixed, make([]agent24KBIndexFacts, len(mixed)))
 	assert.Equal(t, &agent24KnowledgeError{
 		Code: agent24CodeInvalidRequest, Reason: "mixed_score_space",
 		Extra: map[string]any{"groups": []agent24ScoreSpaceGroup{
@@ -152,6 +179,20 @@ func TestAgent24SearchOutcome(t *testing.T) {
 			searchErr:    agent24Unavailable("dependency"),
 			completeness: "partial",
 			failures:     []agent24SearchFailure{building, fail("a", "unavailable", "dependency", true)},
+		},
+		{
+			name: "a non-retryable failure beside a success stays partial",
+			plan: agent24SearchPlan{
+				Scope: []string{"a", "c"}, Searchable: []string{"a"},
+				Failures: []agent24SearchFailure{failed},
+			},
+			completeness: "partial", failures: []agent24SearchFailure{failed},
+		},
+		{
+			name:      "timeout beside a successful empty KB",
+			plan:      agent24SearchPlan{Scope: []string{"a", "b"}, Searchable: []string{"a"}, Empty: []string{"b"}},
+			searchErr: agent24Timeout(), completeness: "partial",
+			failures: []agent24SearchFailure{fail("a", "timeout", "timeout", true)},
 		},
 		{
 			name:      "default unavailable reads as dependency",
