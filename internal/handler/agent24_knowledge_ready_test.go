@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -96,9 +97,100 @@ func TestAgent24DefaultProbeRetrieveEngineDBStores(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.VectorStore{}))
 	p := agent24DefaultReadyProbe{db: db, registry: emptyAgent24Registry{}}
-	require.Error(t, p.RetrieveEngine(context.Background()))
-	require.NoError(t, db.Create(&types.VectorStore{Name: "vs", EngineType: "qdrant"}).Error)
-	require.NoError(t, p.RetrieveEngine(context.Background()))
+	ctx := types.WithCaller(context.Background(), types.Caller{TenantID: 1})
+	require.Error(t, p.RetrieveEngine(ctx)) // a: no stores
+	require.NoError(t, db.Create(&types.VectorStore{Name: "other", EngineType: "qdrant", TenantID: 2}).Error)
+	require.Error(t, p.RetrieveEngine(ctx)) // b: another tenant's store does not count
+	vs := types.VectorStore{Name: "gone", EngineType: "qdrant", TenantID: 1}
+	require.NoError(t, db.Create(&vs).Error)
+	require.NoError(t, db.Delete(&vs).Error)
+	require.Error(t, p.RetrieveEngine(ctx)) // c: own store soft-deleted
+	require.NoError(t, db.Create(&types.VectorStore{Name: "vs", EngineType: "qdrant", TenantID: 1}).Error)
+	require.NoError(t, p.RetrieveEngine(ctx))                // d: own store
+	require.Error(t, p.RetrieveEngine(context.Background())) // e: no caller
+}
+
+type blockingAgent24ReadyProbe struct {
+	blockStorage, blockEngine bool
+	deadlines                 *[]time.Time
+}
+
+func (p blockingAgent24ReadyProbe) Storage(ctx context.Context) error {
+	if p.deadlines != nil {
+		d, _ := ctx.Deadline()
+		*p.deadlines = append(*p.deadlines, d)
+	}
+	if p.blockStorage {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
+}
+
+func (p blockingAgent24ReadyProbe) RetrieveEngine(ctx context.Context) error {
+	if p.deadlines != nil {
+		d, _ := ctx.Deadline()
+		*p.deadlines = append(*p.deadlines, d)
+	}
+	if p.blockEngine {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
+}
+
+func TestAgent24KnowledgeReadyProbeDeadline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const ok = `{"protocol_version":1,"request_id":"r1","generation":7`
+	ready := map[string]any{"state": "ready"}
+	notReady := map[string]any{"state": "not_ready", "reason": "dependency"}
+	cases := []struct {
+		name         string
+		blockStorage bool
+		blockEngine  bool
+		search, read map[string]any
+		sameDeadline bool
+	}{
+		{name: "engine blocks", blockEngine: true, search: notReady, read: ready},
+		{name: "storage blocks", blockStorage: true, search: notReady, read: notReady},
+		{name: "neither blocks", search: ready, read: ready, sameDeadline: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := agent24ReadyProbeTimeout
+			agent24ReadyProbeTimeout = 50 * time.Millisecond
+			t.Cleanup(func() { agent24ReadyProbeTimeout = prev })
+			var deadlines []time.Time
+			probe := blockingAgent24ReadyProbe{
+				blockStorage: tc.blockStorage, blockEngine: tc.blockEngine, deadlines: &deadlines,
+			}
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(ok+"}"))
+			done := make(chan struct{})
+			go func() {
+				(&Agent24KnowledgeReadyHandler{probe: probe}).Ready(c)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("ready handler did not honor the probe deadline")
+			}
+			require.Equal(t, 200, w.Code)
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			ops := got["operations"].(map[string]any)
+			assert.Equal(t, tc.search, ops["search"])
+			assert.Equal(t, tc.read, ops["read"])
+			if tc.sameDeadline {
+				require.Len(t, deadlines, 2)
+				assert.False(t, deadlines[0].IsZero())
+				assert.False(t, deadlines[1].IsZero())
+				assert.Equal(t, deadlines[0], deadlines[1])
+			}
+		})
+	}
 }
 
 type fakeAgent24Index map[string]agent24KBIndexFacts

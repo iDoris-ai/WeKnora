@@ -27,6 +27,8 @@ type Agent24KnowledgeReadyProbe interface {
 	RetrieveEngine(ctx context.Context) error
 }
 
+var agent24ReadyProbeTimeout = 2 * time.Second // shared deadline for both probes; tests shorten it
+
 type agent24DefaultReadyProbe struct {
 	db       *gorm.DB
 	registry interfaces.RetrieveEngineRegistry
@@ -37,8 +39,6 @@ func (p agent24DefaultReadyProbe) Storage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
 	return sqlDB.PingContext(ctx)
 }
 
@@ -46,8 +46,12 @@ func (p agent24DefaultReadyProbe) RetrieveEngine(ctx context.Context) error {
 	if p.registry != nil && len(p.registry.GetAllRetrieveEngineServices()) > 0 {
 		return nil
 	}
+	tenantID := types.CallerFromContext(ctx).TenantID
+	if tenantID == 0 {
+		return errors.New("no caller tenant")
+	}
 	var count int64
-	if err := p.db.WithContext(ctx).Model(&types.VectorStore{}).Limit(1).Count(&count).Error; err != nil {
+	if err := p.db.WithContext(ctx).Model(&types.VectorStore{}).Where("tenant_id = ?", tenantID).Limit(1).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
@@ -168,8 +172,10 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 		}
 	}
 	ctx := c.Request.Context()
-	storageErr := h.probe.Storage(ctx)
-	engineErr := h.probe.RetrieveEngine(ctx)
+	pctx, cancel := context.WithTimeout(ctx, agent24ReadyProbeTimeout)
+	storageErr := h.probe.Storage(pctx)
+	engineErr := h.probe.RetrieveEngine(pctx)
+	cancel()
 	if storageErr != nil || engineErr != nil {
 		logger.Warnf(ctx, "agent24 knowledge ready: storage=%v retrieve_engine=%v", storageErr, engineErr)
 	}

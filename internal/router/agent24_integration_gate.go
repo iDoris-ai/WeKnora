@@ -1,6 +1,7 @@
-// Package router hosts Agent24 fork product patch A24-KB-04 (KB-C1-01). In integration
+// Agent24 fork product patch A24-KB-04 (KB-C1-01). In integration
 // mode every route outside the allowlist answers 404, indistinguishable from a
 // missing route.
+
 package router
 
 import (
