@@ -60,3 +60,11 @@ func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) error {
 		len(agent24IntegrationAllowlist))
 	return nil
 }
+
+// installAgent24IntegrationCredentialGate must run right after middleware.Auth.
+func installAgent24IntegrationCredentialGate(r *gin.Engine) {
+	mode, err := handler.Agent24KnowledgeModeFromEnv()
+	if err == nil && mode == handler.Agent24KnowledgeModeIntegration {
+		r.Use(handler.Agent24IntegrationCredentialGate())
+	}
+}
