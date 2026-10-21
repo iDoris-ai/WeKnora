@@ -100,8 +100,9 @@ func agent24State(ok bool) agent24OperationState {
 	return agent24OperationState{State: "not_ready", Reason: "dependency"}
 }
 
-// agent24KBIndexFacts counts non-deleting docs; Building = pending/processing; Active = completed/finalizing
-// (index build proxy until KB-C1-01c); HasTextChunks = enabled text chunk of a completed/finalizing/cancelled doc.
+// agent24KBIndexFacts counts docs that are not deleting, draft or unknown (r9); Building = pending/processing;
+// Active = completed/finalizing (index build proxy until KB-C1-01c); HasTextChunks = enabled text chunk of a
+// completed/finalizing doc (r9: a cancelled doc's chunks are not servable).
 type agent24KBIndexFacts struct {
 	Docs, Active, Building int
 	HasTextChunks          bool

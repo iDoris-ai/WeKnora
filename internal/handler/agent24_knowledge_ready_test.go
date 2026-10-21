@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -280,8 +281,8 @@ func TestAgent24KBState(t *testing.T) {
 	eq(ready, nr("index_building"), agent24KBIndexFacts{Docs: 2, Building: 1})
 	eq(ready, nr("index_failed"), agent24KBIndexFacts{Docs: 2})
 	eq(ready, nr("unsupported_kb_type"), agent24KBIndexFacts{Docs: 2, Active: 1, Building: 1})
-	eq(ready, ready, agent24KBIndexFacts{Docs: 1, HasTextChunks: true}) // cancelled only, with chunks
-	eq(ready, nr("index_failed"), agent24KBIndexFacts{Docs: 1})         // cancelled only, no chunks
+	eq(ready, ready, agent24KBIndexFacts{Docs: 1, Active: 1, HasTextChunks: true}) // one servable doc
+	eq(ready, nr("index_failed"), agent24KBIndexFacts{Docs: 1})                    // cancelled only: its chunks are not servable (r9)
 	eq(agent24OperationState{State: "disabled"}, nr("operation_disabled"), agent24KBIndexFacts{HasTextChunks: true})
 	eq(down, nr("dependency"), agent24KBIndexFacts{Docs: 2})
 	sp := agent24ScoreSpace(&types.KnowledgeBase{EmbeddingModelID: "m", VectorStoreID: new("v")})
@@ -338,18 +339,36 @@ func TestAgent24DefaultScopeAndIndex(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:agent24idx?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}))
-	rows := []any{ // a deleting doc, a cancelled doc, its disabled text chunk, then its enabled text chunk
+	rows := []any{ // r9: deleting and draft are not counted; a cancelled doc's chunks are not servable
 		&types.Knowledge{ID: "d", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusDeleting},
 		&types.Knowledge{ID: "k", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusCancelled},
 		&types.Chunk{ID: "c0", TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "k", ChunkType: "text"},
 		&types.Chunk{ID: "c", TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "k", ChunkType: "text", IsEnabled: true},
+		&types.Knowledge{ID: "dr", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ManualKnowledgeStatusDraft},
+		&types.Knowledge{ID: "k2", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusCompleted},
+		&types.Chunk{ID: "c2", TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "k2", ChunkType: "text", IsEnabled: true},
 	}
-	for i, want := range []agent24KBIndexFacts{{}, {Docs: 1}, {Docs: 1}, {Docs: 1, HasTextChunks: true}} {
+	for i, want := range []agent24KBIndexFacts{{}, {Docs: 1}, {Docs: 1}, {Docs: 1}, {Docs: 1},
+		{Docs: 2, Active: 1}, {Docs: 2, Active: 1, HasTextChunks: true}} {
 		require.NoError(t, db.Create(rows[i]).Error)
 		if i == 2 { // gorm default:true overrides a zero IsEnabled on insert
 			require.NoError(t, db.Model(rows[i]).Update("is_enabled", false).Error)
 		}
 		f, err := agent24DBIndexReader{db}.Facts(ctx, own)
 		assert.Equal(t, []any{want, nil}, []any{f, err})
+	}
+}
+
+// The status lists behind Facts agree with the document classifier (contract §5, r9).
+func TestAgent24ReadyStatusListsMatchClassifier(t *testing.T) {
+	for _, st := range []string{
+		types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFailed, types.ParseStatusCancelled,
+		types.ParseStatusCompleted, types.ParseStatusFinalizing, types.ParseStatusDeleting,
+		types.ManualKnowledgeStatusDraft, "unprocessed",
+	} {
+		class := agent24ClassifyDoc(st, 0)
+		assert.Equal(t, class != agent24DocExcluded, slices.Contains(agent24CountedParseStatuses, st), "%s counted", st)
+		assert.Equal(t, agent24HasBuild(st), slices.Contains(agent24ActiveParseStatuses, st), "%s active", st)
+		assert.Equal(t, class == agent24DocBuilding, slices.Contains(agent24BuildingParseStatuses, st), "%s building", st)
 	}
 }

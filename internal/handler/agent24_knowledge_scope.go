@@ -56,22 +56,32 @@ type agent24DBIndexReader struct{ db *gorm.DB }
 
 var agent24ActiveParseStatuses = []string{types.ParseStatusCompleted, types.ParseStatusFinalizing}
 
-// Cancelled docs may keep already-written chunks, so they count toward usable chunks. Known limitation:
-// a cancel after CreateChunks but before BatchIndex leaves unindexed chunks that are counted too; the
-// exact source-revision/index-build mapping lands with KB-C1-01c.
-var agent24ChunkParseStatuses = append(slices.Clone(agent24ActiveParseStatuses), types.ParseStatusCancelled)
+// agent24CountedParseStatuses: documents that count toward a KB's readiness (contract §5, r9: not
+// deleting, draft or an unknown status).
+var agent24CountedParseStatuses = []string{
+	types.ParseStatusPending,
+	types.ParseStatusProcessing,
+	types.ParseStatusFailed,
+	types.ParseStatusCancelled,
+	types.ParseStatusCompleted,
+	types.ParseStatusFinalizing,
+}
 
-// Facts counts the KB's documents; gorm adds deleted_at IS NULL for both models.
+// agent24BuildingParseStatuses: documents still being built (index_building).
+var agent24BuildingParseStatuses = []string{types.ParseStatusPending, types.ParseStatusProcessing}
+
+// Facts counts the KB's counted documents (r9: not deleting, draft or unknown) and whether any has a servable chunk;
+// gorm adds deleted_at IS NULL for both models.
 func (r agent24DBIndexReader) Facts(ctx context.Context, kb *types.KnowledgeBase) (agent24KBIndexFacts, error) {
 	docs := func() *gorm.DB {
 		return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("tenant_id = ? AND knowledge_base_id = ?"+
-			" AND parse_status <> ?", kb.TenantID, kb.ID, types.ParseStatusDeleting)
+			" AND parse_status IN ?", kb.TenantID, kb.ID, agent24CountedParseStatuses)
 	}
 	var f agent24KBIndexFacts
 	err := docs().Select("COUNT(*) AS docs, "+
 		"COALESCE(SUM(CASE WHEN parse_status IN ? THEN 1 ELSE 0 END), 0) AS active, "+
 		"COALESCE(SUM(CASE WHEN parse_status IN ? THEN 1 ELSE 0 END), 0) AS building",
-		agent24ActiveParseStatuses, []string{types.ParseStatusPending, types.ParseStatusProcessing},
+		agent24ActiveParseStatuses, agent24BuildingParseStatuses,
 	).Scan(&f).Error
 	if err != nil || f.Docs == 0 {
 		return f, err
@@ -80,7 +90,7 @@ func (r agent24DBIndexReader) Facts(ctx context.Context, kb *types.KnowledgeBase
 	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND is_enabled = ?",
 			kb.TenantID, kb.ID, types.ChunkTypeText, true).
-		Where("knowledge_id IN (?)", docs().Select("id").Where("parse_status IN ?", agent24ChunkParseStatuses)).
+		Where("knowledge_id IN (?)", docs().Select("id").Where("parse_status IN ?", agent24ActiveParseStatuses)).
 		Limit(1).Pluck("id", &ids).Error
 	f.HasTextChunks = len(ids) > 0
 	return f, err
