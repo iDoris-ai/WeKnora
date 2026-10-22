@@ -10,7 +10,9 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // Agent24 fork patch A24-KB-09: retainPartialResults marks the recorder on the context, and only then.
@@ -158,6 +160,88 @@ func TestAgent24RetrievalDegradedFAQIteration(t *testing.T) {
 			ctx, degraded := types.WithRetrievalDegradedRecorder(ctx)
 			_, err := (&knowledgeBaseService{}).iterativeRetrieveWithDeduplication(ctx, groups, 10, "q", 50)
 			require.Equal(t, tc.fails, err != nil, "err = %v", err)
+			assert.Equal(t, tc.degraded, degraded())
+		})
+	}
+}
+
+// failingChunkRepo fails every chunk lookup.
+type failingChunkRepo struct {
+	interfaces.ChunkRepository
+}
+
+func (failingChunkRepo) ListChunksByID(context.Context, uint64, []string) ([]*types.Chunk, error) {
+	return nil, stderrors.New("chunk storage unavailable")
+}
+
+// A chunk lookup that fails leaves negative questions unchecked, in the FAQ deepening loop and in the
+// filter alike; both searches are degraded. The same searches with the lookup answering are not.
+func TestAgent24RetrievalDegradedFAQChunks(t *testing.T) {
+	answering := func(t *testing.T) interfaces.ChunkRepository {
+		return &tenantScopedFAQChunkRepo{chunks: map[string]*types.Chunk{
+			"c1": faqChunkWithNegative(t, "c1", 1, "kb", "gift cards"),
+		}}
+	}
+	for _, tc := range []struct {
+		name     string
+		repo     func(t *testing.T) interfaces.ChunkRepository
+		degraded bool
+	}{
+		{"lookup answers", answering, false},
+		{"lookup fails", func(*testing.T) interfaces.ChunkRepository { return failingChunkRepo{} }, true},
+	} {
+		t.Run("iteration, "+tc.name, func(t *testing.T) {
+			engine := &fakeRetrieveEngineService{
+				engineType: types.PostgresRetrieverEngineType,
+				support:    []types.RetrieverType{types.VectorRetrieverType},
+				canned:     []*types.IndexWithScore{{ChunkID: "c1", KnowledgeBaseID: "kb", Score: 0.5}},
+			}
+			groups := []*storeGroup{{
+				Engine: buildBoundComposite(t, engine), BaseParams: vectorParams("q"), TopK: 50, KBIDs: []string{"kb"},
+			}}
+			s := &knowledgeBaseService{chunkRepo: tc.repo(t), kbShareService: &fakeKBShareService{}}
+			ctx, degraded := types.WithRetrievalDegradedRecorder(newSharedAccessContext())
+			out, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 10, "refunds", 50)
+			require.NoError(t, err)
+			require.Len(t, out, 1)
+			assert.Equal(t, tc.degraded, degraded())
+		})
+		t.Run("filter, "+tc.name, func(t *testing.T) {
+			s := &knowledgeBaseService{chunkRepo: tc.repo(t), kbShareService: &fakeKBShareService{}}
+			ctx, degraded := types.WithRetrievalDegradedRecorder(newSharedAccessContext())
+			in := []*types.IndexWithScore{{ChunkID: "c1", KnowledgeBaseID: "kb", Score: 0.5}}
+			out := s.filterByNegativeQuestions(ctx, in, "refunds", map[string]bool{"kb": true})
+			require.Len(t, out, 1)
+			assert.Equal(t, tc.degraded, degraded())
+		})
+	}
+}
+
+// failingModels fails every embedding model lookup.
+type failingModels struct {
+	interfaces.ModelService
+}
+
+func (failingModels) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+	return nil, stderrors.New("model registry unavailable")
+}
+
+// Image recall that cannot resolve the KB's embedding model falls back to text: a degraded search. A model
+// that takes no images is the normal text-only case.
+func TestAgent24RetrievalDegradedImageModel(t *testing.T) {
+	kb := &types.KnowledgeBase{ID: "kb", TenantID: 1, EmbeddingModelID: "embed-1"}
+	for _, tc := range []struct {
+		name     string
+		models   interfaces.ModelService
+		degraded bool
+	}{
+		{"text-only model", &imageRecallModels{model: &textModel{}}, false},
+		{"lookup fails", failingModels{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+			ctx, degraded := types.WithRetrievalDegradedRecorder(ctx)
+			assert.False(t, (&knowledgeBaseService{modelService: tc.models}).embeddingTakesImages(ctx, kb))
 			assert.Equal(t, tc.degraded, degraded())
 		})
 	}

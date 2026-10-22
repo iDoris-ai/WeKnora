@@ -173,6 +173,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			newChunks, err := s.listChunksByIDWithShared(ctx, tenantID, newChunkIDs)
 			if err != nil {
 				logger.Warnf(ctx, "Failed to fetch chunks at iteration %d: %v", i+1, err)
+				types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: negative questions go unchecked
 			} else {
 				for _, chunk := range newChunks {
 					chunkDataCache[chunk.ID] = chunk
@@ -267,6 +268,7 @@ func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, chunkIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to fetch chunks for negative question filtering: %v", err)
+		types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: results go unfiltered
 		// If we can't fetch chunks, return original results
 		return chunks
 	}
