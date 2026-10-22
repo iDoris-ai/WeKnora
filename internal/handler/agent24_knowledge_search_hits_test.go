@@ -110,10 +110,9 @@ func TestAgent24Snippet(t *testing.T) {
 func TestAgent24Display(t *testing.T) {
 	assert.Nil(t, agent24Display("", ""))
 	assert.Equal(t, &agent24HitDisplay{FileName: "f"}, agent24Display("", "f"))
-	long := strings.Repeat("字", agent24DisplayMaxRunes+1)
-	d := agent24Display(long, "x")
-	assert.Equal(t, agent24DisplayMaxRunes, utf8.RuneCountInString(d.Title))
-	assert.Equal(t, long[:len(long)-len("字")], d.Title)
+	exact := strings.Repeat("字", 1024) // the schema bound, written out so a changed constant fails here
+	d := agent24Display(exact+"字", exact)
+	assert.Equal(t, &agent24HitDisplay{Title: exact, FileName: exact}, d)
 	assert.Equal(t, "ab", agent24TruncateRunes("ab", 2))
 	assert.Equal(t, "", agent24TruncateRunes("ab", 0))
 }
@@ -171,6 +170,11 @@ func agent24HitTestDB(t *testing.T) *gorm.DB {
 		chunk("c10", 1, "a", "k6", text, "document soft-deleted"),
 		k7,
 		chunk("c11", 1, "b", "k7", text, "manual, no metadata"),
+		// Inconsistent KB rows: each KB filter alone must drop them (the chunk's KB, then the document's).
+		doc("k8", 1, "z", types.ParseStatusCompleted),
+		chunk("c15", 1, "a", "k8", text, "chunk in scope, document out of scope"),
+		doc("k9", 1, "a", types.ParseStatusCompleted),
+		chunk("c16", 1, "z", "k9", text, "chunk out of scope, document in scope"),
 	}
 	for _, row := range rows {
 		require.NoError(t, db.Create(row).Error)
@@ -190,7 +194,7 @@ func agent24SortedSnapshot(s agent24HitSnapshot) agent24HitSnapshot {
 }
 
 var agent24HitTestChunkIDs = []string{
-	"c1", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11", "c13", "c14", "nope",
+	"c1", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11", "c13", "c14", "c15", "c16", "nope",
 }
 
 var agent24HitTestWant = agent24HitSnapshot{
