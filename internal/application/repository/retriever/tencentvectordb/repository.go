@@ -348,6 +348,7 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 		if err != nil {
 			failedCollections++
 			log.Warnf("[TencentVectorDB] keyword search failed in %s: %v", collection.CollectionName, err)
+			types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09
 			continue
 		}
 		if len(search.Documents) == 0 {

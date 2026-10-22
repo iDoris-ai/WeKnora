@@ -130,7 +130,8 @@ func TestAgent24RetrievalDegradedRefill(t *testing.T) {
 }
 
 // The FAQ deepening loop keeps what earlier iterations found when a later retrieval fails with a plain
-// error; the search is degraded. A typed failure still fails the search, unmarked.
+// error; the search is degraded. A typed failure still fails the search, unmarked; a loop that runs out of
+// results normally is not degraded.
 func TestAgent24RetrievalDegradedFAQIteration(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -138,6 +139,7 @@ func TestAgent24RetrievalDegradedFAQIteration(t *testing.T) {
 		degraded bool
 		fails    bool
 	}{
+		{"runs out normally", nil, false, false},
 		{"plain error", stderrors.New("engine timeout"), true, false},
 		{"typed error", apperrors.NewVectorStoreUnavailableError("down"), false, true},
 	} {

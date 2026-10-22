@@ -396,6 +396,7 @@ func (r *dorisRepository) KeywordsRetrieve(ctx context.Context,
 		rows, err := r.db.QueryContext(ctx, stmt, args...)
 		if err != nil {
 			log.Warnf("[Doris] Keyword retrieve in %s failed: %v", table, err)
+			types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09
 			continue
 		}
 		// score 在 KeywordsRetrieve 中固定 1.0，与 Qdrant 行为一致。
