@@ -195,7 +195,8 @@ func (r *flakyChunkRepo) ListChunksByID(ctx context.Context, tenantID uint64, id
 // is checked against negative questions after all: not degraded. When the last lookup failed, it is.
 func TestAgent24RetrievalDegradedFAQLookupRecovers(t *testing.T) {
 	// 30 rows over 5 chunks: a full first page (depth 30) that dedups below matchCount 10, so the loop
-	// goes one level deeper, where the same 30 rows exhaust the list.
+	// goes one level deeper, where the same 30 rows exhaust the list. c0's negative question is the query:
+	// a checked result leaves it out.
 	var rows []*types.IndexWithScore
 	chunks := map[string]*types.Chunk{}
 	for i := range 30 {
@@ -203,15 +204,17 @@ func TestAgent24RetrievalDegradedFAQLookupRecovers(t *testing.T) {
 		rows = append(rows, &types.IndexWithScore{ChunkID: id, KnowledgeBaseID: "kb", Score: 0.9 - float64(i)/100})
 		chunks[id] = faqChunkWithNegative(t, id, 1, "kb", "gift cards")
 	}
+	chunks["c0"] = faqChunkWithNegative(t, "c0", 1, "kb", "refunds")
 	for _, tc := range []struct {
 		name     string
 		failures int
 		calls    int
+		results  int
 		degraded bool
 	}{
-		{"no failure", 0, 1, false},
-		{"first lookup fails, second answers", 1, 2, false},
-		{"both lookups fail", 2, 2, true},
+		{"no failure", 0, 1, 4, false},
+		{"first lookup fails, second answers", 1, 2, 4, false},
+		{"both lookups fail", 2, 2, 5, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &fakeRetrieveEngineService{
@@ -227,7 +230,7 @@ func TestAgent24RetrievalDegradedFAQLookupRecovers(t *testing.T) {
 			ctx, degraded := types.WithRetrievalDegradedRecorder(newSharedAccessContext())
 			out, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 10, "refunds", 1)
 			require.NoError(t, err)
-			require.Len(t, out, 5)
+			require.Len(t, out, tc.results, "c0 is filtered out once checked")
 			assert.Equal(t, tc.calls, repo.calls, "lookups")
 			assert.Equal(t, tc.degraded, degraded())
 		})
