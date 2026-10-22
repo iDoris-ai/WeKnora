@@ -348,7 +348,6 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 		if err != nil {
 			failedCollections++
 			log.Warnf("[TencentVectorDB] keyword search failed in %s: %v", collection.CollectionName, err)
-			types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09
 			continue
 		}
 		if len(search.Documents) == 0 {
@@ -361,6 +360,9 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 	}
 	if matchedCollections > 0 && failedCollections == matchedCollections {
 		return nil, fmt.Errorf("tencent vectordb keyword search failed in all matched collections; ensure collections have the %q sparse vector index and reimport data if they were created before keyword support", fieldSparseVector)
+	}
+	if failedCollections > 0 { // some collections answered: kept results, degraded (Agent24 fork patch A24-KB-09)
+		types.MarkRetrievalDegraded(ctx)
 	}
 
 	sort.SliceStable(results, func(i, j int) bool {
