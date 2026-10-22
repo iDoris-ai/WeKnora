@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -172,6 +173,65 @@ type failingChunkRepo struct {
 
 func (failingChunkRepo) ListChunksByID(context.Context, uint64, []string) ([]*types.Chunk, error) {
 	return nil, stderrors.New("chunk storage unavailable")
+}
+
+// flakyChunkRepo fails the first failures lookups, then answers from answering.
+type flakyChunkRepo struct {
+	interfaces.ChunkRepository
+	answering interfaces.ChunkRepository
+	failures  int
+	calls     int
+}
+
+func (r *flakyChunkRepo) ListChunksByID(ctx context.Context, tenantID uint64, ids []string) ([]*types.Chunk, error) {
+	r.calls++
+	if r.calls <= r.failures {
+		return nil, stderrors.New("chunk storage unavailable")
+	}
+	return r.answering.ListChunksByID(ctx, tenantID, ids)
+}
+
+// The FAQ deepening loop refetches the chunks a failed lookup missed. When a later lookup answers, the result
+// is checked against negative questions after all: not degraded. When the last lookup failed, it is.
+func TestAgent24RetrievalDegradedFAQLookupRecovers(t *testing.T) {
+	// 30 rows over 5 chunks: a full first page (depth 30) that dedups below matchCount 10, so the loop
+	// goes one level deeper, where the same 30 rows exhaust the list.
+	var rows []*types.IndexWithScore
+	chunks := map[string]*types.Chunk{}
+	for i := range 30 {
+		id := fmt.Sprintf("c%d", i%5)
+		rows = append(rows, &types.IndexWithScore{ChunkID: id, KnowledgeBaseID: "kb", Score: 0.9 - float64(i)/100})
+		chunks[id] = faqChunkWithNegative(t, id, 1, "kb", "gift cards")
+	}
+	for _, tc := range []struct {
+		name     string
+		failures int
+		calls    int
+		degraded bool
+	}{
+		{"no failure", 0, 1, false},
+		{"first lookup fails, second answers", 1, 2, false},
+		{"both lookups fail", 2, 2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &fakeRetrieveEngineService{
+				engineType: types.PostgresRetrieverEngineType,
+				support:    []types.RetrieverType{types.VectorRetrieverType},
+				canned:     rows,
+			}
+			groups := []*storeGroup{{
+				Engine: buildBoundComposite(t, engine), BaseParams: vectorParams("q"), TopK: 30, KBIDs: []string{"kb"},
+			}}
+			repo := &flakyChunkRepo{answering: &tenantScopedFAQChunkRepo{chunks: chunks}, failures: tc.failures}
+			s := &knowledgeBaseService{chunkRepo: repo, kbShareService: &fakeKBShareService{}}
+			ctx, degraded := types.WithRetrievalDegradedRecorder(newSharedAccessContext())
+			out, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 10, "refunds", 1)
+			require.NoError(t, err)
+			require.Len(t, out, 5)
+			assert.Equal(t, tc.calls, repo.calls, "lookups")
+			assert.Equal(t, tc.degraded, degraded())
+		})
+	}
 }
 
 // A chunk lookup that fails leaves negative questions unchecked, in the FAQ deepening loop and in the

@@ -110,6 +110,9 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	chunkDataCache := make(map[string]*types.Chunk)
 	// Track chunks that have been filtered out by negative questions
 	filteredOutChunks := make(map[string]struct{})
+	// lookupFailed: the last chunk lookup failed, so uniqueChunks went unchecked against negative questions.
+	// A later lookup refetches those chunks (they were not cached) and clears it. (Agent24 fork patch A24-KB-09)
+	lookupFailed := false
 
 	queryTextLower := strings.ToLower(strings.TrimSpace(queryText))
 	tenantID := types.MustTenantIDFromContext(ctx)
@@ -169,11 +172,12 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 		}
 
 		// Batch fetch only new chunks
+		lookupFailed = false
 		if len(newChunkIDs) > 0 {
 			newChunks, err := s.listChunksByIDWithShared(ctx, tenantID, newChunkIDs)
 			if err != nil {
 				logger.Warnf(ctx, "Failed to fetch chunks at iteration %d: %v", i+1, err)
-				types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: negative questions go unchecked
+				lookupFailed = true
 			} else {
 				for _, chunk := range newChunks {
 					chunkDataCache[chunk.ID] = chunk
@@ -227,6 +231,9 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 		currentTopK = min(currentTopK*2, maxRetrievalPoolSize)
 	}
 
+	if lookupFailed {
+		types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: negative questions went unchecked
+	}
 	logger.Infof(ctx, "Iterative retrieval completed: %d unique chunks found after filtering", len(uniqueChunks))
 	return uniqueChunks, nil
 }
