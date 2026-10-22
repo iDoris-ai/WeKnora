@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -149,20 +150,29 @@ func TestAgent24KnowledgeReadySchemaNegative(t *testing.T) {
 	}
 }
 
-// Every copy compiles, with its references to common.schema.json resolved; the search request and response,
-// and the error envelope, are what the search endpoint's tests validate against.
+// Every copy compiles, entry by entry: the roots and each $defs entry, so a broken reference anywhere in a
+// copy (even in a definition no other copy uses yet, like common's doc_revision) fails here.
 func TestAgent24KnowledgeSchemaCopiesCompile(t *testing.T) {
 	c, ids := agent24SchemaCompiler(t)
-	for _, ref := range []string{
-		ids["ready.schema.json"] + "#/$defs/request", ids["ready.schema.json"] + "#/$defs/response",
-		ids["search.schema.json"] + "#/$defs/request", ids["search.schema.json"] + "#/$defs/response",
-		ids["error.schema.json"],
-	} {
-		_, err := c.Compile(ref)
-		assert.NoError(t, err, ref)
-	}
-	require.Len(t, ids, 4)
+	require.Len(t, ids, len(agent24KnowledgeSchemaSHA256))
+	compiled := 0
 	for name, id := range ids {
-		assert.NotEmpty(t, id, name)
+		require.NotEmpty(t, id, name)
+		raw, err := os.ReadFile(filepath.Join("testdata", "agent24_knowledge", name))
+		require.NoError(t, err)
+		var doc struct {
+			Defs map[string]json.RawMessage `json:"$defs"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &doc), name)
+		refs := []string{id}
+		for def := range doc.Defs {
+			refs = append(refs, id+"#/$defs/"+def)
+		}
+		for _, ref := range refs {
+			_, err := c.Compile(ref)
+			assert.NoError(t, err, ref)
+			compiled++
+		}
 	}
+	assert.Greater(t, compiled, 30, "every $defs entry of the four copies")
 }
