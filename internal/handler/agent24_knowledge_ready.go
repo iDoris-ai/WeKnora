@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -136,12 +137,18 @@ func agent24ScoreSpace(kb *types.KnowledgeBase) string {
 	return "emb:" + kb.EmbeddingModelID
 }
 
-// agent24ParseScope accepts exactly {"knowledge_base_ids":[non-empty string, ...]} and dedups ids.
+// agent24IDMaxRunes is maxLength of the schema id (common.schema.json), in characters.
+const agent24IDMaxRunes = 256
+
+// agent24ParseScope accepts exactly {"knowledge_base_ids":[id, ...]} (1–256 characters each) and dedups ids.
 func agent24ParseScope(raw json.RawMessage) ([]string, bool) {
 	var scope map[string]json.RawMessage
 	var ids []string
 	if json.Unmarshal(raw, &scope) != nil || len(scope) != 1 ||
-		json.Unmarshal(scope["knowledge_base_ids"], &ids) != nil || len(ids) == 0 || slices.Contains(ids, "") {
+		json.Unmarshal(scope["knowledge_base_ids"], &ids) != nil || len(ids) == 0 ||
+		slices.ContainsFunc(ids, func(id string) bool {
+			return id == "" || utf8.RuneCountInString(id) > agent24IDMaxRunes
+		}) {
 		return nil, false
 	}
 	seen := make(map[string]bool, len(ids)) // keeps first occurrences, in order
