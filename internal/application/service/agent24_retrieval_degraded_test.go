@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -64,4 +65,96 @@ func TestAgent24RetrievalDegradedMark(t *testing.T) {
 		types.MarkRetrievalDegraded(ctxA)
 		assert.Equal(t, []bool{true, false}, []bool{a(), b()})
 	})
+}
+
+// An image-row refill that fails or answers in part keeps the smaller pool; that is a degraded search too.
+func TestAgent24RetrievalDegradedRefill(t *testing.T) {
+	images := func(rows []*types.IndexWithScore) []*types.IndexWithScore {
+		var out []*types.IndexWithScore
+		for _, h := range rows {
+			if h.SourceType == types.ImageSourceType {
+				out = append(out, h)
+			}
+		}
+		return out
+	}
+	cases := []struct {
+		name     string
+		refill   func(rows []*types.IndexWithScore) ([]*types.RetrieveResult, error)
+		degraded bool
+	}{
+		{"refill complete", func(rows []*types.IndexWithScore) ([]*types.RetrieveResult, error) {
+			more := append(rows, rankedHits("kb", "deep", 50, 0.1, types.ChunkSourceType)...)
+			return []*types.RetrieveResult{{
+				Results: more, RetrieverEngineType: types.PostgresRetrieverEngineType,
+				RetrieverType: types.VectorRetrieverType,
+			}}, nil
+		}, false},
+		{"refill answers in part", func(rows []*types.IndexWithScore) ([]*types.RetrieveResult, error) {
+			return []*types.RetrieveResult{{
+				Results: images(rows), RetrieverEngineType: types.PostgresRetrieverEngineType,
+				RetrieverType: types.VectorRetrieverType, Error: stderrors.New("collection text: unavailable"),
+			}}, nil
+		}, true},
+		{"refill fails", func([]*types.IndexWithScore) ([]*types.RetrieveResult, error) {
+			return nil, stderrors.New("store unavailable")
+		}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &flakyRefillEngine{
+				rankedEngine: rankedEngine{
+					fakeRetrieveEngineService: fakeRetrieveEngineService{
+						engineType: types.PostgresRetrieverEngineType,
+						support:    []types.RetrieverType{types.VectorRetrieverType},
+					},
+					ranked: map[types.RetrieverType][]*types.IndexWithScore{
+						types.VectorRetrieverType: append(
+							rankedHits("kb", "image", 40, 0.9, types.ImageSourceType),
+							rankedHits("kb", "text", 10, 0.5, types.ChunkSourceType)...),
+					},
+				},
+				refill: tc.refill,
+			}
+			g := &storeGroup{
+				KBIDs: []string{"kb"}, Engine: buildBoundComposite(t, engine), TopK: 50,
+				BaseParams: []types.RetrieveParams{{RetrieverType: types.VectorRetrieverType}},
+			}
+			ctx, degraded := types.WithRetrievalDegradedRecorder(context.Background())
+			_, err := (&knowledgeBaseService{}).retrieveFromStores(ctx, []*storeGroup{g}, nil)
+			require.NoError(t, err)
+			assert.Equal(t, []int{50, 100}, engine.topKs[types.VectorRetrieverType], "the refill ran")
+			assert.Equal(t, tc.degraded, degraded())
+		})
+	}
+}
+
+// The FAQ deepening loop keeps what earlier iterations found when a later retrieval fails with a plain
+// error; the search is degraded. A typed failure still fails the search, unmarked.
+func TestAgent24RetrievalDegradedFAQIteration(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		degraded bool
+		fails    bool
+	}{
+		{"plain error", stderrors.New("engine timeout"), true, false},
+		{"typed error", apperrors.NewVectorStoreUnavailableError("down"), false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := &fakeRetrieveEngineService{
+				engineType: types.PostgresRetrieverEngineType,
+				support:    []types.RetrieverType{types.VectorRetrieverType},
+				cannedErr:  tc.err,
+			}
+			groups := []*storeGroup{
+				{Engine: buildBoundComposite(t, bad), BaseParams: vectorParams("q"), TopK: 50, KBIDs: []string{"kb"}},
+			}
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+			ctx, degraded := types.WithRetrievalDegradedRecorder(ctx)
+			_, err := (&knowledgeBaseService{}).iterativeRetrieveWithDeduplication(ctx, groups, 10, "q", 50)
+			require.Equal(t, tc.fails, err != nil, "err = %v", err)
+			assert.Equal(t, tc.degraded, degraded())
+		})
+	}
 }

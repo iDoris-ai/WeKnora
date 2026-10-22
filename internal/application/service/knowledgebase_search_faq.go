@@ -143,6 +143,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 				return nil, err
 			}
 			logger.Warnf(ctx, "Iterative retrieval failed at iteration %d: %v", i+1, err)
+			types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09
 			break
 		}
 
