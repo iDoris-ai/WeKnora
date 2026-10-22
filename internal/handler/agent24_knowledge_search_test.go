@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -478,21 +479,32 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 // returned a non-finite score or the snapshot answered anyway: not a dependency failure, not internal, not 200.
 func TestAgent24KnowledgeSearchEndedByDeadline(t *testing.T) {
 	_, _, errSchema := agent24SearchSchemas(t)
-	late := func(e *agent24SearchEnv) { e.h.search = agent24WaitForDeadline{e.searcher} }
+	late := func(e *agent24SearchEnv, _ *agent24ExpiringCtx) { e.h.search = agent24WaitForDeadline{e.searcher} }
 	for _, tc := range []struct {
 		name      string
-		setup     func(*agent24SearchEnv)
+		setup     func(*agent24SearchEnv, *agent24ExpiringCtx)
 		snapshots int
 	}{
-		{"degraded", func(e *agent24SearchEnv) { late(e); e.searcher.degrade = true }, 0},
-		{"non-finite candidate", func(e *agent24SearchEnv) { late(e); e.searcher.results[1].Score = math.Inf(-1) }, 0},
-		{"snapshot answers late", func(e *agent24SearchEnv) { e.h.hits = agent24SnapshotAfterDeadline{e.hits} }, 1},
+		{"degraded", func(e *agent24SearchEnv, p *agent24ExpiringCtx) { late(e, p); e.searcher.degrade = true }, 0},
+		{"non-finite candidate", func(e *agent24SearchEnv, p *agent24ExpiringCtx) {
+			late(e, p)
+			e.searcher.results[1].Score = math.Inf(-1)
+		}, 0},
+		// The deadline passes inside the snapshot, deterministically: the parent expires there.
+		{"snapshot answers late", func(e *agent24SearchEnv, p *agent24ExpiringCtx) {
+			e.h.hits = agent24ExpireOnSnapshot{e.hits, p}
+		}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newAgent24SearchEnv()
-			tc.setup(e)
-			budget := `{"deadline_ms":50,"max_results":10,"max_concurrency":1}`
-			w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a"`, budget))
+			parent := newAgent24ExpiringCtx(agent24TenantCtx())
+			tc.setup(e, parent)
+			deadline := 50
+			if tc.snapshots > 0 {
+				deadline = 8000 // only the parent's expiry ends this request
+			}
+			budget := fmt.Sprintf(`{"deadline_ms":%d,"max_results":10,"max_concurrency":1}`, deadline)
+			w := e.run(parent, t, agent24SearchBody(`"a"`, budget))
 			require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
 			require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()), w.Body.String())
 			assert.Contains(t, w.Body.String(), `"code":"timeout"`)
@@ -514,15 +526,40 @@ func (a agent24WaitForDeadline) HybridSearch(ctx context.Context, id string, p t
 	return a.inner.HybridSearch(ctx, id, p)
 }
 
-// agent24SnapshotAfterDeadline reads the hits once the request deadline has passed, and answers.
-type agent24SnapshotAfterDeadline struct {
-	inner *fakeAgent24Hits
+// agent24ExpiringCtx is a parent context whose deadline passes when expire is called.
+type agent24ExpiringCtx struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
 }
 
-func (a agent24SnapshotAfterDeadline) Snapshot(ctx context.Context, tenantID uint64, kbIDs, chunkIDs []string) (
+func newAgent24ExpiringCtx(parent context.Context) *agent24ExpiringCtx {
+	return &agent24ExpiringCtx{Context: parent, done: make(chan struct{})}
+}
+
+func (c *agent24ExpiringCtx) expire()               { c.once.Do(func() { close(c.done) }) }
+func (c *agent24ExpiringCtx) Done() <-chan struct{} { return c.done }
+
+func (c *agent24ExpiringCtx) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+// agent24ExpireOnSnapshot lets the request deadline pass while the hits are read, then answers.
+type agent24ExpireOnSnapshot struct {
+	inner  *fakeAgent24Hits
+	parent *agent24ExpiringCtx
+}
+
+func (a agent24ExpireOnSnapshot) Snapshot(ctx context.Context, tenantID uint64, kbIDs, chunkIDs []string) (
 	agent24HitSnapshot, error,
 ) {
-	<-ctx.Done()
+	a.parent.expire()
+	<-ctx.Done() // the request context follows its parent
 	return a.inner.Snapshot(ctx, tenantID, kbIDs, chunkIDs)
 }
 
