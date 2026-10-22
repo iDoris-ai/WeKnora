@@ -183,9 +183,9 @@ func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) 
 // retrieve runs the one retrieval over plan.Searchable, without context expansion (R3.8), and reads its hits
 // in one snapshot (R3.9). searchErr is the branch failure for agent24SearchOutcome: a retrieval error, a
 // degraded retrieval (its store group failed in part; the group is the failure unit, R3.5, so its results are
-// dropped), internal for a non-finite candidate score (the whole request fails), or a snapshot error; timeout
-// or gone first whenever the deadline or the caller ended the retrieval. hits is never nil. gone: the caller
-// aborted, write nothing.
+// dropped), internal for a non-finite candidate score (the whole request fails, checked before degraded), or a
+// snapshot error; timeout or gone whenever the deadline or the caller ended the retrieval or the snapshot. hits
+// is never nil. gone: the caller aborted, write nothing.
 func (h *Agent24KnowledgeSearchHandler) retrieve(ctx context.Context, req agent24SearchRequest,
 	plan agent24SearchPlan,
 ) ([]agent24SearchHit, *agent24KnowledgeError, bool) {
@@ -206,12 +206,12 @@ func (h *Agent24KnowledgeSearchHandler) retrieve(ctx context.Context, req agent2
 		e, gone := agent24StorageError(ctx, ctx.Err())
 		return hits, e, gone
 	}
-	if degraded() {
-		return hits, agent24Unavailable("dependency"), false
-	}
-	if !agent24FiniteScores(results) {
+	if !agent24FiniteScores(results) { // before degraded: a broken score fails the request, dropped or not
 		logger.Warnf(ctx, "agent24 knowledge search: non-finite candidate score")
 		return hits, agent24Internal(), false
+	}
+	if degraded() {
+		return hits, agent24Unavailable("dependency"), false
 	}
 	var cands []agent24SearchCandidate
 	var chunkIDs []string
@@ -225,6 +225,9 @@ func (h *Agent24KnowledgeSearchHandler) retrieve(ctx context.Context, req agent2
 		}
 	}
 	snap, err := h.hits.Snapshot(ctx, types.CallerFromContext(ctx).TenantID, plan.Searchable, chunkIDs)
+	if err == nil {
+		err = ctx.Err() // a snapshot that answered as the caller left or the deadline passed
+	}
 	if err != nil {
 		e, gone := agent24StorageError(ctx, err)
 		return hits, e, gone
