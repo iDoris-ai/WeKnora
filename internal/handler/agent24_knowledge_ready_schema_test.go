@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,14 +22,27 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Copied verbatim from Agent24 9623505e (CONTRACT-READONLY-v1 r8); see testdata/agent24_knowledge/README.md.
+// Copied verbatim from Agent24 9121a7b2 (CONTRACT-READONLY-v1 r10); see testdata/agent24_knowledge/README.md.
 var agent24KnowledgeSchemaSHA256 = map[string]string{
 	"ready.schema.json":  "3670772188f2a0c84f6e7234006977bbf029764ad44e19f11c38791e524dbfdd",
-	"common.schema.json": "4d0f6669c4d7e2ad75e513991a86dbcb90e751c681076ba97a929d826008a278",
+	"search.schema.json": "6f714593bfaaeb1e3b3a5063b1610eaa19da74b3e37f28b1dd2b25c257fba16f",
+	"error.schema.json":  "02dea455203cf503f61e0995f62605fffbcd832af627a5fb4a210820cd81649e",
+	"common.schema.json": "97de36a9af3a1315bdacda1243c9f8dd84a1f15993f9c757698b73c2bc345f52",
 }
 
 // agent24ReadySchemas checks the testdata digests and compiles ready.schema.json's request and response.
 func agent24ReadySchemas(t *testing.T) (request, response *jsonschema.Schema) {
+	t.Helper()
+	c, ids := agent24SchemaCompiler(t)
+	request, err := c.Compile(ids["ready.schema.json"] + "#/$defs/request")
+	require.NoError(t, err)
+	response, err = c.Compile(ids["ready.schema.json"] + "#/$defs/response")
+	require.NoError(t, err)
+	return request, response
+}
+
+// agent24SchemaCompiler checks the testdata digests and loads every schema copy; ids maps file name to $id.
+func agent24SchemaCompiler(t *testing.T) (*jsonschema.Compiler, map[string]string) {
 	t.Helper()
 	c := jsonschema.NewCompiler()
 	ids := map[string]string{}
@@ -43,11 +57,7 @@ func agent24ReadySchemas(t *testing.T) (request, response *jsonschema.Schema) {
 		ids[name], _ = doc.(map[string]any)["$id"].(string)
 		require.NoError(t, c.AddResource(ids[name], doc))
 	}
-	request, err := c.Compile(ids["ready.schema.json"] + "#/$defs/request")
-	require.NoError(t, err)
-	response, err = c.Compile(ids["ready.schema.json"] + "#/$defs/response")
-	require.NoError(t, err)
-	return request, response
+	return c, ids
 }
 
 func agent24Validate(sch *jsonschema.Schema, body []byte) error {
@@ -101,7 +111,7 @@ func TestAgent24KnowledgeReadySchemaPositive(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-			(&Agent24KnowledgeReadyHandler{tc.probe, resolver, index}).Ready(c)
+			(&Agent24KnowledgeReadyHandler{probe: tc.probe, scope: resolver, index: index}).Ready(c)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 			assert.NoError(t, agent24Validate(respSchema, w.Body.Bytes()), "response: %s", w.Body.String())
 			for _, s := range tc.wants {
@@ -138,4 +148,31 @@ func TestAgent24KnowledgeReadySchemaNegative(t *testing.T) {
 			assert.Error(t, agent24Validate(respSchema, []byte(tc.body)), tc.body)
 		})
 	}
+}
+
+// Every copy compiles, entry by entry: the roots and each $defs entry, so a broken reference anywhere in a
+// copy (even in a definition no other copy uses yet, like common's doc_revision) fails here.
+func TestAgent24KnowledgeSchemaCopiesCompile(t *testing.T) {
+	c, ids := agent24SchemaCompiler(t)
+	require.Len(t, ids, len(agent24KnowledgeSchemaSHA256))
+	compiled := 0
+	for name, id := range ids {
+		require.NotEmpty(t, id, name)
+		raw, err := os.ReadFile(filepath.Join("testdata", "agent24_knowledge", name))
+		require.NoError(t, err)
+		var doc struct {
+			Defs map[string]json.RawMessage `json:"$defs"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &doc), name)
+		refs := []string{id}
+		for def := range doc.Defs {
+			refs = append(refs, id+"#/$defs/"+def)
+		}
+		for _, ref := range refs {
+			_, err := c.Compile(ref)
+			assert.NoError(t, err, ref)
+			compiled++
+		}
+	}
+	assert.Greater(t, compiled, 30, "every $defs entry of the four copies")
 }
