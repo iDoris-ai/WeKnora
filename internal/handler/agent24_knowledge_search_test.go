@@ -440,6 +440,8 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := newAgent24SearchEnv()
 			ctx, cancel := context.WithCancel(agent24TenantCtx())
+			e.h.search = agent24CancelOnCall{e.searcher, cancel}
+			snapshots := 0
 			switch name {
 			case "retrieval":
 				e.searcher.err = context.Canceled
@@ -447,12 +449,15 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 				e.searcher.degrade = true
 			case "non-finite candidate":
 				e.searcher.results[1].Score = math.NaN()
-			default:
+			default: // the retrieval completes; the caller leaves while the hits are read
+				e.h.search = e.searcher
+				e.h.hits = agent24CancelOnSnapshot{e.hits, cancel}
 				e.hits.err = context.Canceled
+				snapshots = 1
 			}
-			e.h.search = agent24CancelOnCall{e.searcher, cancel}
 			w := e.run(ctx, t, agent24SearchBody(`"a"`, agent24Budget))
 			assert.Empty(t, w.Body.String())
+			assert.Equal(t, []int{1, snapshots}, []int{len(e.searcher.calls), len(e.hits.calls)})
 		})
 	}
 }
@@ -493,6 +498,19 @@ func (a agent24WaitForDeadline) HybridSearch(ctx context.Context, id string, p t
 ) {
 	<-ctx.Done()
 	return a.inner.HybridSearch(ctx, id, p)
+}
+
+// agent24CancelOnSnapshot cancels the request context while the hits are read.
+type agent24CancelOnSnapshot struct {
+	inner  *fakeAgent24Hits
+	cancel context.CancelFunc
+}
+
+func (a agent24CancelOnSnapshot) Snapshot(ctx context.Context, tenantID uint64, kbIDs, chunkIDs []string) (
+	agent24HitSnapshot, error,
+) {
+	a.cancel()
+	return a.inner.Snapshot(ctx, tenantID, kbIDs, chunkIDs)
 }
 
 // agent24CancelOnCall cancels the request context while the retrieval runs.
