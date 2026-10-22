@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"slices"
@@ -38,13 +39,13 @@ func TestAgent24AssembleHits(t *testing.T) {
 		},
 	}
 	cands := []agent24SearchCandidate{
-		{ChunkID: "c3", Score: 0.9},
+		{ChunkID: "c3", Score: 0.1}, // retrieval order is authoritative, not score (R3.6)
 		{ChunkID: "nope", Score: 0.8},
 		{ChunkID: "c1", Score: 0.7},
-		{ChunkID: "c3", Score: 0.6},
+		{ChunkID: "c3", Score: 0.99}, // a repeat keeps the first occurrence
 		{ChunkID: "c4", Score: 0.5},
 		{ChunkID: "c5", Score: 0.4},
-		{ChunkID: "c2", Score: 0.3},
+		{ChunkID: "c2", Score: 0.9},
 	}
 	hits := agent24AssembleHits(key, "emb:e1", cands, snap, 50)
 	ids := func(hs []agent24SearchHit) (out []string) {
@@ -70,6 +71,7 @@ func TestAgent24AssembleHits(t *testing.T) {
 	assert.Equal(t, agent24HitSnippet{Text: long[:agent24KnowledgeMaxSnippetBytes-1], Truncated: true},
 		hits[0].Snippet)
 	assert.Nil(t, hits[0].Display)
+	assert.Equal(t, 0.1, hits[0].Score)
 	assert.Equal(t, []int{1, 2, 3}, []int{hits[0].Rank, hits[1].Rank, hits[2].Rank})
 	assert.Equal(t, hits[1].Revision.IndexBuildID, hits[2].Revision.IndexBuildID) // same document, same build
 
@@ -141,7 +143,10 @@ func agent24HitTestDB(t *testing.T) *gorm.DB {
 	k7.Type = types.KnowledgeTypeManual
 	rows := []any{
 		k1,
-		chunk("c1", 1, "a", "k1", text, "one"),
+		&types.Chunk{
+			ID: "c1", TenantID: 1, KnowledgeBaseID: "a", KnowledgeID: "k1", ChunkType: text, IsEnabled: true,
+			Content: "one", ContentRevision: 3,
+		},
 		chunk("c2", 1, "a", "k1", text, "two"),
 		chunk("c3", 1, "a", "k1", text, "disabled"),
 		chunk("c4", 1, "a", "k1", types.ChunkTypeSummary, "summary"),
@@ -149,6 +154,10 @@ func agent24HitTestDB(t *testing.T) *gorm.DB {
 		&types.Chunk{
 			ID: "c13", TenantID: 1, KnowledgeBaseID: "a", KnowledgeID: "k1", ChunkType: text, IsEnabled: true,
 			IndexStatus: "processing",
+		},
+		&types.Chunk{
+			ID: "c14", TenantID: 1, KnowledgeBaseID: "a", KnowledgeID: "k1", ChunkType: text, IsEnabled: true,
+			IndexStatus: "failed",
 		},
 		doc("k2", 1, "a", types.ParseStatusProcessing),
 		chunk("c6", 1, "a", "k2", text, "no build"),
@@ -181,12 +190,12 @@ func agent24SortedSnapshot(s agent24HitSnapshot) agent24HitSnapshot {
 }
 
 var agent24HitTestChunkIDs = []string{
-	"c1", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11", "c13", "nope",
+	"c1", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "c11", "c13", "c14", "nope",
 }
 
 var agent24HitTestWant = agent24HitSnapshot{
 	Chunks: map[string]agent24HitChunk{
-		"c1":  {ID: "c1", KnowledgeID: "k1", KnowledgeBaseID: "a", Content: "one"},
+		"c1":  {ID: "c1", KnowledgeID: "k1", KnowledgeBaseID: "a", Content: "one", ContentRevision: 3},
 		"c9":  {ID: "c9", KnowledgeID: "k5", KnowledgeBaseID: "b", Content: "manual"},
 		"c11": {ID: "c11", KnowledgeID: "k7", KnowledgeBaseID: "b", Content: "manual, no metadata"},
 	},
@@ -194,7 +203,7 @@ var agent24HitTestWant = agent24HitSnapshot{
 		"k1": {
 			ID: "k1", KnowledgeBaseID: "a", Title: "T1", FileName: "f1.pdf",
 			Fingerprint:      agent24SourceFingerprint{FileHash: "h1", FilePath: "p1", Source: "s1"},
-			ServableChunkIDs: []string{"c1", "c13", "c2"}, // c13 is servable though its index sync is pending
+			ServableChunkIDs: []string{"c1", "c13", "c14", "c2"}, // c13, c14: servable, index sync pending/failed
 		},
 		"k5": {
 			ID: "k5", KnowledgeBaseID: "b", Fingerprint: agent24SourceFingerprint{ManualVersion: 3},
@@ -250,7 +259,45 @@ func TestAgent24DBHitSnapshotIsOneSnapshot(t *testing.T) {
 	assert.Equal(t, agent24HitTestWant, agent24SortedSnapshot(snap))
 }
 
+// agent24TxRecorder records the options each transaction is begun with, then begins it with defaults.
+type agent24TxRecorder struct {
+	*sql.DB
+	opts []*sql.TxOptions
+}
+
+func (r *agent24TxRecorder) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	r.opts = append(r.opts, opts)
+	return r.DB.BeginTx(ctx, nil)
+}
+
+// agent24NamedDialector reports another dialect name over a working dialector.
+type agent24NamedDialector struct {
+	gorm.Dialector
+	name string
+}
+
+func (d agent24NamedDialector) Name() string { return d.name }
+
+// Snapshot begins its one transaction with the dialect's options: on Postgres a read-only REPEATABLE READ
+// (R3.9; READ COMMITTED would give each query its own snapshot), on SQLite the default.
 func TestAgent24SnapshotTxOptions(t *testing.T) {
-	db := agent24HitTestDB(t)
-	assert.Nil(t, agent24SnapshotTxOptions(db))
+	for _, tc := range []struct {
+		name string
+		want []*sql.TxOptions
+	}{
+		{"postgres", []*sql.TxOptions{{Isolation: sql.LevelRepeatableRead, ReadOnly: true}}},
+		{"sqlite", []*sql.TxOptions{nil}},
+	} {
+		db := agent24HitTestDB(t)
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		rec := &agent24TxRecorder{DB: sqlDB}
+		db.ConnPool, db.Statement.ConnPool = rec, rec
+		db.Dialector = agent24NamedDialector{db.Dialector, tc.name}
+		snap, err := agent24DBHitReader{db}.Snapshot(context.Background(), 1, []string{"a", "b"},
+			agent24HitTestChunkIDs)
+		require.NoError(t, err)
+		assert.Equal(t, agent24HitTestWant, agent24SortedSnapshot(snap), tc.name)
+		assert.Equal(t, tc.want, rec.opts, tc.name)
+	}
 }
