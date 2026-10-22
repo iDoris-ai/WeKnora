@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -150,29 +152,36 @@ func TestAgent24KnowledgeReadySchemaNegative(t *testing.T) {
 	}
 }
 
+// agent24KnowledgeSchemaDefs is the number of $defs entries in each copy, pinned with its sha256: a
+// re-sync updates both.
+var agent24KnowledgeSchemaDefs = map[string]int{
+	"ready.schema.json": 5, "search.schema.json": 5, "error.schema.json": 9, "common.schema.json": 13,
+}
+
 // Every copy compiles, entry by entry: the roots and each $defs entry, so a broken reference anywhere in a
 // copy (even in a definition no other copy uses yet, like common's doc_revision) fails here.
 func TestAgent24KnowledgeSchemaCopiesCompile(t *testing.T) {
 	c, ids := agent24SchemaCompiler(t)
-	require.Len(t, ids, len(agent24KnowledgeSchemaSHA256))
-	compiled := 0
+	names, distinct := []string{}, map[string]bool{}
 	for name, id := range ids {
 		require.NotEmpty(t, id, name)
+		names, distinct[id] = append(names, name), true
+	}
+	require.ElementsMatch(t, slices.Collect(maps.Keys(agent24KnowledgeSchemaDefs)), names)
+	require.Len(t, distinct, len(ids), "every copy has its own $id")
+	for name, id := range ids {
 		raw, err := os.ReadFile(filepath.Join("testdata", "agent24_knowledge", name))
 		require.NoError(t, err)
 		var doc struct {
 			Defs map[string]json.RawMessage `json:"$defs"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &doc), name)
-		refs := []string{id}
+		require.Len(t, doc.Defs, agent24KnowledgeSchemaDefs[name], name)
+		_, err = c.Compile(id)
+		assert.NoError(t, err, id)
 		for def := range doc.Defs {
-			refs = append(refs, id+"#/$defs/"+def)
-		}
-		for _, ref := range refs {
-			_, err := c.Compile(ref)
-			assert.NoError(t, err, ref)
-			compiled++
+			_, err := c.Compile(id + "#/$defs/" + def)
+			assert.NoError(t, err, def)
 		}
 	}
-	assert.Greater(t, compiled, 30, "every $defs entry of the four copies")
 }
