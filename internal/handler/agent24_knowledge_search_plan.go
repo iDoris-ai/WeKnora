@@ -128,7 +128,7 @@ func agent24JSONPositiveInt(raw json.RawMessage, limit int) (int, bool) {
 }
 
 // agent24SearchScoreSpace returns the one score space of E (kbs, request order); more than one is
-// mixed_score_space, with the groups (R3.6). It reads nothing but kbs, so it is judged before any index fact.
+// mixed_score_space, with the groups (R3.6). It reads nothing but kbs: a caller can judge it before reading any index fact.
 func agent24SearchScoreSpace(kbs []*types.KnowledgeBase) (string, *agent24KnowledgeError) {
 	var groups []agent24ScoreSpaceGroup
 	index := map[string]int{}
