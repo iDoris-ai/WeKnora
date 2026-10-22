@@ -41,7 +41,7 @@ func TestAgent24AssembleHits(t *testing.T) {
 	cands := []agent24SearchCandidate{
 		{ChunkID: "c3", Score: 0.1}, // retrieval order is authoritative, not score (R3.6)
 		{ChunkID: "nope", Score: 0.8},
-		{ChunkID: "c1", Score: 0.7},
+		{ChunkID: "c1", Score: 0.95}, // kept scores 0.1, 0.95, 0.9: neither ascending nor descending
 		{ChunkID: "c3", Score: 0.99}, // a repeat keeps the first occurrence
 		{ChunkID: "c4", Score: 0.5},
 		{ChunkID: "c5", Score: 0.4},
@@ -63,7 +63,7 @@ func TestAgent24AssembleHits(t *testing.T) {
 			IndexBuildID:   agent24IndexBuildID(key, "d1", []string{"c1", "c2", "c9"}),
 			ChunkRevision:  2, ContentTag: agent24ContentTag(key, "c1", "one"),
 		},
-		Locator: agent24HitLocator{Valid: false}, IndexState: "fresh", Score: 0.7, ScoreSpace: "emb:e1",
+		Locator: agent24HitLocator{Valid: false}, IndexState: "fresh", Score: 0.95, ScoreSpace: "emb:e1",
 		Snippet: agent24HitSnippet{Text: "one"}, Display: &agent24HitDisplay{Title: "T", FileName: "f.pdf"},
 	}, hits[1])
 	// The snippet comes from the same text as content_tag, cut on a rune boundary (R3.8).
