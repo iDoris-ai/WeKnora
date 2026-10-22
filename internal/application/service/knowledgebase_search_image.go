@@ -89,6 +89,7 @@ func (s *knowledgeBaseService) embeddingTakesImages(ctx context.Context, kb *typ
 		// The query embedding already resolved this model, so a failure here
 		// is transient; searching as text-only is the safe fallback.
 		logger.Warnf(ctx, "image recall: resolve embedding model %s: %v", kb.EmbeddingModelID, err)
+		types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: image hits are not searched
 		return false
 	}
 	_, ok := embedding.AsImageEmbedder(model)
