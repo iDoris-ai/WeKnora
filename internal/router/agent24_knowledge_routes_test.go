@@ -2,6 +2,8 @@ package router
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -77,5 +79,30 @@ func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Each route reaches its own handler: a valid search body is a search refused as operation_disabled (a handler
+// without the revision key) on the search route, and not a ready request (invalid_request) on the ready route.
+func TestAgent24KnowledgeRouteHandlers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
+		&handler.Agent24KnowledgeSearchHandler{}, &rbacGuards{})
+	body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
+		`"scope":{"knowledge_base_ids":["a"]},"budget":{"deadline_ms":800,"max_results":5,"max_concurrency":1}}`
+	for _, tc := range []struct {
+		op, want string
+		status   int
+	}{
+		{"search", `"reason":"operation_disabled"`, http.StatusForbidden},
+		{"ready", `"code":"invalid_request"`, http.StatusBadRequest},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/"+tc.op, strings.NewReader(body))
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("%s: status %d body %s, want %d with %s", tc.op, w.Code, w.Body.String(), tc.status, tc.want)
+		}
 	}
 }
