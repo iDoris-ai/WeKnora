@@ -334,6 +334,15 @@ func TestAgent24KnowledgeSearchOutcomes(t *testing.T) {
 			},
 		},
 		{name: "empty scope", ids: `"x"`, status: 403, code: "forbidden", reason: "empty_scope"},
+		{
+			// A broken score fails the request even though the degraded retrieval's results are dropped.
+			name: "degraded with a non-finite candidate", ids: `"a","c"`,
+			setup: func(e *agent24SearchEnv) {
+				e.searcher.degrade = true
+				e.searcher.results[1].Score = math.NaN()
+			},
+			status: 500, code: "internal", searches: 1,
+		},
 		{name: "mixed score space", ids: `"a","m"`, status: 400, code: "invalid_request", reason: "mixed_score_space"},
 		{
 			name: "mixed score space, index facts fail", ids: `"a","m"`,
@@ -434,9 +443,10 @@ func (agent24FailingIndex) Facts(context.Context, *types.KnowledgeBase) (agent24
 }
 
 // The caller aborting means no response at all (R7.1), also when upstream swallowed the cancellation as a
-// degraded retrieval.
+// degraded retrieval, or a snapshot answered anyway.
 func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
-	for _, name := range []string{"retrieval", "degraded retrieval", "non-finite candidate", "snapshot"} {
+	names := []string{"retrieval", "degraded retrieval", "non-finite candidate", "snapshot", "snapshot answers"}
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			e := newAgent24SearchEnv()
 			ctx, cancel := context.WithCancel(agent24TenantCtx())
@@ -452,7 +462,9 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 			default: // the retrieval completes; the caller leaves while the hits are read
 				e.h.search = e.searcher
 				e.h.hits = agent24CancelOnSnapshot{e.hits, cancel}
-				e.hits.err = context.Canceled
+				if name == "snapshot" {
+					e.hits.err = context.Canceled
+				}
 				snapshots = 1
 			}
 			w := e.run(ctx, t, agent24SearchBody(`"a"`, agent24Budget))
@@ -462,28 +474,30 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 	}
 }
 
-// A retrieval the deadline ended is a timeout, also when upstream swallowed it as degraded or returned a
-// non-finite score: not a dependency failure, not internal.
+// A retrieval or snapshot the deadline ended is a timeout, also when upstream swallowed it as degraded,
+// returned a non-finite score or the snapshot answered anyway: not a dependency failure, not internal, not 200.
 func TestAgent24KnowledgeSearchEndedByDeadline(t *testing.T) {
 	_, _, errSchema := agent24SearchSchemas(t)
+	late := func(e *agent24SearchEnv) { e.h.search = agent24WaitForDeadline{e.searcher} }
 	for _, tc := range []struct {
-		name  string
-		setup func(*agent24SearchEnv)
+		name      string
+		setup     func(*agent24SearchEnv)
+		snapshots int
 	}{
-		{"degraded", func(e *agent24SearchEnv) { e.searcher.degrade = true }},
-		{"non-finite candidate", func(e *agent24SearchEnv) { e.searcher.results[1].Score = math.Inf(-1) }},
+		{"degraded", func(e *agent24SearchEnv) { late(e); e.searcher.degrade = true }, 0},
+		{"non-finite candidate", func(e *agent24SearchEnv) { late(e); e.searcher.results[1].Score = math.Inf(-1) }, 0},
+		{"snapshot answers late", func(e *agent24SearchEnv) { e.h.hits = agent24SnapshotAfterDeadline{e.hits} }, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newAgent24SearchEnv()
 			tc.setup(e)
-			e.h.search = agent24WaitForDeadline{e.searcher}
 			budget := `{"deadline_ms":50,"max_results":10,"max_concurrency":1}`
 			w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a"`, budget))
 			require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
 			require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()), w.Body.String())
 			assert.Contains(t, w.Body.String(), `"code":"timeout"`)
 			assert.Contains(t, w.Body.String(), `"reason":"timeout"`)
-			assert.Equal(t, []int{1, 0}, []int{len(e.searcher.calls), len(e.hits.calls)}, "retrieved, no snapshot")
+			assert.Equal(t, []int{1, tc.snapshots}, []int{len(e.searcher.calls), len(e.hits.calls)})
 		})
 	}
 }
@@ -498,6 +512,18 @@ func (a agent24WaitForDeadline) HybridSearch(ctx context.Context, id string, p t
 ) {
 	<-ctx.Done()
 	return a.inner.HybridSearch(ctx, id, p)
+}
+
+// agent24SnapshotAfterDeadline reads the hits once the request deadline has passed, and answers.
+type agent24SnapshotAfterDeadline struct {
+	inner *fakeAgent24Hits
+}
+
+func (a agent24SnapshotAfterDeadline) Snapshot(ctx context.Context, tenantID uint64, kbIDs, chunkIDs []string) (
+	agent24HitSnapshot, error,
+) {
+	<-ctx.Done()
+	return a.inner.Snapshot(ctx, tenantID, kbIDs, chunkIDs)
 }
 
 // agent24CancelOnSnapshot cancels the request context while the hits are read.
