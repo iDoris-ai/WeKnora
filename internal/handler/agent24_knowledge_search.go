@@ -183,9 +183,9 @@ func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) 
 // retrieve runs the one retrieval over plan.Searchable, without context expansion (R3.8), and reads its hits
 // in one snapshot (R3.9). searchErr is the branch failure for agent24SearchOutcome: a retrieval error, a
 // degraded retrieval (its store group failed in part; the group is the failure unit, R3.5, so its results are
-// dropped; timeout or gone when the deadline or the caller ended it), internal for a non-finite candidate
-// score (the whole request fails), or a snapshot error. hits is never nil. gone: the caller aborted, write
-// nothing.
+// dropped), internal for a non-finite candidate score (the whole request fails), or a snapshot error; timeout
+// or gone first whenever the deadline or the caller ended the retrieval. hits is never nil. gone: the caller
+// aborted, write nothing.
 func (h *Agent24KnowledgeSearchHandler) retrieve(ctx context.Context, req agent24SearchRequest,
 	plan agent24SearchPlan,
 ) ([]agent24SearchHit, *agent24KnowledgeError, bool) {
@@ -202,11 +202,11 @@ func (h *Agent24KnowledgeSearchHandler) retrieve(ctx context.Context, req agent2
 		e, gone := classifyAgent24KnowledgeExecError(ctx, err)
 		return hits, e, gone
 	}
+	if ctx.Err() != nil { // the caller or the deadline ended the retrieval; upstream may have swallowed it
+		e, gone := agent24StorageError(ctx, ctx.Err())
+		return hits, e, gone
+	}
 	if degraded() {
-		if ctx.Err() != nil { // the caller or the deadline ended the retrieval; upstream counted it as degraded
-			e, gone := agent24StorageError(ctx, ctx.Err())
-			return hits, e, gone
-		}
 		return hits, agent24Unavailable("dependency"), false
 	}
 	if !agent24FiniteScores(results) {

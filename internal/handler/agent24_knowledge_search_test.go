@@ -436,7 +436,7 @@ func (agent24FailingIndex) Facts(context.Context, *types.KnowledgeBase) (agent24
 // The caller aborting means no response at all (R7.1), also when upstream swallowed the cancellation as a
 // degraded retrieval.
 func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
-	for _, name := range []string{"retrieval", "degraded retrieval", "snapshot"} {
+	for _, name := range []string{"retrieval", "degraded retrieval", "non-finite candidate", "snapshot"} {
 		t.Run(name, func(t *testing.T) {
 			e := newAgent24SearchEnv()
 			ctx, cancel := context.WithCancel(agent24TenantCtx())
@@ -445,6 +445,8 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 				e.searcher.err = context.Canceled
 			case "degraded retrieval":
 				e.searcher.degrade = true
+			case "non-finite candidate":
+				e.searcher.results[1].Score = math.NaN()
 			default:
 				e.hits.err = context.Canceled
 			}
@@ -455,19 +457,30 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 	}
 }
 
-// A retrieval the deadline ended, swallowed upstream as degraded, is a timeout, not a dependency failure.
-func TestAgent24KnowledgeSearchDegradedByDeadline(t *testing.T) {
+// A retrieval the deadline ended is a timeout, also when upstream swallowed it as degraded or returned a
+// non-finite score: not a dependency failure, not internal.
+func TestAgent24KnowledgeSearchEndedByDeadline(t *testing.T) {
 	_, _, errSchema := agent24SearchSchemas(t)
-	e := newAgent24SearchEnv()
-	e.searcher.degrade = true
-	e.h.search = agent24WaitForDeadline{e.searcher}
-	budget := `{"deadline_ms":50,"max_results":10,"max_concurrency":1}`
-	w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a"`, budget))
-	require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
-	require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()), w.Body.String())
-	assert.Contains(t, w.Body.String(), `"code":"timeout"`)
-	assert.Contains(t, w.Body.String(), `"reason":"timeout"`)
-	assert.Empty(t, e.hits.calls)
+	for _, tc := range []struct {
+		name  string
+		setup func(*agent24SearchEnv)
+	}{
+		{"degraded", func(e *agent24SearchEnv) { e.searcher.degrade = true }},
+		{"non-finite candidate", func(e *agent24SearchEnv) { e.searcher.results[1].Score = math.Inf(-1) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newAgent24SearchEnv()
+			tc.setup(e)
+			e.h.search = agent24WaitForDeadline{e.searcher}
+			budget := `{"deadline_ms":50,"max_results":10,"max_concurrency":1}`
+			w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a"`, budget))
+			require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
+			require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()), w.Body.String())
+			assert.Contains(t, w.Body.String(), `"code":"timeout"`)
+			assert.Contains(t, w.Body.String(), `"reason":"timeout"`)
+			assert.Equal(t, []int{1, 0}, []int{len(e.searcher.calls), len(e.hits.calls)}, "retrieved, no snapshot")
+		})
+	}
 }
 
 // agent24WaitForDeadline runs the retrieval once the request deadline has passed.
