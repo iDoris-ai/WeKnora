@@ -22,8 +22,8 @@ import (
 )
 
 // agent24SearchTagKey is the revision identifier key (R5.1); nil when AGENT24_KNOWLEDGE_TAG_KEY is unset or
-// invalid. Without it search is disabled, the same in ready, search and the capability declaration (R6.4,
-// R9.3). Only standalone can get here: integration mode refuses to start without the key.
+// invalid. Without it search is disabled (R6.4): ready reports it and the endpoint refuses, each from its own
+// read at construction. Only standalone can get here: integration mode refuses to start without the key.
 func agent24SearchTagKey() []byte {
 	key, err := Agent24KnowledgeTagKeyFromEnv()
 	if err != nil {
