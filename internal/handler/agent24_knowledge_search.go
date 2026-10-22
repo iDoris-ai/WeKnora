@@ -95,10 +95,11 @@ func agent24StorageError(ctx context.Context, err error) (*agent24KnowledgeError
 	return agent24Unavailable("dependency"), false
 }
 
-// agent24FiniteScores reports whether every hit score is a finite number (json.Marshal fails otherwise).
-func agent24FiniteScores(hits []agent24SearchHit) bool {
-	for _, h := range hits {
-		if math.IsNaN(h.Score) || math.IsInf(h.Score, 0) {
+// agent24FiniteScores reports whether every retrieval candidate has a finite score. A NaN or Inf anywhere
+// leaves the ranking, and so the cut to max_results, untrustworthy; in a hit it would also fail json.Marshal.
+func agent24FiniteScores(results []*types.SearchResult) bool {
+	for _, r := range results {
+		if r != nil && (math.IsNaN(r.Score) || math.IsInf(r.Score, 0)) {
 			return false
 		}
 	}
@@ -135,11 +136,6 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 	if gone {
 		return
 	}
-	if !agent24FiniteScores(hits) {
-		logger.Warnf(ctx, "agent24 knowledge search: non-finite hit score")
-		writeAgent24KnowledgeError(c, agent24Internal(), echo)
-		return
-	}
 	completeness, failures, kerr := agent24SearchOutcome(plan, searchErr)
 	if kerr != nil {
 		writeAgent24KnowledgeError(c, kerr, echo)
@@ -152,8 +148,9 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 	})
 }
 
-// plan computes E (empty: forbidden/empty_scope, R2.3) and its branch plan under the current
-// operations.search state (R3.4–R3.6). gone: the caller aborted, write nothing.
+// plan computes E (empty: forbidden/empty_scope, R2.3), judges mixed_score_space before reading any index
+// fact (R6.4), and makes the branch plan under the current operations.search state (R3.4–R3.6). gone: the
+// caller aborted, write nothing.
 func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) (
 	agent24SearchPlan, *agent24KnowledgeError, bool,
 ) {
@@ -169,6 +166,9 @@ func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) 
 	if len(kbs) == 0 {
 		return agent24SearchPlan{}, agent24Forbidden("empty_scope"), false
 	}
+	if _, kerr := agent24SearchScoreSpace(kbs); kerr != nil {
+		return agent24SearchPlan{}, kerr, false
+	}
 	facts := make([]agent24KBIndexFacts, len(kbs))
 	for i, kb := range kbs {
 		if facts[i], err = h.index.Facts(ctx, kb); err != nil {
@@ -183,7 +183,9 @@ func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) 
 // retrieve runs the one retrieval over plan.Searchable, without context expansion (R3.8), and reads its hits
 // in one snapshot (R3.9). searchErr is the branch failure for agent24SearchOutcome: a retrieval error, a
 // degraded retrieval (its store group failed in part; the group is the failure unit, R3.5, so its results are
-// dropped) or a snapshot error. hits is never nil. gone: the caller aborted, write nothing.
+// dropped; timeout or gone when the deadline or the caller ended it), internal for a non-finite candidate
+// score (the whole request fails), or a snapshot error. hits is never nil. gone: the caller aborted, write
+// nothing.
 func (h *Agent24KnowledgeSearchHandler) retrieve(ctx context.Context, req agent24SearchRequest,
 	plan agent24SearchPlan,
 ) ([]agent24SearchHit, *agent24KnowledgeError, bool) {
@@ -201,7 +203,15 @@ func (h *Agent24KnowledgeSearchHandler) retrieve(ctx context.Context, req agent2
 		return hits, e, gone
 	}
 	if degraded() {
+		if ctx.Err() != nil { // the caller or the deadline ended the retrieval; upstream counted it as degraded
+			e, gone := agent24StorageError(ctx, ctx.Err())
+			return hits, e, gone
+		}
 		return hits, agent24Unavailable("dependency"), false
+	}
+	if !agent24FiniteScores(results) {
+		logger.Warnf(ctx, "agent24 knowledge search: non-finite candidate score")
+		return hits, agent24Internal(), false
 	}
 	var cands []agent24SearchCandidate
 	var chunkIDs []string

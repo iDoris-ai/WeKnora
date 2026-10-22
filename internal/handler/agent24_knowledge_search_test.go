@@ -316,7 +316,13 @@ func TestAgent24KnowledgeSearchOutcomes(t *testing.T) {
 		{
 			name: "non-finite score", ids: `"a"`,
 			setup:  func(e *agent24SearchEnv) { e.searcher.results[3].Score = math.Inf(1) },
-			status: 500, code: "internal", searches: 1, snapshots: 1,
+			status: 500, code: "internal", searches: 1,
+		},
+		{
+			// "gone" is not in the snapshot: the score would never reach a hit, yet the ranking is broken.
+			name: "non-finite score of a dropped candidate", ids: `"a"`,
+			setup:  func(e *agent24SearchEnv) { e.searcher.results[1].Score = math.NaN() },
+			status: 500, code: "internal", searches: 1,
 		},
 		{
 			name: "engine down", ids: `"a","c"`,
@@ -329,6 +335,16 @@ func TestAgent24KnowledgeSearchOutcomes(t *testing.T) {
 		},
 		{name: "empty scope", ids: `"x"`, status: 403, code: "forbidden", reason: "empty_scope"},
 		{name: "mixed score space", ids: `"a","m"`, status: 400, code: "invalid_request", reason: "mixed_score_space"},
+		{
+			name: "mixed score space, index facts fail", ids: `"a","m"`,
+			setup:  func(e *agent24SearchEnv) { e.h.index = agent24FailingIndex{} },
+			status: 400, code: "invalid_request", reason: "mixed_score_space",
+		},
+		{
+			name: "index facts fail", ids: `"a"`,
+			setup:  func(e *agent24SearchEnv) { e.h.index = agent24FailingIndex{} },
+			status: 503, code: "unavailable", reason: "dependency",
+		},
 		{
 			name: "scope fails", ids: `"a"`, setup: func(e *agent24SearchEnv) { e.scope.err = down },
 			status: 503, code: "unavailable", reason: "dependency",
@@ -410,15 +426,26 @@ func TestAgent24KnowledgeSearchDecisionOrder(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"request_id":null`)
 }
 
-// The caller aborting means no response at all (R7.1).
+// agent24FailingIndex fails every index fact read.
+type agent24FailingIndex struct{}
+
+func (agent24FailingIndex) Facts(context.Context, *types.KnowledgeBase) (agent24KBIndexFacts, error) {
+	return agent24KBIndexFacts{}, errors.New("SECRET-dsn")
+}
+
+// The caller aborting means no response at all (R7.1), also when upstream swallowed the cancellation as a
+// degraded retrieval.
 func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
-	for _, name := range []string{"retrieval", "snapshot"} {
+	for _, name := range []string{"retrieval", "degraded retrieval", "snapshot"} {
 		t.Run(name, func(t *testing.T) {
 			e := newAgent24SearchEnv()
 			ctx, cancel := context.WithCancel(agent24TenantCtx())
-			if name == "retrieval" {
+			switch name {
+			case "retrieval":
 				e.searcher.err = context.Canceled
-			} else {
+			case "degraded retrieval":
+				e.searcher.degrade = true
+			default:
 				e.hits.err = context.Canceled
 			}
 			e.h.search = agent24CancelOnCall{e.searcher, cancel}
@@ -426,6 +453,33 @@ func TestAgent24KnowledgeSearchClientGone(t *testing.T) {
 			assert.Empty(t, w.Body.String())
 		})
 	}
+}
+
+// A retrieval the deadline ended, swallowed upstream as degraded, is a timeout, not a dependency failure.
+func TestAgent24KnowledgeSearchDegradedByDeadline(t *testing.T) {
+	_, _, errSchema := agent24SearchSchemas(t)
+	e := newAgent24SearchEnv()
+	e.searcher.degrade = true
+	e.h.search = agent24WaitForDeadline{e.searcher}
+	budget := `{"deadline_ms":50,"max_results":10,"max_concurrency":1}`
+	w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a"`, budget))
+	require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
+	require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()), w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"timeout"`)
+	assert.Contains(t, w.Body.String(), `"reason":"timeout"`)
+	assert.Empty(t, e.hits.calls)
+}
+
+// agent24WaitForDeadline runs the retrieval once the request deadline has passed.
+type agent24WaitForDeadline struct {
+	inner *fakeAgent24Searcher
+}
+
+func (a agent24WaitForDeadline) HybridSearch(ctx context.Context, id string, p types.SearchParams) (
+	[]*types.SearchResult, error,
+) {
+	<-ctx.Done()
+	return a.inner.HybridSearch(ctx, id, p)
 }
 
 // agent24CancelOnCall cancels the request context while the retrieval runs.
