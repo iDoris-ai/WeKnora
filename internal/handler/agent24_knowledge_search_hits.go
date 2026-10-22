@@ -98,6 +98,8 @@ type agent24HitReader interface {
 
 type agent24DBHitReader struct{ db *gorm.DB }
 
+var _ agent24HitReader = agent24DBHitReader{}
+
 // agent24UnservedIndexStatuses: chunk index_status values upstream never serves as a hit (R5.3,
 // knowledgebase_search_results.go isSearchableChunk). They stay in the servable set of index_build_id (R5.1).
 var agent24UnservedIndexStatuses = []string{"processing", "failed"}
@@ -108,7 +110,7 @@ var agent24HitSnapshotTestHook func()
 // agent24SnapshotTxOptions: Postgres reads in a read-only REPEATABLE READ transaction, one snapshot for
 // every statement; SQLite (WAL) keeps the snapshot of its first read for the whole transaction.
 func agent24SnapshotTxOptions(db *gorm.DB) *sql.TxOptions {
-	if db.Dialector.Name() == "postgres" {
+	if db.Name() == "postgres" {
 		return &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
 	}
 	return nil
