@@ -36,6 +36,8 @@ func TestAgent24RetrievalDegradedMark(t *testing.T) {
 		fails    bool
 	}{
 		{"partial single group", []*storeGroup{group(engine(hit, cause, nil))}, true, false},
+		// Qdrant and Milvus carry a partial failure on RetrieveResult.Error, with or without hits.
+		{"partial without hits", []*storeGroup{group(engine(nil, cause, nil))}, true, false},
 		{
 			"partial one of two groups",
 			[]*storeGroup{group(engine(hit, nil, nil)), group(engine(hit, cause, nil))},
