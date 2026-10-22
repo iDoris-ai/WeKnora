@@ -252,7 +252,8 @@ func TestAgent24KnowledgeReadyScope(t *testing.T) {
 			var q [][]string // the real resolver over the fake KB service: one deduped batch lookup
 			scope := agent24DefaultScopeResolver{fakeAgent24KB{kbs: in, queries: &q}}
 			index := fakeAgent24Index{"a": {Docs: 2, Building: 1}}
-			(&Agent24KnowledgeReadyHandler{fakeAgent24ReadyProbe{engine: engErr}, scope, index}).Ready(c)
+			h := &Agent24KnowledgeReadyHandler{probe: fakeAgent24ReadyProbe{engine: engErr}, scope: scope, index: index}
+			h.Ready(c)
 			require.Equal(t, []any{status, [][]string{{"b", "a", "x"}}}, []any{w.Code, q})
 			assert.NotContains(t, w.Body.String(), "SECRET")
 			var resp map[string]any
@@ -384,6 +385,55 @@ func TestAgent24ReadyStatusListsMatchClassifier(t *testing.T) {
 		assert.Equal(t, agent24HasBuild(st), slices.Contains(agent24ActiveParseStatuses, st), "%s active", st)
 		assert.Equal(t, class == agent24DocBuilding, slices.Contains(agent24BuildingParseStatuses, st),
 			"%s building", st)
+	}
+}
+
+// Without the revision key search is disabled (R6.4, R9.3): operations.search and every KB's search say so,
+// whatever the dependencies; read is unaffected. The response stays schema-valid.
+func TestAgent24KnowledgeReadySearchDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	_, respSchema := agent24ReadySchemas(t)
+	down := errors.New("down")
+	index := fakeAgent24Index{"chunks": {Docs: 1, Active: 1, HasTextChunks: true}, "building": {Docs: 1, Building: 1}}
+	body := `{"protocol_version":1,"request_id":"r1","generation":7,` +
+		`"scope":{"knowledge_base_ids":["chunks","building"]}}`
+	disabled := map[string]any{"state": "disabled", "reason": "tag_key_missing"}
+	kbOff := map[string]any{"state": "not_ready", "reason": "operation_disabled"}
+	for _, tc := range []struct {
+		name  string
+		probe fakeAgent24ReadyProbe
+		reads []any
+	}{
+		{"deps up", fakeAgent24ReadyProbe{}, []any{
+			map[string]any{"state": "ready"}, map[string]any{"state": "not_ready", "reason": "index_building"},
+		}},
+		{"engine down", fakeAgent24ReadyProbe{engine: down}, []any{
+			map[string]any{"state": "ready"}, map[string]any{"state": "not_ready", "reason": "index_building"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			h := &Agent24KnowledgeReadyHandler{
+				probe: tc.probe, scope: agent24EveryKB{}, index: index, searchDisabled: true,
+			}
+			h.Ready(c)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			require.NoError(t, agent24Validate(respSchema, w.Body.Bytes()), w.Body.String())
+			var got struct {
+				Operations     map[string]any   `json:"operations"`
+				KnowledgeBases []map[string]any `json:"knowledge_bases"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			assert.Equal(t, disabled, got.Operations["search"])
+			assert.Equal(t, map[string]any{"state": "ready"}, got.Operations["read"])
+			require.Len(t, got.KnowledgeBases, 2)
+			for i, kb := range got.KnowledgeBases {
+				assert.Equal(t, kbOff, kb["search"], kb["knowledge_base_id"])
+				assert.Equal(t, tc.reads[i], kb["read"], kb["knowledge_base_id"])
+			}
+		})
 	}
 }
 

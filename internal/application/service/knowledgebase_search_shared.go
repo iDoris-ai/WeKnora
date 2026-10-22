@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -87,6 +88,9 @@ func (s *knowledgeBaseService) listChunksByIDWithShared(ctx context.Context,
 			return
 		}
 		allowed, err := permissions.Check(c.KnowledgeBaseID, c.TenantID, types.OrgRoleViewer)
+		if _, denied := apperrors.IsAppError(err); err != nil && !denied {
+			types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: a share lookup failed, the row is dropped
+		}
 		if err == nil && allowed {
 			chunks = append(chunks, c)
 			foundSet[c.ID] = true

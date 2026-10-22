@@ -309,3 +309,53 @@ func TestAgent24RetrievalDegradedImageModel(t *testing.T) {
 		})
 	}
 }
+
+// failingShares fails every organization share lookup.
+type failingShares struct {
+	fakeKBShareService
+}
+
+func (*failingShares) CheckTenantKBPermission(context.Context, string, uint64, types.TenantRole) (
+	types.OrgMemberRole, bool, error,
+) {
+	return "", false, stderrors.New("share storage unavailable")
+}
+
+// A chunk of a shared KB is dropped when its share lookup fails: the lookup answered for fewer chunks than it
+// should, a degraded search. A chunk the caller may not read (here: outside the API key's KBs) is dropped too,
+// and that is no failure.
+func TestAgent24RetrievalDegradedSharedChunk(t *testing.T) {
+	repo := &tenantScopedFAQChunkRepo{chunks: map[string]*types.Chunk{
+		"own":    {ID: "own", TenantID: 1, KnowledgeBaseID: "kb-own"},
+		"shared": {ID: "shared", TenantID: 2, KnowledgeBaseID: "kb-shared"},
+	}}
+	answering := &fakeKBShareService{allowedKBs: map[string]bool{"kb-shared": true}}
+	for _, tc := range []struct {
+		name     string
+		shares   interfaces.KBShareService
+		scope    []string
+		want     []string
+		degraded bool
+	}{
+		{"share lookup answers", answering, nil, []string{"own", "shared"}, false},
+		{"share lookup fails", &failingShares{}, nil, []string{"own"}, true},
+		{"outside the API key", answering, []string{"kb-own"}, []string{"own"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newSharedAccessContext()
+			if tc.scope != nil {
+				ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KnowledgeBaseIDs: tc.scope})
+			}
+			ctx, degraded := types.WithRetrievalDegradedRecorder(ctx)
+			s := &knowledgeBaseService{chunkRepo: repo, kbShareService: tc.shares}
+			got, err := s.listChunksByIDWithShared(ctx, 1, []string{"own", "shared"})
+			require.NoError(t, err)
+			var ids []string
+			for _, c := range got {
+				ids = append(ids, c.ID)
+			}
+			assert.Equal(t, tc.want, ids)
+			assert.Equal(t, tc.degraded, degraded())
+		})
+	}
+}

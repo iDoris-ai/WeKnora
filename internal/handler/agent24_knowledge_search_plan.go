@@ -127,13 +127,10 @@ func agent24JSONPositiveInt(raw json.RawMessage, limit int) (int, bool) {
 	return min(i, limit), true
 }
 
-// agent24PlanSearch groups E (kbs, request order; facts[i] belongs to kbs[i]) by score space and
-// classifies each KB with agent24KBState under op, the operations.search state (ready or not_ready; a
-// disabled operation is rejected before E, R6.4). More than one score space is mixed_score_space (R3.6).
-// An empty KB is a successful branch only while op is ready; otherwise it fails as dependency (R3.4).
-func agent24PlanSearch(op agent24OperationState, kbs []*types.KnowledgeBase, facts []agent24KBIndexFacts) (
-	agent24SearchPlan, *agent24KnowledgeError,
-) {
+// agent24SearchScoreSpace returns the one score space of E (kbs, request order); more than one is
+// mixed_score_space, with the groups (R3.6). It reads nothing but kbs: a caller can judge it before reading
+// any index fact.
+func agent24SearchScoreSpace(kbs []*types.KnowledgeBase) (string, *agent24KnowledgeError) {
 	var groups []agent24ScoreSpaceGroup
 	index := map[string]int{}
 	for _, kb := range kbs {
@@ -147,15 +144,29 @@ func agent24PlanSearch(op agent24OperationState, kbs []*types.KnowledgeBase, fac
 		groups[i].KnowledgeBaseIDs = append(groups[i].KnowledgeBaseIDs, kb.ID)
 	}
 	if len(groups) > 1 {
-		return agent24SearchPlan{}, &agent24KnowledgeError{
+		return "", &agent24KnowledgeError{
 			Code: agent24CodeInvalidRequest, Reason: "mixed_score_space",
 			Extra: map[string]any{"groups": groups},
 		}
 	}
-	var plan agent24SearchPlan
 	if len(groups) == 1 {
-		plan.ScoreSpace = groups[0].ScoreSpace
+		return groups[0].ScoreSpace, nil
 	}
+	return "", nil
+}
+
+// agent24PlanSearch classifies each KB of E (kbs, request order; facts[i] belongs to kbs[i]) with
+// agent24KBState under op, the operations.search state (ready or not_ready; a disabled operation is rejected
+// before E, R6.4). More than one score space is mixed_score_space (agent24SearchScoreSpace). An empty KB is a
+// successful branch only while op is ready; otherwise it fails as dependency (R3.4).
+func agent24PlanSearch(op agent24OperationState, kbs []*types.KnowledgeBase, facts []agent24KBIndexFacts) (
+	agent24SearchPlan, *agent24KnowledgeError,
+) {
+	space, kerr := agent24SearchScoreSpace(kbs)
+	if kerr != nil {
+		return agent24SearchPlan{}, kerr
+	}
+	plan := agent24SearchPlan{ScoreSpace: space}
 	for i, kb := range kbs {
 		plan.Scope = append(plan.Scope, kb.ID)
 		st := agent24KBState(op, facts[i])
