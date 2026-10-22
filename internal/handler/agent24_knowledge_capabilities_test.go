@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"math"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,6 +25,7 @@ func sortedKeys(m map[string]any) []string {
 
 func TestAgent24KnowledgeCapabilityWireShape(t *testing.T) {
 	t.Setenv(Agent24KnowledgeModeEnv, "")
+	t.Setenv(Agent24KnowledgeTagKeyEnv, "")
 	data := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{
 		Agents:  true,
 		API:     true,
@@ -106,5 +109,29 @@ func TestOverlayLiveDockerSandboxCapabilityPreservesIntegration(t *testing.T) {
 		overlaid := overlayLiveDockerSandboxCapability(data)
 		require.Equal(t, before, overlaid.Integration)
 		require.Equal(t, before, data.Integration)
+	}
+}
+
+// search is declared exactly when the revision key is usable (R9.3), the same judgement the ready and search
+// handlers make at construction (R6.4); read is not implemented yet.
+func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
+	t.Setenv(Agent24KnowledgeModeEnv, "")
+	for _, tc := range []struct {
+		name, key string
+		want      []string
+	}{
+		{"unset", "", []string{}},
+		{"not base64", "%%%", []string{}},
+		{"31 bytes", base64.StdEncoding.EncodeToString(make([]byte, 31)), []string{}},
+		{"32 bytes", base64.StdEncoding.EncodeToString(make([]byte, 32)), []string{"search"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(Agent24KnowledgeTagKeyEnv, tc.key)
+			assert.Equal(t, tc.want, BuildAgent24KnowledgeCapability().SupportedOperations)
+			declared := len(tc.want) > 0
+			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
+			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
+			assert.Equal(t, []bool{!declared, declared}, []bool{ready.searchDisabled, search.key != nil})
+		})
 	}
 }

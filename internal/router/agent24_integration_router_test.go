@@ -129,22 +129,25 @@ func TestAgent24IntegrationCredentialGateNewRouter(t *testing.T) {
 				TenantService:       agent24FakeTenantSvc{tenant: tenant},
 				UserService:         agent24FakeUserSvc{},
 
-				Agent24KnowledgeReadyHandler: &handler.Agent24KnowledgeReadyHandler{},
+				Agent24KnowledgeReadyHandler:  &handler.Agent24KnowledgeReadyHandler{},
+				Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
 			})
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", strings.NewReader("{}"))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-API-Key", "sk-test")
-			req.Header.Set("X-Tenant-ID", "1")
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
-			require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
-			var body struct {
-				Error struct {
-					Details map[string]any `json:"details"`
-				} `json:"error"`
+			for _, op := range []string{"ready", "search"} {
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/"+op, strings.NewReader("{}"))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-API-Key", "sk-test")
+				req.Header.Set("X-Tenant-ID", "1")
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				require.Equal(t, http.StatusUnauthorized, w.Code, "%s: %s", op, w.Body.String())
+				var body struct {
+					Error struct {
+						Details map[string]any `json:"details"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+				require.Equal(t, "credential_invalid", body.Error.Details["reason"], op)
 			}
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
-			require.Equal(t, "credential_invalid", body.Error.Details["reason"])
 		})
 	}
 }
