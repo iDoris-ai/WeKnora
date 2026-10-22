@@ -181,6 +181,7 @@ func retainPartialResults(
 		"store_kind":  storeKindLabel(g.StoreID),
 		"result_sets": len(res),
 	}, fmt.Sprintf("retrieve returned partial results: %v", err))
+	types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: callers that ask can see the degradation
 	return res, nil
 }
 

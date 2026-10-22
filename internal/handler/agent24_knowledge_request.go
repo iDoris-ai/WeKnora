@@ -8,10 +8,24 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
 	"slices"
+
+	"github.com/gin-gonic/gin"
 )
 
 var agent24KnowledgeSupportedProtocolVersions = []int{agent24KnowledgeProtocolVersion}
+
+// agent24KnowledgeMaxBodyBytes caps every agent24 knowledge request body; a larger body is invalid_request.
+const agent24KnowledgeMaxBodyBytes = 1 << 20
+
+// agent24ReadBody reads the request body, at most agent24KnowledgeMaxBodyBytes; false on a read error or
+// a larger body.
+func agent24ReadBody(c *gin.Context) ([]byte, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, agent24KnowledgeMaxBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	return body, err == nil
+}
 
 const agent24RequestIDMaxBytes = 128
 

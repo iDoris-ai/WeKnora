@@ -386,3 +386,31 @@ func TestAgent24ReadyStatusListsMatchClassifier(t *testing.T) {
 			"%s building", st)
 	}
 }
+
+// A body over agent24KnowledgeMaxBodyBytes is invalid_request with nothing echoed, even when it starts as a
+// valid request; one exactly at the limit is read.
+func TestAgent24KnowledgeReadyBodyLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	head := `{"protocol_version":1,"request_id":"r1","generation":7}`
+	for _, tc := range []struct {
+		name   string
+		size   int
+		status int
+	}{
+		{"at limit", 1 << 20, http.StatusOK},
+		{"one byte over", 1<<20 + 1, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := head + strings.Repeat(" ", tc.size-len(head))
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			(&Agent24KnowledgeReadyHandler{probe: fakeAgent24ReadyProbe{}}).Ready(c)
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+			if tc.status != http.StatusOK {
+				assert.JSONEq(t, `{"error":{"code":"invalid_request","message":"invalid request",`+
+					`"details":{"retryable":false,"request_id":null,"generation":null}}}`, w.Body.String())
+			}
+		})
+	}
+}
