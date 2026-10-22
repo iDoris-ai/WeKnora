@@ -805,3 +805,46 @@ func TestScanRetrieveRows_Error(t *testing.T) {
 
 // silence unused import warning when sql isn't directly used
 var _ = sql.ErrNoRows
+
+// Agent24 fork patch A24-KB-09: a table whose keyword query fails is skipped and the rest returned; the
+// search is degraded. Every table answering is not.
+func TestAgent24KeywordsRetrieveMarksDegraded(t *testing.T) {
+	cols := []string{
+		"id", "content", "source_id", "source_type",
+		"chunk_id", "knowledge_id", "knowledge_base_id", "tag_id", "is_enabled",
+	}
+	for _, tc := range []struct {
+		name     string
+		failB    bool
+		degraded bool
+		hits     int
+	}{
+		{"every table answers", false, false, 2},
+		{"one table fails", true, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, mock, _, cleanup := newTestRepo(t)
+			defer cleanup()
+			mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
+				WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).
+					AddRow("weknora_embeddings_768").AddRow("weknora_embeddings_1024"))
+			mock.ExpectQuery("weknora_embeddings_768.*MATCH_ANY").
+				WillReturnRows(sqlmock.NewRows(cols).AddRow("id1", "a", "s", 0, "c1", "k1", "kb", "", true))
+			b := mock.ExpectQuery("weknora_embeddings_1024.*MATCH_ANY")
+			if tc.failB {
+				b.WillReturnError(errors.New("timeout"))
+			} else {
+				b.WillReturnRows(sqlmock.NewRows(cols).AddRow("id2", "b", "s", 0, "c2", "k2", "kb", "", true))
+			}
+			ctx, degraded := types.WithRetrievalDegradedRecorder(context.Background())
+			res, err := repo.KeywordsRetrieve(ctx, types.RetrieveParams{
+				Query: "q", TopK: 5, RetrieverType: types.KeywordsRetrieverType,
+			})
+			require.NoError(t, err)
+			require.Len(t, res, 1)
+			assert.Len(t, res[0].Results, tc.hits)
+			assert.Equal(t, tc.degraded, degraded())
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}

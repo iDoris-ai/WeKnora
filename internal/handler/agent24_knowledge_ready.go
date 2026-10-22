@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"slices"
 	"time"
@@ -157,8 +156,8 @@ func agent24ParseScope(raw json.RawMessage) ([]string, bool) {
 
 // Ready reports liveness and per-operation readiness, plus per-KB readiness for a scope.
 func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
+	body, ok := agent24ReadBody(c)
+	if !ok {
 		writeAgent24KnowledgeError(c, agent24InvalidRequest(), agent24KnowledgeEcho{})
 		return
 	}

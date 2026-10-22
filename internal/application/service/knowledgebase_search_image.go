@@ -284,6 +284,7 @@ func refillSearch(ctx context.Context, g *storeGroup, p types.RetrieveParams) (*
 			"retriever":  p.RetrieverType,
 			"top_k":      p.TopK,
 		}, fmt.Sprintf("image row refill incomplete, keeping the smaller pool: %v", err))
+		types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09
 		return nil, false
 	}
 	return more[0], true
