@@ -24,7 +24,10 @@ probe_namespace_diff() {
     echo "前置核对失败：读 product_patches 失败" >&2
     return 3
   fi
-  patches_type=$(jq -r 'type' <<<"$patches_json" 2>/dev/null) || patches_type=""
+  patches_type=$(jq -r 'type' <<<"$patches_json" 2>/dev/null) && [ -n "$patches_type" ] || {
+    echo "前置核对失败：读 product_patches 失败" >&2
+    return 3
+  }
   if [ "$patches_type" != "array" ]; then
     patches_json='[]'
   fi
@@ -93,7 +96,7 @@ probe_namespace_diff() {
 # 工作区和暂存区分别对 HEAD 比；固定 core.fileMode=true，只改权限位也算改动。
 # docs/agent24/probe-evidence/ 不在 H 里。
 probe_require_harness_at_head() {
-  local others flagged bad
+  local others flagged bad grep_rc
   if ! git -C "$ROOT" -c core.fileMode=true diff --quiet HEAD -- docs/agent24/UPSTREAM-BASELINE.json scripts/agent24/probe \
     || ! git -C "$ROOT" -c core.fileMode=true diff --cached --quiet HEAD -- docs/agent24/UPSTREAM-BASELINE.json scripts/agent24/probe; then
     echo "前置核对失败：探测依据与 HEAD 不一致：docs/agent24/UPSTREAM-BASELINE.json 或 scripts/agent24/probe 有未提交改动，含暂存区。" >&2
@@ -108,7 +111,13 @@ probe_require_harness_at_head() {
   flagged=$(git -C "$ROOT" ls-files -v -- docs/agent24/UPSTREAM-BASELINE.json scripts/agent24/probe) \
     || { echo "前置核对失败：读不到探测依据路径的 index 标记" >&2; return 3; }
   if [ -n "$flagged" ]; then
-    bad=$(printf '%s\n' "$flagged" | grep -v '^H ' || true)
+    # grep 没有输出时退出 1，表示没有带标记的文件；2 以上是 grep 本身出错。
+    bad=$(printf '%s\n' "$flagged" | grep -v '^H ')
+    grep_rc=$?
+    if [ "$grep_rc" -gt 1 ]; then
+      echo "前置核对失败：读不到探测依据路径的 index 标记" >&2
+      return 3
+    fi
     if [ -n "$bad" ]; then
       echo "前置核对失败：探测依据路径有 skip-worktree 或 assume-unchanged 标记。" >&2
       return 3
