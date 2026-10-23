@@ -42,7 +42,7 @@ func TestAgent24ParseReadRequest(t *testing.T) {
 		Expected:  &agent24ReadExpected{ContentTag: "ct"},
 		PageLimit: 100, MaxBytes: 4096, DeadlineMS: 5000,
 	}, req)
-	for _, rev := range []string{"0", "3.0", "1e2", "9223372036854775808"} {
+	for _, rev := range []string{"0", "-0", "0.0", "0e0", "0E-3", "3.0", "1e2", "9223372036854775808"} {
 		_, _, kerr = parse(scope, kid, `"chunk_id":"chk-71"`,
 			`"expected_revision":{"content_tag":"ct","chunk_revision":`+rev+`}`)
 		assert.Nil(t, kerr, rev)
@@ -95,6 +95,8 @@ func TestAgent24ParseReadRequest(t *testing.T) {
 		"chunk expected extra key":   {scope, kid, chunk, cexp(`"x":1`)},
 		"chunk expected rev -1":      {scope, kid, chunk, cexp(`"chunk_revision":-1`)},
 		"chunk expected rev 1.5":     {scope, kid, chunk, cexp(`"chunk_revision":1.5`)},
+		"chunk expected rev 0.5":     {scope, kid, chunk, cexp(`"chunk_revision":0.5`)},
+		"chunk expected rev -1e0":    {scope, kid, chunk, cexp(`"chunk_revision":-1e0`)},
 		"chunk expected rev string":  {scope, kid, chunk, cexp(`"chunk_revision":"1"`)},
 		"chunk expected source null": {scope, kid, chunk, cexp(`"source_revision":null`)},
 		"chunk expected build empty": {scope, kid, chunk, cexp(`"index_build_id":""`)},

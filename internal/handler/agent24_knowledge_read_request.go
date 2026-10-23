@@ -185,10 +185,9 @@ func agent24ParseReadExpected(raw json.RawMessage, chunked bool) (*agent24ReadEx
 		case "source_revision", "index_build_id":
 			_, good := agent24ReadJSONString(v, agent24IDMaxRunes)
 			ok = ok && good
-		case "chunk_revision": // null or an integer >= 0, as JSON Schema reads integers (3.0, 1e2)
-			n, zero := agent24JSONInt64(v)
+		case "chunk_revision": // null or an integer >= 0, as JSON Schema reads integers (0.0, 3.0, 1e2)
 			_, positive := agent24JSONPositiveInt(v, 1)
-			ok = ok && (string(v) == "null" || zero && n == 0 || positive)
+			ok = ok && (string(v) == "null" || positive || agent24JSONZero(v))
 		default:
 			ok = false
 		}
@@ -197,6 +196,19 @@ func agent24ParseReadExpected(raw json.RawMessage, chunked bool) (*agent24ReadEx
 		return nil, false
 	}
 	return &agent24ReadExpected{ContentTag: tag}, true
+}
+
+// agent24JSONZero reports whether raw is a JSON number equal to zero in any spelling (0, -0, 0.0, 0e5).
+func agent24JSONZero(raw json.RawMessage) bool {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if dec.Decode(&v) != nil {
+		return false
+	}
+	n, ok := v.(json.Number)
+	mant, _, _ := strings.Cut(strings.ToLower(string(n)), "e")
+	return ok && strings.Trim(strings.TrimPrefix(mant, "-"), "0.") == ""
 }
 
 // agent24ReadOptPage reads the optional page: the cursor ("" for null or no page), the applied limit, and
