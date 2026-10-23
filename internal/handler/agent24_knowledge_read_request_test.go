@@ -42,6 +42,11 @@ func TestAgent24ParseReadRequest(t *testing.T) {
 		Expected:  &agent24ReadExpected{ContentTag: "ct"},
 		PageLimit: 100, MaxBytes: 4096, DeadlineMS: 5000,
 	}, req)
+	for _, rev := range []string{"0", "3.0", "1e2", "9223372036854775808"} {
+		_, _, kerr = parse(scope, kid, `"chunk_id":"chk-71"`,
+			`"expected_revision":{"content_tag":"ct","chunk_revision":`+rev+`}`)
+		assert.Nil(t, kerr, rev)
+	}
 	req, _, kerr = parse(scope, kid, `"chunk_id":"chk-71"`,
 		`"expected_revision":{"content_tag":"ct","chunk_revision":null}`, `"page":{"cursor":null,"limit":7}`)
 	assert.Nil(t, kerr)

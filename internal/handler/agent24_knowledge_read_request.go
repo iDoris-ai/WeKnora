@@ -185,9 +185,10 @@ func agent24ParseReadExpected(raw json.RawMessage, chunked bool) (*agent24ReadEx
 		case "source_revision", "index_build_id":
 			_, good := agent24ReadJSONString(v, agent24IDMaxRunes)
 			ok = ok && good
-		case "chunk_revision":
-			n, good := agent24JSONInt64(v)
-			ok = ok && (string(v) == "null" || (good && n >= 0))
+		case "chunk_revision": // null or an integer >= 0, as JSON Schema reads integers (3.0, 1e2)
+			n, zero := agent24JSONInt64(v)
+			_, positive := agent24JSONPositiveInt(v, 1)
+			ok = ok && (string(v) == "null" || zero && n == 0 || positive)
 		default:
 			ok = false
 		}
