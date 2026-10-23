@@ -189,6 +189,18 @@ func (agent24NoMemberSvc) ListByUser(context.Context, string) ([]*types.TenantMe
 	return nil, nil
 }
 
+// agent24OrphanHomeSvc has no membership rows and lets the orphan home-workspace self-heal succeed
+// (auth.go:798-809): a user reaching it becomes Owner, so Auth lets the request through.
+type agent24OrphanHomeSvc struct{ agent24NoMemberSvc }
+
+func (agent24OrphanHomeSvc) HasAnyMembers(context.Context, uint64) (bool, error) { return false, nil }
+
+func (agent24OrphanHomeSvc) AddMember(
+	context.Context, string, uint64, types.TenantRole, *string,
+) (*types.TenantMember, error) {
+	return &types.TenantMember{}, nil
+}
+
 func agent24RequireKnowledgeEnvelope(t *testing.T, body []byte, code, reason string, noReason bool) {
 	t.Helper()
 	var parsed struct {
@@ -303,12 +315,12 @@ func TestAgent24IntegrationAuthEnvelopeNewRouter(t *testing.T) {
 			wantReason: "credential_invalid",
 		},
 		{
-			// auth.go:219 — valid JWT, no home workspace and no membership. Workspace 0 exists in the fixture, so
-			// were :219 skipped the lookup at :232 would succeed and the request would go on instead of ending in
-			// the same envelope as :234's 401.
+			// auth.go:219 — valid JWT, no home workspace and no membership. Were :219 skipped, workspace 0 exists
+			// (so not :234's 401) and is the user's home with no members, so the self-heal makes the user Owner
+			// (not :248's 403): Auth would let the request through, never this envelope.
 			name: "jwt no workspace", keys: agent24FakeKeySvc{key: platform},
 			users:   agent24TokenUserSvc{user: tenantlessUser},
-			members: noMember, tenant: &types.Tenant{}, bearer: "Bearer good",
+			members: agent24OrphanHomeSvc{}, tenant: &types.Tenant{}, bearer: "Bearer good",
 			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized",
 			wantReason: "credential_invalid",
 		},
