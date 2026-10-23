@@ -146,6 +146,17 @@ func TestAgent24DBReadSnapshot(t *testing.T) {
 	require.NoError(t, db.Model(&types.Knowledge{}).Where("id = ?", "m1").Update("metadata", "{").Error)
 	_, err = r.Snapshot(ctx, 1, kbs, "m1", agent24ReadWindow{Limit: 1})
 	assert.Error(t, err)
+	// Out of E or excluded, an unreadable metadata value is not read: such documents stay indistinguishable
+	// from absent ones (R2.6).
+	require.NoError(t, db.Model(&types.Knowledge{}).Where("id IN ?", []string{"d3", "d6"}).
+		Updates(map[string]any{"metadata": "{", "type": types.KnowledgeTypeManual}).Error)
+	_, err = r.Snapshot(ctx, 1, []string{"b"}, "m1", agent24ReadWindow{Limit: 1})
+	assert.Error(t, err) // in E: still an error
+	for _, id := range []string{"d3", "d6", "m1"} {
+		s, err := r.Snapshot(ctx, 1, []string{"a"}, id, agent24ReadWindow{Limit: 1})
+		require.NoError(t, err, id)
+		assert.False(t, s.Found, id)
+	}
 }
 
 // Search and read derive index_build_id from the same servable set (R5.1).

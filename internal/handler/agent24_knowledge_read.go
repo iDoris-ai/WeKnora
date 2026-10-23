@@ -66,8 +66,10 @@ func (r agent24DBReadReader) Snapshot(ctx context.Context, tenantID uint64, kbID
 	var snap agent24ReadSnapshot
 	fn := func(tx *gorm.DB) error {
 		var rows []types.Knowledge
+		// metadata is read only after the R2.6 checks: an unreadable value must not tell an excluded document
+		// apart from an absent one.
 		if err := tx.Select(
-			"id, knowledge_base_id, parse_status, title, file_name, file_hash, file_path, source, type, metadata",
+			"id, knowledge_base_id, parse_status, title, file_name, file_hash, file_path, source, type",
 		).Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).Limit(1).Find(&rows).Error; err != nil {
 			return err
 		}
@@ -79,6 +81,14 @@ func (r agent24DBReadReader) Snapshot(ctx context.Context, tenantID uint64, kbID
 			return nil
 		}
 		row := &rows[0]
+		if row.IsManual() {
+			var meta struct{ Metadata types.JSON }
+			if err := tx.Model(&types.Knowledge{}).Select("metadata").
+				Where("tenant_id = ? AND id = ?", tenantID, row.ID).Find(&meta).Error; err != nil {
+				return err
+			}
+			row.Metadata = meta.Metadata
+		}
 		version, err := agent24ManualVersion(row)
 		if err != nil {
 			return err
