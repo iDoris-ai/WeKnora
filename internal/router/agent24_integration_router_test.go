@@ -25,7 +25,7 @@ var agent24RouteParam = regexp.MustCompile(`[:*][^/]+`)
 // TestAgent24IntegrationModeNewRouter guards the production wiring in NewRouter:
 // every registered non-allowlisted route, and its CORS preflight, must answer 404.
 func TestAgent24IntegrationModeNewRouter(t *testing.T) {
-	t.Setenv(handler.Agent24KnowledgeTagKeyEnv, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
@@ -103,7 +103,7 @@ func (agent24FakeUserSvc) GetUserByTenantID(context.Context, uint64) (*types.Use
 // TestAgent24IntegrationCredentialGateNewRouter guards the A24-KB-05 wiring in NewRouter:
 // platform keys and direct-principal tenant keys are rejected after middleware.Auth.
 func TestAgent24IntegrationCredentialGateNewRouter(t *testing.T) {
-	t.Setenv(handler.Agent24KnowledgeTagKeyEnv, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")

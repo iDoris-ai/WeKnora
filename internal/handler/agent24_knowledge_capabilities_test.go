@@ -25,7 +25,7 @@ func sortedKeys(m map[string]any) []string {
 
 func TestAgent24KnowledgeCapabilityWireShape(t *testing.T) {
 	t.Setenv(Agent24KnowledgeModeEnv, "")
-	t.Setenv(Agent24KnowledgeTagKeyEnv, "")
+	agent24SetTagKey(t, "")
 	data := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{
 		Agents:  true,
 		API:     true,
@@ -113,7 +113,7 @@ func TestOverlayLiveDockerSandboxCapabilityPreservesIntegration(t *testing.T) {
 }
 
 // search is declared exactly when the revision key is usable (R9.3), the same judgement the ready and search
-// handlers make at construction (R6.4); read is not implemented yet.
+// handlers make at construction (R6.4), all from the one read of agent24TagKeyOnce; read is not implemented yet.
 func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 	t.Setenv(Agent24KnowledgeModeEnv, "")
 	for _, tc := range []struct {
@@ -126,7 +126,7 @@ func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 		{"32 bytes", base64.StdEncoding.EncodeToString(make([]byte, 32)), []string{"search"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(Agent24KnowledgeTagKeyEnv, tc.key)
+			agent24SetTagKey(t, tc.key)
 			assert.Equal(t, tc.want, BuildAgent24KnowledgeCapability().SupportedOperations)
 			declared := len(tc.want) > 0
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)

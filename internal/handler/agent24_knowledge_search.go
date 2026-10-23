@@ -11,6 +11,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,11 +22,23 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
+// agent24TagKeyOnce reads AGENT24_KNOWLEDGE_TAG_KEY on its first call and returns that result afterwards
+// (until ResetAgent24KnowledgeTagKeyForTest): the capability declaration, ready and search all read the key
+// through it.
+var agent24TagKeyOnce = sync.OnceValues(Agent24KnowledgeTagKeyFromEnv)
+
+// ResetAgent24KnowledgeTagKeyForTest makes the next agent24SearchTagKey read the environment again. For tests;
+// the swap is unsynchronized, so call it while no read is running.
+func ResetAgent24KnowledgeTagKeyForTest() {
+	agent24TagKeyOnce = sync.OnceValues(Agent24KnowledgeTagKeyFromEnv)
+}
+
 // agent24SearchTagKey is the revision identifier key (R5.1); nil when AGENT24_KNOWLEDGE_TAG_KEY is unset or
-// invalid. Without it search is disabled (R6.4): ready reports it and the endpoint refuses, each from its own
-// read at construction. Only standalone can get here: integration mode refuses to start without the key.
+// invalid. Without it search is disabled (R6.4): the capability declaration leaves search out, ready reports
+// it and the endpoint refuses, all from the one read of agent24TagKeyOnce. Only standalone can get here:
+// integration mode refuses to start without the key.
 func agent24SearchTagKey() []byte {
-	key, err := Agent24KnowledgeTagKeyFromEnv()
+	key, err := agent24TagKeyOnce()
 	if err != nil {
 		return nil
 	}
@@ -50,7 +63,8 @@ type Agent24KnowledgeSearchHandler struct {
 	hits   agent24HitReader
 }
 
-// NewAgent24KnowledgeSearchHandler builds the handler with the default dependencies; the key is read once.
+// NewAgent24KnowledgeSearchHandler builds the handler with the default dependencies; the key is taken once,
+// at construction, from agent24SearchTagKey (the process-wide read).
 func NewAgent24KnowledgeSearchHandler(
 	db *gorm.DB, registry interfaces.RetrieveEngineRegistry,
 	kbService interfaces.KnowledgeBaseService,
