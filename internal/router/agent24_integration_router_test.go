@@ -167,6 +167,28 @@ func (agent24RejectKeySvc) AuthenticateAPIKey(context.Context, string) (*types.T
 	return nil, errors.New("invalid API key")
 }
 
+// agent24TokenUserSvc accepts any bearer token as user, with the JWT tenant claim.
+type agent24TokenUserSvc struct {
+	agent24FakeUserSvc
+	user        *types.User
+	jwtTenantID uint64
+}
+
+func (s agent24TokenUserSvc) ValidateToken(context.Context, string) (*types.User, uint64, error) {
+	return s.user, s.jwtTenantID, nil
+}
+
+// agent24NoMemberSvc has no membership rows. GetMembership misses and ListByUser is empty.
+type agent24NoMemberSvc struct{ interfaces.TenantMemberService }
+
+func (agent24NoMemberSvc) GetMembership(context.Context, string, uint64) (*types.TenantMember, error) {
+	return nil, nil
+}
+
+func (agent24NoMemberSvc) ListByUser(context.Context, string) ([]*types.TenantMember, error) {
+	return nil, nil
+}
+
 func agent24RequireKnowledgeEnvelope(t *testing.T, body []byte, code, reason string, noReason bool) {
 	t.Helper()
 	var parsed struct {
@@ -201,11 +223,23 @@ func TestAgent24IntegrationAuthEnvelopeNewRouter(t *testing.T) {
 	direct := &types.Tenant{ID: tenantID, APIPrincipalConfig: &types.APIPrincipalConfig{
 		Mode: types.APIPrincipalModeDirect, RequireDirectHeader: true,
 	}}
+	// Workspace 2 is never the caller's home. auth.go:316 returns before tenant lookup, so a
+	// fixture for workspace 1 makes a missed 316 fall through to 400 instead of another 403.
+	otherID := uint64(2)
+	noMember := agent24NoMemberSvc{}
+	memberUser := &types.User{ID: "user-1", TenantID: tenantID}
+	tenantlessUser := &types.User{ID: "user-2"}
+	otherTenant := &types.Tenant{ID: otherID}
+	tenantModeKey := &types.TenantAPIKey{ID: 3, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID}
+	tenantMode := &types.Tenant{ID: tenantID, APIPrincipalConfig: &types.APIPrincipalConfig{
+		Mode: types.APIPrincipalModeTenant,
+	}}
 
 	cases := []struct {
 		name       string
 		keys       interfaces.TenantAPIKeyService
 		users      interfaces.UserService
+		members    interfaces.TenantMemberService
 		tenant     *types.Tenant
 		bearer     string
 		apiKey     string
@@ -245,6 +279,37 @@ func TestAgent24IntegrationAuthEnvelopeNewRouter(t *testing.T) {
 			tenant: direct, apiKey: "sk-test", tenantHdr: "1", wantStatus: http.StatusUnauthorized,
 			wantCode: "unauthorized", wantReason: "credential_invalid",
 		},
+		{
+			// auth.go:248 — JWT tenant is not the caller's home, and there is no membership.
+			name: "jwt not workspace member", keys: agent24FakeKeySvc{key: platform},
+			users:   agent24TokenUserSvc{user: memberUser, jwtTenantID: otherID},
+			members: noMember, tenant: otherTenant, bearer: "Bearer good",
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized",
+			wantReason: "credential_invalid",
+		},
+		{
+			// auth.go:316 — X-Tenant-ID names a workspace the caller cannot access.
+			name: "jwt forbidden tenant header", keys: agent24FakeKeySvc{key: platform},
+			users:   agent24TokenUserSvc{user: memberUser, jwtTenantID: tenantID},
+			members: noMember, tenant: plain, bearer: "Bearer good", tenantHdr: "2",
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized",
+			wantReason: "credential_invalid",
+		},
+		{
+			// auth.go:424 — a tenant-mode tenant key cannot name another workspace.
+			name: "tenant key other workspace", keys: agent24FakeKeySvc{key: tenantModeKey},
+			users: agent24FakeUserSvc{}, tenant: tenantMode, apiKey: "sk-test", tenantHdr: "2",
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized",
+			wantReason: "credential_invalid",
+		},
+		{
+			// auth.go:219 — valid JWT, no home workspace and no membership.
+			name: "jwt no workspace", keys: agent24FakeKeySvc{key: platform},
+			users:   agent24TokenUserSvc{user: tenantlessUser},
+			members: noMember, tenant: plain, bearer: "Bearer good",
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized",
+			wantReason: "credential_invalid",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,6 +318,7 @@ func TestAgent24IntegrationAuthEnvelopeNewRouter(t *testing.T) {
 				TenantAPIKeyService:           tc.keys,
 				TenantService:                 agent24FakeTenantSvc{tenant: tc.tenant},
 				UserService:                   tc.users,
+				TenantMemberService:           tc.members,
 				Agent24KnowledgeReadyHandler:  &handler.Agent24KnowledgeReadyHandler{},
 				Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
 			})
@@ -320,19 +386,11 @@ func TestAgent24StandaloneAuthEnvelopeNewRouter(t *testing.T) {
 		req.Header.Set("X-Tenant-ID", "1")
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-		var body struct {
-			Error json.RawMessage `json:"error"`
-		}
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		var body map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
-		if len(body.Error) > 0 && body.Error[0] == '{' {
-			var env struct {
-				Code    string `json:"code"`
-				Details struct {
-					Reason string `json:"reason"`
-				} `json:"details"`
-			}
-			require.NoError(t, json.Unmarshal(body.Error, &env), w.Body.String())
-			require.False(t, env.Code == "unauthorized" && env.Details.Reason == "credential_invalid", w.Body.String())
-		}
+		errText, isString := body["error"].(string)
+		require.True(t, isString, w.Body.String())
+		require.Equal(t, "Forbidden: API key scope does not allow this operation", errText)
 	})
 }
