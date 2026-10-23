@@ -98,6 +98,7 @@
             "internal/handler/testdata/agent24_knowledge/common.schema.json",
             "internal/handler/testdata/agent24_knowledge/ready.schema.json",
             "internal/router/agent24_knowledge_routes.go",
+            "internal/router/agent24_knowledge_routes_test.go",
             "internal/router/router.go"
           ],
           "remove_when": "fork 自有功能，不随上游撤掉；上游升级时保留新增的 agent24_* 文件，冲突只可能在 router.go 的 RouterParams 字段与注册行、container.go 的 Provide 行",
@@ -135,9 +136,94 @@
           ],
           "remove_when": "上游不会提供，长期保留；随 Knowledge 集成存续",
           "added_on": "2026-10-21"
+        },
+        {
+          "id": "A24-KB-06",
+          "issue": "iDoris-ai/WeKnora#38",
+          "summary": "Knowledge 集成的内容寻址修订标识（KB-C1-01c ③ R1，CONTRACT-READONLY-v1 r9 R5.1）：HMAC 派生 content_tag、source_revision、index_build_id；集成模式要求 AGENT24_KNOWLEDGE_TAG_KEY（缺失时启动失败）",
+          "upstream_commit": null,
+          "paths": [
+            "internal/handler/agent24_knowledge_mode.go",
+            "internal/handler/agent24_knowledge_mode_test.go",
+            "internal/handler/agent24_knowledge_revision.go",
+            "internal/handler/agent24_knowledge_revision_test.go",
+            "internal/router/agent24_integration_router_test.go"
+          ],
+          "remove_when": "fork 自有功能，不随上游撤掉；全部是 agent24_* 文件，上游升级时保留即可，不会冲突",
+          "added_on": "2026-10-21"
+        },
+        {
+          "id": "A24-KB-07",
+          "issue": "iDoris-ai/WeKnora#38",
+          "summary": "Knowledge 集成 search 的请求解析、预算截断、按 score_space 的分支规划与完整性判定（KB-C1-01c ③b 第 1 片，CONTRACT-READONLY-v1 r10 R3.2–R3.6）；scope 里的 KB id 增加 256 字符上限（就绪端点共用）",
+          "upstream_commit": null,
+          "paths": [
+            "internal/handler/agent24_knowledge_ready.go",
+            "internal/handler/agent24_knowledge_search_plan.go",
+            "internal/handler/agent24_knowledge_search_plan_test.go"
+          ],
+          "remove_when": "fork 自有功能，不随上游撤掉；全部是 agent24_* 文件，上游升级时保留即可，不会冲突",
+          "added_on": "2026-10-22"
+        },
+        {
+          "id": "A24-KB-08",
+          "issue": "iDoris-ai/WeKnora#38",
+          "summary": "Knowledge 集成 search 的命中组装：在同一个数据库快照里回表核对分块可服务，生成修订标识、snippet 与 display（KB-C1-01c ③b 第 2 片，CONTRACT-READONLY-v1 r10 R3.8–R3.10、R5.1–R5.3）",
+          "upstream_commit": null,
+          "paths": [
+            "internal/handler/agent24_knowledge_search_hits.go",
+            "internal/handler/agent24_knowledge_search_hits_test.go"
+          ],
+          "remove_when": "fork 自有功能，不随上游撤掉；只新增文件，上游升级时保留即可；依赖上游 chunks.index_status 的 processing / failed 语义，升级时核对",
+          "added_on": "2026-10-22"
+        },
+        {
+          "id": "A24-KB-09",
+          "issue": "iDoris-ai/WeKnora#38",
+          "summary": "检索降级标记（KB-C1-01c ③b-3b）：上游在检索中吞掉失败、仍返回结果的九处，在 context 携带的记录器上打标记，供 search 把降级当作分支失败；没有记录器时行为与上游相同",
+          "upstream_commit": null,
+          "paths": [
+            "internal/application/repository/retriever/doris/repository.go",
+            "internal/application/repository/retriever/doris/repository_test.go",
+            "internal/application/repository/retriever/tencentvectordb/repository.go",
+            "internal/application/service/agent24_retrieval_degraded_test.go",
+            "internal/application/service/knowledgebase_search_fanout.go",
+            "internal/application/service/knowledgebase_search_faq.go",
+            "internal/application/service/knowledgebase_search_image.go",
+            "internal/application/service/knowledgebase_search_shared.go",
+            "internal/types/agent24_retrieval.go"
+          ],
+          "remove_when": "上游不会提供，长期保留；改的是上游文件（各加一行打标），升级冲突时按 PATCH-LEDGER.md 的 A24-KB-09 行重放，并核对九处是否仍吞错、检索路径上有没有新的吞错点",
+          "added_on": "2026-10-22"
+        },
+        {
+          "id": "A24-KB-10",
+          "issue": "iDoris-ai/WeKnora#38",
+          "summary": "Knowledge 集成 search 端点 POST /api/v1/agent24/knowledge/search（KB-C1-01c ③b-3a/3c/3e，CONTRACT-READONLY-v1 r10 §3、R6.4、R9.3）：处理器、契约 schema 副本（r10 新增 search 与 error）、路由注册、集成允许列表、能力声明在有 key 时列出 search",
+          "upstream_commit": null,
+          "paths": [
+            "internal/container/container.go",
+            "internal/handler/agent24_knowledge_capabilities.go",
+            "internal/handler/agent24_knowledge_capabilities_test.go",
+            "internal/handler/agent24_knowledge_ready.go",
+            "internal/handler/agent24_knowledge_ready_schema_test.go",
+            "internal/handler/agent24_knowledge_ready_test.go",
+            "internal/handler/agent24_knowledge_search.go",
+            "internal/handler/agent24_knowledge_search_plan.go",
+            "internal/handler/agent24_knowledge_search_test.go",
+            "internal/handler/testdata/agent24_knowledge/error.schema.json",
+            "internal/handler/testdata/agent24_knowledge/search.schema.json",
+            "internal/router/agent24_integration_gate.go",
+            "internal/router/agent24_integration_router_test.go",
+            "internal/router/agent24_knowledge_routes.go",
+            "internal/router/agent24_knowledge_routes_test.go",
+            "internal/router/router.go"
+          ],
+          "remove_when": "fork 自有功能，不随上游撤掉；上游升级时保留新增的 agent24_* 文件，冲突只可能在 router.go 的 RouterParams 字段与注册行、container.go 的 Provide 行；依赖上游 HybridSearch 的 KnowledgeBaseIDs、MatchCount、SkipContextEnrichment 语义，升级时核对",
+          "added_on": "2026-10-23"
         }
       ],
-      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-21 有六项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，4 个新增路径）、A24-KB-02（iDoris-ai/WeKnora#37，10 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）与 A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
+      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-23 有十一项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，4 个路径）、A24-KB-02（iDoris-ai/WeKnora#37，11 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）、A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）、A24-KB-06（iDoris-ai/WeKnora#38，5 个路径）、A24-KB-07（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-08（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-09（iDoris-ai/WeKnora#38，9 个路径）、A24-KB-10（iDoris-ai/WeKnora#38，16 个路径）；各项路径可以重叠（后一项改了前一项登记过的文件时两边都列）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
     },
     "absorbed_upstream_release": {
       "tag": "v0.8.3",
