@@ -63,7 +63,8 @@ type Agent24KnowledgeSearchHandler struct {
 	hits   agent24HitReader
 }
 
-// NewAgent24KnowledgeSearchHandler builds the handler with the default dependencies; the key is read once.
+// NewAgent24KnowledgeSearchHandler builds the handler with the default dependencies; the key is taken once,
+// at construction, from agent24SearchTagKey (the process-wide read).
 func NewAgent24KnowledgeSearchHandler(
 	db *gorm.DB, registry interfaces.RetrieveEngineRegistry,
 	kbService interfaces.KnowledgeBaseService,
