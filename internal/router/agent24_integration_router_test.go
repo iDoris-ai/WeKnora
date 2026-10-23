@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -150,4 +151,188 @@ func TestAgent24IntegrationCredentialGateNewRouter(t *testing.T) {
 			}
 		})
 	}
+}
+
+// agent24RejectTokenUserSvc fails ValidateToken so Auth takes the bearer-rejection path.
+type agent24RejectTokenUserSvc struct{ agent24FakeUserSvc }
+
+func (agent24RejectTokenUserSvc) ValidateToken(context.Context, string) (*types.User, uint64, error) {
+	return nil, 0, errors.New("invalid or expired token")
+}
+
+// agent24RejectKeySvc fails AuthenticateAPIKey.
+type agent24RejectKeySvc struct{ interfaces.TenantAPIKeyService }
+
+func (agent24RejectKeySvc) AuthenticateAPIKey(context.Context, string) (*types.TenantAPIKey, error) {
+	return nil, errors.New("invalid API key")
+}
+
+func agent24RequireKnowledgeEnvelope(t *testing.T, body []byte, code, reason string, noReason bool) {
+	t.Helper()
+	var parsed struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(body, &parsed), string(body))
+	require.Equal(t, code, parsed.Error.Code, string(body))
+	if noReason {
+		_, ok := parsed.Error.Details["reason"]
+		require.False(t, ok, string(body))
+		return
+	}
+	require.Equal(t, reason, parsed.Error.Details["reason"], string(body))
+}
+
+// TestAgent24IntegrationAuthEnvelopeNewRouter guards A24-KB-11: Auth's early rejections on the
+// knowledge endpoints are contract envelopes.
+func TestAgent24IntegrationAuthEnvelopeNewRouter(t *testing.T) {
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+
+	tenantID := uint64(1)
+	platform := &types.TenantAPIKey{ID: 1, ScopeType: types.APIKeyScopePlatform}
+	tenantKey := &types.TenantAPIKey{ID: 2, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID}
+	plain := &types.Tenant{ID: tenantID}
+	// RequireDirectHeader and no X-External-User-ID is auth.go's 401 (the direct-header path).
+	direct := &types.Tenant{ID: tenantID, APIPrincipalConfig: &types.APIPrincipalConfig{
+		Mode: types.APIPrincipalModeDirect, RequireDirectHeader: true,
+	}}
+
+	cases := []struct {
+		name       string
+		keys       interfaces.TenantAPIKeyService
+		users      interfaces.UserService
+		tenant     *types.Tenant
+		bearer     string
+		apiKey     string
+		tenantHdr  string
+		wantStatus int
+		wantCode   string
+		wantReason string
+		noReason   bool
+	}{
+		{
+			name: "no credential", keys: agent24FakeKeySvc{key: platform}, users: agent24FakeUserSvc{},
+			tenant: plain, wantStatus: http.StatusUnauthorized, wantCode: "unauthorized",
+			wantReason: "credential_missing",
+		},
+		{
+			name: "bearer token", keys: agent24FakeKeySvc{key: platform}, users: agent24RejectTokenUserSvc{},
+			tenant: plain, bearer: "Bearer bad", wantStatus: http.StatusUnauthorized,
+			wantCode: "unauthorized", wantReason: "credential_invalid",
+		},
+		{
+			name: "api key rejected", keys: agent24RejectKeySvc{}, users: agent24FakeUserSvc{},
+			tenant: plain, apiKey: "sk-test", wantStatus: http.StatusUnauthorized,
+			wantCode: "unauthorized", wantReason: "credential_invalid",
+		},
+		{
+			name: "platform key missing tenant", keys: agent24FakeKeySvc{key: platform}, users: agent24FakeUserSvc{},
+			tenant: plain, apiKey: "sk-test", wantStatus: http.StatusUnauthorized,
+			wantCode: "unauthorized", wantReason: "credential_invalid",
+		},
+		{
+			name: "platform key bad tenant id", keys: agent24FakeKeySvc{key: platform}, users: agent24FakeUserSvc{},
+			tenant: plain, apiKey: "sk-test", tenantHdr: "abc", wantStatus: http.StatusBadRequest,
+			wantCode: "invalid_request", noReason: true,
+		},
+		{
+			name: "direct header missing", keys: agent24FakeKeySvc{key: tenantKey}, users: agent24FakeUserSvc{},
+			tenant: direct, apiKey: "sk-test", tenantHdr: "1", wantStatus: http.StatusUnauthorized,
+			wantCode: "unauthorized", wantReason: "credential_invalid",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRouter(RouterParams{
+				Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+				TenantAPIKeyService:           tc.keys,
+				TenantService:                 agent24FakeTenantSvc{tenant: tc.tenant},
+				UserService:                   tc.users,
+				Agent24KnowledgeReadyHandler:  &handler.Agent24KnowledgeReadyHandler{},
+				Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
+			})
+			for _, op := range []string{"ready", "search"} {
+				t.Run(op, func(t *testing.T) {
+					req := httptest.NewRequest(
+						http.MethodPost, "/api/v1/agent24/knowledge/"+op, strings.NewReader("{}"),
+					)
+					req.Header.Set("Content-Type", "application/json")
+					if tc.bearer != "" {
+						req.Header.Set("Authorization", tc.bearer)
+					}
+					if tc.apiKey != "" {
+						req.Header.Set("X-API-Key", tc.apiKey)
+					}
+					if tc.tenantHdr != "" {
+						req.Header.Set("X-Tenant-ID", tc.tenantHdr)
+					}
+					w := httptest.NewRecorder()
+					r.ServeHTTP(w, req)
+					require.Equal(t, tc.wantStatus, w.Code, "%s: %s", op, w.Body.String())
+					agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), tc.wantCode, tc.wantReason, tc.noReason)
+				})
+			}
+		})
+	}
+}
+
+// TestAgent24StandaloneAuthEnvelopeNewRouter guards L1: standalone does not install the envelope
+// or the credential gate.
+func TestAgent24StandaloneAuthEnvelopeNewRouter(t *testing.T) {
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv(handler.Agent24KnowledgeModeEnv, "")
+	require.NoError(t, os.Unsetenv(handler.Agent24KnowledgeModeEnv))
+
+	tenantID := uint64(1)
+	r := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		TenantAPIKeyService: agent24FakeKeySvc{key: &types.TenantAPIKey{
+			ID: 1, ScopeType: types.APIKeyScopePlatform,
+		}},
+		TenantService:                 agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}},
+		UserService:                   agent24FakeUserSvc{},
+		Agent24KnowledgeReadyHandler:  &handler.Agent24KnowledgeReadyHandler{},
+		Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
+	})
+
+	t.Run("no credential", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+		require.Equal(t, "Unauthorized: missing authentication", body["error"])
+	})
+
+	t.Run("platform key", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", "sk-test")
+		req.Header.Set("X-Tenant-ID", "1")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		var body struct {
+			Error json.RawMessage `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+		if len(body.Error) > 0 && body.Error[0] == '{' {
+			var env struct {
+				Code    string `json:"code"`
+				Details struct {
+					Reason string `json:"reason"`
+				} `json:"details"`
+			}
+			require.NoError(t, json.Unmarshal(body.Error, &env), w.Body.String())
+			require.False(t, env.Code == "unauthorized" && env.Details.Reason == "credential_invalid", w.Body.String())
+		}
+	})
 }

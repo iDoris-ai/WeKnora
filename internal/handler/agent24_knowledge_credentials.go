@@ -17,9 +17,12 @@ import (
 
 const agent24KnowledgePathPrefix = "/api/v1/agent24/knowledge/"
 
-// Agent24IntegrationCredentialGate rejects credentials not accepted in integration mode.
+// Agent24IntegrationCredentialGate rejects credentials not accepted in integration mode. Reaching it means
+// middleware.Auth let the request through, so it first releases the writer held by
+// Agent24KnowledgeAuthEnvelope (A24-KB-11).
 func Agent24IntegrationCredentialGate() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		agent24ReleaseHeldWriter(c)
 		if agent24CredentialAccepted(c) {
 			c.Next()
 			return
