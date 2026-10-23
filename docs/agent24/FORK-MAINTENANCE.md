@@ -1,6 +1,6 @@
 # WeKnora fork：分支角色与上游维护
 
-本仓库是 `iDoris-ai/WeKnora`，上游为 `Tencent/WeKnora`。首个提交只建立了仓库、文档与同步基础设施；之后的产品补丁（截至 2026-10-19：安全修复 A24-PATCH-01 与 Knowledge 集成 A24-KB-01～04）逐项登记在 `PATCH-LEDGER.md` 和 `UPSTREAM-BASELINE.json` 的 `current_baseline.product.product_patches`。
+本仓库是 `iDoris-ai/WeKnora`，上游为 `Tencent/WeKnora`。首个提交只建立了仓库、文档与同步基础设施；之后的产品补丁（截至 2026-10-23：安全修复 A24-PATCH-01 与 Knowledge 集成 A24-KB-01～10）逐项登记在 `PATCH-LEDGER.md` 和 `UPSTREAM-BASELINE.json` 的 `current_baseline.product.product_patches`。
 
 ## 三个长期分支
 
