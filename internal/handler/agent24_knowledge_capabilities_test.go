@@ -25,7 +25,7 @@ func sortedKeys(m map[string]any) []string {
 
 func TestAgent24KnowledgeCapabilityWireShape(t *testing.T) {
 	t.Setenv(Agent24KnowledgeModeEnv, "")
-	t.Setenv(Agent24KnowledgeTagKeyEnv, "")
+	agent24SetTagKey(t, "")
 	data := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{
 		Agents:  true,
 		API:     true,
@@ -126,7 +126,7 @@ func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 		{"32 bytes", base64.StdEncoding.EncodeToString(make([]byte, 32)), []string{"search"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(Agent24KnowledgeTagKeyEnv, tc.key)
+			agent24SetTagKey(t, tc.key)
 			assert.Equal(t, tc.want, BuildAgent24KnowledgeCapability().SupportedOperations)
 			declared := len(tc.want) > 0
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)

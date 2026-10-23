@@ -589,6 +589,39 @@ func (a agent24CancelOnCall) HybridSearch(ctx context.Context, id string, p type
 	return a.inner.HybridSearch(ctx, id, p)
 }
 
+// agent24SetTagKey sets the key variable for the test and drops the cached read, so the next read sees it.
+func agent24SetTagKey(t *testing.T, value string) {
+	t.Helper()
+	t.Setenv(Agent24KnowledgeTagKeyEnv, value)
+	ResetAgent24KnowledgeTagKeyForTest()
+	t.Cleanup(ResetAgent24KnowledgeTagKeyForTest)
+}
+
+// The capability declaration, ready and search share one read of the key (agent24TagKeyOnce): changing the
+// variable after that read reaches none of them, in either direction.
+func TestAgent24KnowledgeTagKeyReadOnce(t *testing.T) {
+	t.Setenv(Agent24KnowledgeModeEnv, "")
+	valid := base64.StdEncoding.EncodeToString(agent24TestKey)
+	for _, tc := range []struct {
+		name, first, later string
+		enabled            bool
+	}{
+		{"valid then unset", valid, "", true},
+		{"unset then valid", "", valid, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent24SetTagKey(t, tc.first)
+			_ = agent24SearchTagKey()
+			t.Setenv(Agent24KnowledgeTagKeyEnv, tc.later)
+			ops := BuildAgent24KnowledgeCapability().SupportedOperations
+			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
+			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
+			assert.Equal(t, []bool{tc.enabled, !tc.enabled, tc.enabled},
+				[]bool{slices.Contains(ops, "search"), ready.searchDisabled, search.key != nil})
+		})
+	}
+}
+
 // One judgement drives ready and search (R6.4): the key read at startup.
 func TestAgent24KnowledgeSearchKeyAgreement(t *testing.T) {
 	for _, tc := range []struct {
@@ -600,7 +633,7 @@ func TestAgent24KnowledgeSearchKeyAgreement(t *testing.T) {
 		{"valid", base64.StdEncoding.EncodeToString(agent24TestKey), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(Agent24KnowledgeTagKeyEnv, tc.env)
+			agent24SetTagKey(t, tc.env)
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
 			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
 			assert.Equal(t, !tc.enabled, ready.searchDisabled)
