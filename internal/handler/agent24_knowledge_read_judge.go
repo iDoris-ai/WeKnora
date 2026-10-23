@@ -66,7 +66,7 @@ func agent24ReadCut(s string, off, maxBytes int) (string, bool) {
 	if i == 0 {
 		_, i = utf8.DecodeRuneInString(rest)
 	}
-	return rest[:i], true
+	return rest[:i], i < len(rest)
 }
 
 // agent24JudgeRead applies the R6.4 order after E to one snapshot: document (not_found, R2.6), then anchor

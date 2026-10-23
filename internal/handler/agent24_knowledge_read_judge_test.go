@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -88,11 +89,22 @@ func TestAgent24JudgeReadChunk(t *testing.T) {
 	assert.Equal(t, []string{"三", "四", "五"}, texts)
 	assert.Equal(t, &agent24ReadCursor{ContentTag: tag3, Offset: 6}, cur)
 
-	// A page always advances by at least one rune.
-	page, kerr = agent24JudgeRead(key, req("c3", nil, nil, 1), snap)
-	require.Nil(t, kerr)
-	assert.Equal(t, "三", page.Segments[0].Text)
-	assert.True(t, page.Truncated)
+	// A page always advances by at least one rune, and the page that ends the text is not truncated even when
+	// that rune is wider than max_bytes.
+	texts, cur = nil, nil
+	for range 4 {
+		page, kerr = agent24JudgeRead(key, req("c3", nil, cur, 1), snap)
+		require.Nil(t, kerr)
+		texts = append(texts, page.Segments[0].Text)
+		if page.NextCursor == nil {
+			assert.False(t, page.Truncated)
+			break
+		}
+		c, ok := agent24DecodeReadCursor(key, "doc", "c3", *page.NextCursor)
+		require.True(t, ok)
+		cur = &c
+	}
+	assert.Equal(t, []string{"三", "四", "五"}, texts)
 
 	// An offset that does not fit the text is a server fault, not a guess.
 	for _, off := range []int{1, 9, 10} {
@@ -184,6 +196,11 @@ func TestAgent24JudgeReadDocument(t *testing.T) {
 	require.Nil(t, kerr)
 	assert.Equal(t, []agent24ReadSegment{seg(2, "三")}, page.Segments) // at least one rune
 	assert.Equal(t, at(2, 3, tags[2]), decode(page))
+	page, kerr = agent24JudgeRead(key, req(nil, at(2, 6, tags[2]), 100, 1), snap)
+	require.Nil(t, kerr)
+	assert.Equal(t, []agent24ReadSegment{seg(2, "五")}, page.Segments) // the last rune ends the document
+	assert.False(t, page.Truncated)
+	assert.Nil(t, page.NextCursor)
 
 	// expected_revision, then the cursor's binding: either part differing is stale (R4.4, R4.5).
 	wantStale := agent24Stale(source, &build, nil, "", false)
@@ -269,4 +286,59 @@ func TestAgent24StaleDetails(t *testing.T) {
 	assert.JSONEq(t, `{"current_revision":{"source_revision":"src","index_build_id":"ib"},`+
 		`"current_chunk_revision":4,"current_content_tag":"ct"}`, string(raw))
 	assert.Equal(t, "anchor_missing", agent24Stale("src", &b, nil, "", true).Reason)
+}
+
+// Paging to the end under any max_bytes ends in a finite number of pages and returns the text exactly once
+// (R4.5, R4.7), also when a rune is wider than max_bytes.
+func TestAgent24JudgeReadPagesToEnd(t *testing.T) {
+	key := agent24ReadTestKey
+	contents := []string{"三四五", "a😀b😀", "😀", "é", "x"}
+	snap := agent24ReadSnapshot{Found: true, ParseStatus: types.ParseStatusCompleted}
+	for i, c := range contents {
+		snap.Chunks = append(snap.Chunks, agent24ReadChunk{ID: fmt.Sprintf("c%d", i), Content: c, Loaded: true})
+	}
+	for maxBytes := 1; maxBytes <= 5; maxBytes++ {
+		for i, want := range contents { // single chunk
+			var got string
+			var cur *agent24ReadCursor
+			for pages := 0; ; pages++ {
+				require.Less(t, pages, 32, "chunk %d max_bytes %d", i, maxBytes)
+				page, kerr := agent24JudgeRead(key, agent24ReadRequest{
+					KnowledgeID: "d", ChunkID: snap.Chunks[i].ID, Cursor: cur, MaxBytes: maxBytes,
+				}, snap)
+				require.Nil(t, kerr)
+				got += page.Segments[0].Text
+				assert.Equal(t, page.NextCursor != nil, page.Truncated)
+				if page.NextCursor == nil {
+					break
+				}
+				c, ok := agent24DecodeReadCursor(key, "d", snap.Chunks[i].ID, *page.NextCursor)
+				require.True(t, ok)
+				cur = &c
+			}
+			assert.Equal(t, want, got, "chunk %d max_bytes %d", i, maxBytes)
+		}
+		got := map[string]string{} // document level
+		var cur *agent24ReadCursor
+		for pages := 0; ; pages++ {
+			require.Less(t, pages, 64, "document max_bytes %d", maxBytes)
+			page, kerr := agent24JudgeRead(key, agent24ReadRequest{
+				KnowledgeID: "d", Cursor: cur, PageLimit: 2, MaxBytes: maxBytes,
+			}, snap)
+			require.Nil(t, kerr)
+			for _, s := range page.Segments {
+				got[s.ChunkID] += s.Text
+			}
+			if page.NextCursor == nil {
+				assert.False(t, page.Truncated)
+				break
+			}
+			c, ok := agent24DecodeReadCursor(key, "d", "", *page.NextCursor)
+			require.True(t, ok)
+			cur = &c
+		}
+		for i, want := range contents {
+			assert.Equal(t, want, got[snap.Chunks[i].ID], "document chunk %d max_bytes %d", i, maxBytes)
+		}
+	}
 }
