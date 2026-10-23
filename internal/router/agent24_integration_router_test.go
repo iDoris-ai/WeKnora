@@ -303,10 +303,12 @@ func TestAgent24IntegrationAuthEnvelopeNewRouter(t *testing.T) {
 			wantReason: "credential_invalid",
 		},
 		{
-			// auth.go:219 — valid JWT, no home workspace and no membership.
+			// auth.go:219 — valid JWT, no home workspace and no membership. Workspace 0 exists in the fixture, so
+			// were :219 skipped the lookup at :232 would succeed and the request would go on instead of ending in
+			// the same envelope as :234's 401.
 			name: "jwt no workspace", keys: agent24FakeKeySvc{key: platform},
 			users:   agent24TokenUserSvc{user: tenantlessUser},
-			members: noMember, tenant: plain, bearer: "Bearer good",
+			members: noMember, tenant: &types.Tenant{}, bearer: "Bearer good",
 			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized",
 			wantReason: "credential_invalid",
 		},
