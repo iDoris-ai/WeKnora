@@ -95,6 +95,8 @@ type RouterParams struct {
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
 	HostSandbox                  service.HostSandboxManager
+
+	Agent24KnowledgeSearchHandler *handler.Agent24KnowledgeSearchHandler // A24-KB-10
 }
 
 // NewRouter 创建新的路由
@@ -334,7 +336,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
-		RegisterAgent24KnowledgeRoutes(v1, params.Agent24KnowledgeReadyHandler, rbacGuards)
+		RegisterAgent24KnowledgeRoutes(v1, params.Agent24KnowledgeReadyHandler, params.Agent24KnowledgeSearchHandler,
+			rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route
 		// template that does not actually exist (typo / path drift). A

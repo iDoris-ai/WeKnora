@@ -20,8 +20,7 @@ const (
 	agent24ServerVersionMaxBytes = 128
 )
 
-// Declared values only: these limits take no effect until KB-C1-01c implements
-// the search/read endpoints; supported_operations stays empty until then.
+// max_read_bytes and max_page_limit take effect with the read endpoint (KB-C1-01c ②).
 const (
 	agent24KnowledgeMaxResults      = 50
 	agent24KnowledgeMaxConcurrency  = 4
@@ -63,12 +62,16 @@ func BuildAgent24KnowledgeCapability() Agent24KnowledgeCapability {
 	if err != nil {
 		mode = Agent24KnowledgeModeStandalone
 	}
+	// Non-nil so it serializes as [] rather than null. search needs the revision key (agent24SearchTagKey);
+	// read is not implemented yet (KB-C1-01c ②).
+	ops := []string{}
+	if agent24SearchTagKey() != nil {
+		ops = append(ops, "search")
+	}
 	return Agent24KnowledgeCapability{
-		ProtocolVersions: []int{agent24KnowledgeProtocolVersion},
-		Mode:             mode,
-		// search/read integration endpoints (KB-C1-01c) are not implemented.
-		// Non-nil so it serializes as [] rather than null.
-		SupportedOperations: []string{},
+		ProtocolVersions:    []int{agent24KnowledgeProtocolVersion},
+		Mode:                mode,
+		SupportedOperations: ops,
 		ServerVersion:       agent24ServerVersion(Version, CommitID),
 		Limits: Agent24KnowledgeLimits{
 			MaxResults:      agent24KnowledgeMaxResults,

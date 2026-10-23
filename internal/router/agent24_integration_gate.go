@@ -18,9 +18,10 @@ import (
 
 // agent24IntegrationAllowlist keys are method + " " + c.FullPath().
 var agent24IntegrationAllowlist = map[string]struct{}{
-	"GET /health":                          {},
-	"GET /api/v1/system/capabilities":      {},
-	"POST /api/v1/agent24/knowledge/ready": {},
+	"GET /health":                           {},
+	"GET /api/v1/system/capabilities":       {},
+	"POST /api/v1/agent24/knowledge/ready":  {},
+	"POST /api/v1/agent24/knowledge/search": {},
 }
 
 func agent24IntegrationGate() gin.HandlerFunc {
