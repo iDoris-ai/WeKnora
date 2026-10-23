@@ -22,6 +22,7 @@ REL_COMMIT=$(jq -er '.current_baseline.release.commit' "$BASELINE" 2>/dev/null) 
 REV=$(git -C "$ROOT" rev-parse HEAD) || { echo "前置核对失败：读不到 HEAD" >&2; exit 3; }
 SHA8=$(git -C "$ROOT" rev-parse --short=8 HEAD) || { echo "前置核对失败：读不到 HEAD" >&2; exit 3; }
 
+probe_require_harness_at_head || exit 3
 probe_namespace_diff || exit 3
 [ -d "$STACK_DIR" ] || { echo "失败：STACK_DIR 不是目录：${STACK_DIR}" >&2; exit 1; }
 
@@ -62,8 +63,12 @@ docker_build+=(--label "org.opencontainers.image.revision=${REV}"
 
 IMAGE_ID=$(docker image inspect -f '{{.Id}}' "$TAG") || { echo "失败：读不到镜像 ${TAG} 的 Id" >&2; exit 1; }
 [ -n "$IMAGE_ID" ] || { echo "失败：镜像 ${TAG} 的 Id 为空" >&2; exit 1; }
-patch_ids=$(jq -c '.current_baseline.product.product_patches | if type == "array" then [.[] | .id] else [] end' "$BASELINE") \
-  || { echo "失败：读不到 product_patches" >&2; exit 1; }
+if [ -z "$REG_IDS_CSV" ]; then
+  patch_ids='[]'
+else
+  patch_ids=$(jq -cn --arg csv "$REG_IDS_CSV" '$csv | split(",")') \
+    || { echo "失败：由 REG_IDS_CSV 生成 patch_ids 失败" >&2; exit 1; }
+fi
 jq -n \
   --arg revision "$REV" \
   --arg image_id "$IMAGE_ID" \
