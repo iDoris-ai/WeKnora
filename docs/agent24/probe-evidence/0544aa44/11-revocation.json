@@ -1,0 +1,247 @@
+{
+  "item": 11,
+  "title": "撤权生效时机",
+  "environment": {
+    "tested_dir_note": "受测目录名 0544aa44 = 受测 HEAD 0544aa44；app 镜像由受测 HEAD 本地构建；命名空间之外与 v0.8.3 的差异全部是已登记补丁（A24-PATCH-01, A24-KB-01, A24-KB-03, A24-KB-02, A24-KB-04, A24-KB-05, A24-KB-06, A24-KB-07, A24-KB-08, A24-KB-09, A24-KB-10, A24-KB-11）；其余 4 个服务用登记的官方镜像",
+    "images": [
+      "app=weknora-app:agent24-0544aa44@sha256:d1ff229e3c68cd0c1c6602d312a4be2e825333633e3877add9705176a59c7e4f",
+      "frontend=wechatopenai/weknora-ui:v0.8.3@sha256:94f7992e963b1e2e3b8dc429091f1204fde9c3cd985175b16f40b4142f915fe5",
+      "docreader=wechatopenai/weknora-docreader:v0.8.3@sha256:9af668ac0ac857b9dfe8430d0fe77c0e5ad2636dc2b5285cd5500a13d5a35266",
+      "postgres=paradedb/paradedb:v0.25.11-pg17@sha256:78d65750f0f88a56548526201bcab9910f83b90fe929cdbf979890f3f80b0f95",
+      "redis=redis:7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
+    ],
+    "digest_check": "app 为本地构建：镜像 ID 与 agent24-local-app.json 一致；label 的 revision、base-release、patch-ids、with-anydoc、version 与当前 HEAD、登记一致；json 各字段与同一组值一致；Config.Image 等于 json 的 tag。其余服务 RepoDigests 与登记值一致",
+    "schema_migrations": "118 dirty=false",
+    "run_at_utc": "2026-10-23T19:50:01Z",
+    "base": "http://127.0.0.1:8080",
+    "running_services": "app docreader frontend postgres redis",
+    "storage_type": "local",
+    "docker_port": [
+      "app: 8080/tcp -> 127.0.0.1:8080",
+      "frontend: 80/tcp -> 127.0.0.1:18080"
+    ],
+    "embed_mode": "fake-ollama",
+    "app_source": "local",
+    "local_build": {
+      "revision": "0544aa446e14a07c66c4e09166c21c7f1d21c8bf",
+      "image_id": "sha256:d1ff229e3c68cd0c1c6602d312a4be2e825333633e3877add9705176a59c7e4f",
+      "tag": "weknora-app:agent24-0544aa44",
+      "version": "0.8.3+agent24.0544aa44",
+      "base_release": "v0.8.3",
+      "patch_ids": [
+        "A24-PATCH-01",
+        "A24-KB-01",
+        "A24-KB-03",
+        "A24-KB-02",
+        "A24-KB-04",
+        "A24-KB-05",
+        "A24-KB-06",
+        "A24-KB-07",
+        "A24-KB-08",
+        "A24-KB-09",
+        "A24-KB-10",
+        "A24-KB-11"
+      ],
+      "built_at_utc": "2026-10-23T19:46:07Z",
+      "build_args": {
+        "WITH_ANYDOC": "1",
+        "VERSION_ARG": "0.8.3+agent24.0544aa44",
+        "COMMIT_ID_ARG": "0544aa446e14a07c66c4e09166c21c7f1d21c8bf",
+        "BUILD_TIME_ARG": "2026-10-23T19:46:07Z"
+      }
+    },
+    "embedding_note": "向量为伪造的固定值，只证明分块和读取路径，不代表检索质量",
+    "system_info": {
+      "version": "0.8.3+agent24.0544aa44",
+      "edition": "standard",
+      "commit_id": "0544aa446e14a07c66c4e09166c21c7f1d21c8bf",
+      "db_version": "118",
+      "build_time": "2026-10-23T19:46:07Z"
+    }
+  },
+  "requests": [
+    {
+      "actor": "key:rev",
+      "method": "GET",
+      "path": "/api/v1/knowledge-bases",
+      "status": 200
+    },
+    {
+      "actor": "jwt:A",
+      "method": "DELETE",
+      "path": "/api/v1/tenants/10035/api-keys/56",
+      "status": 200
+    },
+    {
+      "actor": "key:rev",
+      "method": "GET",
+      "path": "/api/v1/knowledge-bases",
+      "status": 401
+    },
+    {
+      "actor": "jwt:C",
+      "method": "GET",
+      "path": "/api/v1/knowledge/75d1f752-bad6-4a07-8cb7-0e2c9a2bafde/download",
+      "status": 200
+    },
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10035/members/71eeed01-41de-4019-9bd0-085c1e1131c8",
+      "status": 200
+    },
+    {
+      "actor": "jwt:C",
+      "method": "GET",
+      "path": "/api/v1/knowledge/75d1f752-bad6-4a07-8cb7-0e2c9a2bafde/download",
+      "status": 403
+    },
+    {
+      "actor": "jwt:V",
+      "method": "GET",
+      "path": "/api/v1/knowledge-bases",
+      "status": 200
+    },
+    {
+      "actor": "jwt:A",
+      "method": "DELETE",
+      "path": "/api/v1/tenants/10035/members/13392fa0-5741-4cf1-bdd5-f7c8ce99c47e",
+      "status": 200
+    },
+    {
+      "actor": "jwt:V",
+      "method": "GET",
+      "path": "/api/v1/knowledge-bases",
+      "status": 401
+    },
+    {
+      "actor": "jwt:V",
+      "method": "GET",
+      "path": "/api/v1/knowledge-bases",
+      "status": 401
+    },
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10035/api-principal-config",
+      "status": 200
+    },
+    {
+      "actor": "jwt:A",
+      "method": "POST",
+      "path": "/api/v1/tenants/10035/api-principal-test-token",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 200
+    },
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10035/api-principal-config",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 401
+    },
+    {
+      "actor": "jwt:A",
+      "method": "PUT",
+      "path": "/api/v1/tenants/10035/api-principal-config",
+      "status": 200
+    },
+    {
+      "actor": "key:chat",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "status": 200
+    }
+  ],
+  "checks": [
+    {
+      "check": "撤销前 key 可用",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "撤销后下一请求即 401",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "降权前 Contributor 可下载",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "RBAC 开启时降权下一请求生效",
+      "expect": "403",
+      "actual": "403",
+      "ok": true
+    },
+    {
+      "check": "移除前 Viewer 可读",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "移除后访问原租户被拒",
+      "expect": "401|403",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "移除时吊销该用户全部 token（自己的租户也 401）",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "signed token 可用",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    },
+    {
+      "check": "轮换 HMAC 后旧 token 失效（只能粗粒度）",
+      "expect": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "check": "改回 tenant 模式后带旧 token 仍成功（以租户主体）",
+      "expect": "200",
+      "actual": "200",
+      "ok": true
+    }
+  ],
+  "observations": [
+    {
+      "observation": "删除 key",
+      "value": "200"
+    },
+    {
+      "observation": "降为 viewer",
+      "value": "200"
+    },
+    {
+      "observation": "移除成员",
+      "value": "200"
+    }
+  ],
+  "conclusion": {
+    "verdict": "已测部分与矩阵一致；其余未测",
+    "mismatches": [],
+    "untested": "在途流式请求不取消未测；RBAC 关闭时降权未测（需改 app 环境变量）；单主体撤销无接口（静态）"
+  }
+}

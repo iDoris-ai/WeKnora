@@ -1,0 +1,45 @@
+# 13 日志是否记录正文（KB-CT-01 PR②）
+# tested_dir_note: 受测目录名 0544aa44 = 受测 HEAD 0544aa44；app 镜像由受测 HEAD 本地构建；命名空间之外与 v0.8.3 的差异全部是已登记补丁（A24-PATCH-01, A24-KB-01, A24-KB-03, A24-KB-02, A24-KB-04, A24-KB-05, A24-KB-06, A24-KB-07, A24-KB-08, A24-KB-09, A24-KB-10, A24-KB-11）；其余 4 个服务用登记的官方镜像
+# images: ["app=weknora-app:agent24-0544aa44@sha256:d1ff229e3c68cd0c1c6602d312a4be2e825333633e3877add9705176a59c7e4f","frontend=wechatopenai/weknora-ui:v0.8.3@sha256:94f7992e963b1e2e3b8dc429091f1204fde9c3cd985175b16f40b4142f915fe5","docreader=wechatopenai/weknora-docreader:v0.8.3@sha256:9af668ac0ac857b9dfe8430d0fe77c0e5ad2636dc2b5285cd5500a13d5a35266","postgres=paradedb/paradedb:v0.25.11-pg17@sha256:78d65750f0f88a56548526201bcab9910f83b90fe929cdbf979890f3f80b0f95","redis=redis:7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"]
+# digest_check: app 为本地构建：镜像 ID 与 agent24-local-app.json 一致；label 的 revision、base-release、patch-ids、with-anydoc、version 与当前 HEAD、登记一致；json 各字段与同一组值一致；Config.Image 等于 json 的 tag。其余服务 RepoDigests 与登记值一致
+# schema_migrations: 118 dirty=false
+# run_at_utc: 2026-10-23T19:50:01Z
+# base: http://127.0.0.1:8080
+# running_services: app docreader frontend postgres redis
+# storage_type: local
+# docker_port: ["app: 8080/tcp -> 127.0.0.1:8080","frontend: 80/tcp -> 127.0.0.1:18080"]
+# embed_mode: fake-ollama
+# app_source: local
+# local_build: {"revision":"0544aa446e14a07c66c4e09166c21c7f1d21c8bf","image_id":"sha256:d1ff229e3c68cd0c1c6602d312a4be2e825333633e3877add9705176a59c7e4f","tag":"weknora-app:agent24-0544aa44","version":"0.8.3+agent24.0544aa44","base_release":"v0.8.3","patch_ids":["A24-PATCH-01","A24-KB-01","A24-KB-03","A24-KB-02","A24-KB-04","A24-KB-05","A24-KB-06","A24-KB-07","A24-KB-08","A24-KB-09","A24-KB-10","A24-KB-11"],"built_at_utc":"2026-10-23T19:46:07Z","build_args":{"WITH_ANYDOC":"1","VERSION_ARG":"0.8.3+agent24.0544aa44","COMMIT_ID_ARG":"0544aa446e14a07c66c4e09166c21c7f1d21c8bf","BUILD_TIME_ARG":"2026-10-23T19:46:07Z"}}
+# embedding_note: 向量为伪造的固定值，只证明分块和读取路径，不代表检索质量
+# system_info: {"version":"0.8.3+agent24.0544aa44","edition":"standard","commit_id":"0544aa446e14a07c66c4e09166c21c7f1d21c8bf","db_version":"118","build_time":"2026-10-23T19:46:07Z"}
+# 只摘录含哨兵的日志片段（前后各 ≤100 字符）。
+# hmac_secret 明文以 <redacted:hmac_secret> 替代，其余凭据以 <redacted> 替代。
+## 哨兵 PROBE-SENTINEL-QUERY13-10231950012497
+i/v1/knowledge-bases/e30071c2-f57f-48d7-8e54-82c390076a2e/hybrid-search request_body={"query_text":"PROBE-SENTINEL-QUERY13-10231950012497","disable_vector_match":true} response_body={"data":[{"id":"9fe80f17-359d-4bca-96f0-87dbd96bf066","
+dSearch] | Executing hybrid search, knowledge base ID: e30071c2-f57f-48d7-8e54-82c390076a2e, query: PROBE-SENTINEL-QUERY13-10231950012497, effectiveTenantID: 10035
+| Hybrid search parameters, knowledge base IDs: [e30071c2-f57f-48d7-8e54-82c390076a2e], query text: PROBE-SENTINEL-QUERY13-10231950012497
+ [e5136320-057a-4332-95c2-74f5dcb42a19]                      | [Postgres] Keywords retrieval: query=PROBE-SENTINEL-QUERY13-10231950012497, topK=250
+## 哨兵 BODY-ALPHA-10231950012497
+c390076a2e"},{"id":"41446080-ec72-4ee9-bb23-cc72e6b6aa2b","content":"测试文档 alpha 的哨兵句 PROBE-SENTINEL-BODY-ALPHA-10231950012497。纯属合成的假内容。\n","knowledge_id":"75d1f752-bad6-4a07-8cb7-0e2c9a2bafde","chunk_index":0,"knowledge_title
+e_source":"","knowledge_channel":"web","matched_content":"alpha.txt\n测试文档 alpha 的哨兵句 PROBE-SENTINEL-BODY-ALPHA-10231950012497。纯属合成的假内容。","knowledge_base_id":"e30071c2-f57f-48d7-8e54-82c390076a2e","source_locators":[{"type":"t
+","source_hash":"1a24d4d19efb2a309b1fc1444d7eae88","end":67,"quote":"测试文档 alpha 的哨兵句 PROBE-SENTINEL-BODY-ALPHA-10231950012497。纯属合成的假内容。"}]}],"success":true} size=1504 status_code=200]                      | 
+bases/e30071c2-f57f-48d7-8e54-82c390076a2e/hybrid-search request_body={"query_text":"PROBE-SENTINEL-BODY-ALPHA-10231950012497","disable_vector_match":true} response_body={"data":[{"id":"41446080-ec72-4ee9-bb23-cc72e6b6aa2b","
+## 哨兵 <redacted:hmac_secret>
+ path=/api/v1/tenants/10035/api-principal-config request_body={"mode":"signed_token","hmac_secret":"<redacted:hmac_secret>"} response_body={"data":{"mode":"signed_token","direct_header_name":"X-External-User-ID","signed_to
+## 哨兵 probe-A-10231950012497@probe.invalid
+ient_ip=192.168.97.1 latency=55.323989ms method=POST path=/api/v1/auth/login request_body={"email":"probe-A-10231950012497@probe.invalid","password":"***"} response_body={"success":true,"message":"Login successful","user":{"id":"900865e
+b-0a35-4daa-9554-104effcebc2c","username":"probe-A-10231950012497","email":"probe-A-10231950012497@probe.invalid","avatar":"","tenant_id":10035,"is_active":true,"can_access_all_tenants":false,"is_system_admin":fa
+## 检查
+- query 进访问日志 request_body：期望 [1-9][0-9]*，实际 1，符合
+- preview 下发的 text 原件进 response_body（只数 preview 那一行）：期望 [1-9][0-9]*，实际 1，符合
+- 自检：只出现在 request_body 的哨兵不计入 response_body 计数：期望 0，实际 0，符合
+- hybrid-search 命中的正文进 response_body（依赖伪 embedding）：期望 [1-9][0-9]*，实际 2，符合
+- GET /chunks 响应里的正文进 response_body（依赖伪 embedding）：期望 [1-9][0-9]*，实际 1，符合
+- hmac_secret 明文进 request_body：期望 [1-9][0-9]*，实际 1，符合
+- 本次登录行的 password 字段被打码：期望 true，实际 true，符合
+- 口令明文不出现在日志：期望 0，实际 0，符合
+- 观察 容器 LOG_LEVEL：debug
+- 观察 Langfuse 配置（只记是否非空）：LANGFUSE_ENABLED=false；public key 非空；secret key 非空；判定追踪启用=false
+- 说明：标"依赖伪 embedding"的检查，向量为伪造的固定值，只证明分块和读取路径，不代表检索质量
+## 结论：已测部分与矩阵一致；其余未测（Langfuse 追踪未启用，query 与正文进追踪的出口未测）
