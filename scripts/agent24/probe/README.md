@@ -1,6 +1,6 @@
 # KB-CT-01 探测框架（PR②）
 
-这套脚本对本机按当前登记的基线（现为 v0.8.3）起的标准栈逐项实测 `docs/agent24/CAPABILITY-MATRIX.md` 中已提供探测函数的能力项，脱敏后输出证据。证据目录按受测 SHA 命名（`probe-evidence/<受测 HEAD 的 8 位 SHA>`）；每份证据的 `environment.tested_dir_note` 由脚本按登记的 release 生成，脚本同时核对 fork 命名空间之外与该 release 逐字节相同，不同就以 3 停下。旧目录 `4b363d15` 是 v0.8.2 的实测，保留不动。
+这套脚本对本机按当前登记的基线（现为 v0.8.3）起的标准栈逐项实测 `docs/agent24/CAPABILITY-MATRIX.md` 中已提供探测函数的能力项，脱敏后输出证据。证据目录按受测 SHA 命名（`probe-evidence/<受测 HEAD 的 8 位 SHA>`）；每份证据的 `environment.tested_dir_note` 由脚本生成。官方镜像模式（默认）核对 fork 命名空间之外与登记的 release 逐字节相同，不同就以 3 停下。本地构建模式（`PROBE_APP_IMAGE=local`，见第 11 节）说明 app 镜像由受测 HEAD 本地构建，命名空间之外与登记 release 的差异全部是已登记补丁，其余 4 个服务用登记的官方镜像。旧目录 `4b363d15` 是 v0.8.2 的实测，保留不动。
 
 框架自带一个示例项（第 9 项）。其余探测项放在 `probes.sh` 里，文件存在时由 `run.sh` 自动加载。
 
@@ -8,6 +8,8 @@
 |---|---|
 | `run.sh` | 入口：解析项号，统一按升序排好；source `lib.sh`、`probe-09-health.sh`，`probes.sh` 存在时也一并 source |
 | `lib.sh` | 框架：前置核对、setup、请求记录、emit、伪 Ollama、清理与 trap、凭据替换、证据落盘 |
+| `patches.sh` | 命名空间外差异减去已登记补丁；`lib.sh` 与 `build-local-app.sh` 共用 |
+| `build-local-app.sh` | 本地构建模式：构建 app 镜像，写 `agent24-local-app.json`，不碰运行中的栈 |
 | `probe-09-health.sh` | 示例探测项（矩阵第 9 项 /health） |
 | `check-redaction.sh` | 脱敏自检驱动：参数、临时目录，按 `REQUIRED_MODULES` 检查并 source `redact-NN-*.sh` |
 | `redact-00-lib.sh` | 公共函数与敏感字段名；定义 `TEXT_TARGETS`，不跑规则 |
@@ -55,7 +57,7 @@ env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES 
 
 其他注意事项：
 - 误跑过 `latest` 的数据卷要丢弃重建。Lite 与标准栈的结果不能互相替代。
-- **只支持从 Docker Hub 拉取的官方镜像。** 约束里也允许"从 3e22822 本地构建"，但本地构建的镜像没有 RepoDigests，无法与登记的 digest 比对，前置核对会失败。要支持这种做法，得先另行登记本地构建的镜像 ID 和构建方式；本脚本没有做。
+- **官方镜像模式只用从 Docker Hub 拉取的官方镜像。** 有已登记产品补丁、要出正式证据时，用第 11 节的本地构建模式（只本地构建 app，其余 4 个服务仍是登记的官方镜像）。约束里原先的「从 3e22822 本地构建」（拉不到官方镜像时构建 app、ui、docreader）不是这个模式；那种镜像没有 RepoDigests，官方模式对不上 digest，会失败。
 
 ## 2. 前置核对（不符就以退出码 3 停下）
 
@@ -65,16 +67,16 @@ env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES 
 2. `BASE` 只能是 `http://127.0.0.1:端口`，而且端口必须等于 app 经 `docker port` 发布的宿主端口。
 3. 运行中的服务正好是默认的 5 个，所有发布端口都只绑 127.0.0.1（frontend 端口任意，本机是 `127.0.0.1:18080`）。
 4. app 容器的 `STORAGE_TYPE=local`。数据库用户和库名也从 app 容器的 `DB_USER`、`DB_NAME` 读出；psql 连不上时报"无法连接数据库"。
-5. 5 个默认服务（app、frontend、docreader、postgres、redis）的镜像 digest 都与登记值一致：先用 `docker inspect -f '{{.Image}}'` 取容器实际使用的镜像 ID，再查这个 ID 的 `RepoDigests`。登记里读不到 digest 也算失败。
+5. 5 个默认服务（app、frontend、docreader、postgres、redis）的镜像 digest 都与登记值一致：先用 `docker inspect -f '{{.Image}}'` 取容器实际使用的镜像 ID，再查这个 ID 的 `RepoDigests`。登记里读不到 digest 也算失败。本地构建模式不这样核对 app，见第 11 节。
 6. `schema_migrations` 等于登记值：取自 `docs/agent24/UPSTREAM-BASELINE.json` 的 `current_baseline.test_stack_constraints` 里「<登记的 release.tag> 为 N」这一句，不写死版本号。
 7. 宿主 `127.0.0.1:11434`：
    - `fake-ollama` 模式下必须空闲，否则停下；
    - `none` 模式下有应答时也停下。原因是 `.env` 的 `OLLAMA_BASE_URL` 指向宿主 11434，产品可能会调用宿主上的 Ollama 去拉取不存在的模型。确认无妨时可设 `PROBE_ALLOW_HOST_OLLAMA=1`，此时改为打 WARN，并记进 `environment.warnings`。
-8. `/system/info` 的 `commit_id`（至少 7 位前缀）与登记的 `release.commit` 一致，`version` 等于登记的 `release.tag`（接口返回的不带 `v` 前缀，比较时补上），`db_version` 等于第 6 条的登记值。这个接口要鉴权，所以只能在注册并登录第一个测试用户之后核对；不符同样以 3 退出，不再写入其他数据。
+8. `/system/info` 的 `commit_id`（至少 7 位前缀）与登记的 `release.commit` 一致，`version` 等于登记的 `release.tag`（接口返回的不带 `v` 前缀，比较时补上），`db_version` 等于第 6 条的登记值。这个接口要鉴权，所以只能在注册并登录第一个测试用户之后核对；不符同样以 3 退出，不再写入其他数据。本地构建模式的 `commit_id`、`version` 核对见第 11 节；`db_version` 相同。
 
 第 1–7 项都在写入任何数据之前完成。核对结果写进每个证据文件的 `environment`，包括全部 `docker port` 输出。
 
-在这些检查之前，`lib.sh` 被 source 时还会核对 fork 命名空间之外与登记的 release 逐字节相同；有差异就以 3 停下，已登记的产品补丁也一样（官方镜像不含 fork 补丁）。所以 A24-PATCH-01 登记期间，在 `a24/develop` 上跑前置核对必然 exit 3，这是预期行为，不要为了通过去改登记。探测重跑要等 iDoris-ai/WeKnora#51（本地构建镜像的探测模式）落地，或 v0.8.4 吸收上游修复、撤掉该补丁之后。注意 A24-KB-01～04（Knowledge 集成，长期保留）同样在命名空间之外，撤掉 A24-PATCH-01 之后核对仍会 exit 3，届时只能靠 #51。
+在这些检查之前，`lib.sh` 被 source 时还会核对 fork 命名空间之外与登记 release 的差异。未登记路径以 3 停下。只有已登记产品补丁时，官方镜像模式也以 3 停下（官方镜像不含这些补丁），提示用 `PROBE_APP_IMAGE=local`，先跑 `build-local-app.sh`，见第 11 节；不要为了通过核对去改登记。所以 A24-PATCH-01 登记期间，在 `a24/develop` 上用官方模式跑前置核对必然 exit 3。有已登记补丁时出正式证据用第 11 节。v0.8.4 吸收上游修复、撤掉该补丁之后，若没有其他产品补丁可以回到官方模式。A24-KB-01～04（Knowledge 集成，长期保留）同样在命名空间之外，撤掉 A24-PATCH-01 之后官方模式仍会 exit 3，仍要用本地构建模式。
 
 ## 3. 运行方式
 
@@ -90,6 +92,7 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh 9   # 同上，用伪 Ollam
   - `BASE`、`STACK_DIR`；
   - `OUT`：最终证据目录；
   - `PROBE_EMBED`：只接受 `none` 和 `fake-ollama`，其他值以退出码 2 退出；
+  - `PROBE_APP_IMAGE`：`official`（默认）或 `local`，其他值以退出码 2 退出；见第 11 节。
   - `PROBE_ALLOW_HOST_OLLAMA`：见第 2 节第 7 条。
 - **写到哪里**：
   - 正式证据目录 `docs/agent24/probe-evidence/<受测 SHA>/`：只有同时满足"1–16 项都已提供并全部运行、`PROBE_EMBED=fake-ollama`、没有显式指定 `OUT`"时才写。
@@ -219,7 +222,7 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
 读结果：
 - 文件名与矩阵一致；第 13 项是 `13-log-body.txt`，其余是 JSON。
 - JSON 字段：
-  - `environment`：前置核对的结果；
+  - `environment`：前置核对的结果。字段有 `tested_dir_note`、`images`、`digest_check`、`schema_migrations`、`run_at_utc`、`base`、`running_services`、`storage_type`、`docker_port`、`embed_mode`，以及按情况出现的 `embedding_note`、`warnings`、`system_info`。官方模式另有 `app_source: "official"`，这是官方模式相对旧证据唯一允许的输出差异。本地模式为 `app_source: "local"`，并有 `local_build`（`revision`、`image_id`、`tag`、`version`、`base_release`、`patch_ids`、`built_at_utc`、`build_args`，取自 `$STACK_DIR/agent24-local-app.json`）。本地模式的 `digest_check` 说明 app 为本地构建；`images` 里 app 一项是 `app=<tag>@<image_id>`，其余 4 个服务仍是 `服务=镜像@登记 digest`。
   - `requests`：每个请求的主体、方法、路径、状态码，`fields` 是与结论相关的字段；
   - `checks`：期望值取自矩阵；
   - `observations`：只记录事实，不参与判定；
@@ -242,3 +245,29 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
 
 - 第 3 项（hybrid-search）另有未测范围：引擎解析阶段的 12s 内部上限、跨多个 store group 时每组的 30s 内部上限，以及 `/knowledge-search`。
 - 第 13 项（日志是否记录正文）另有未测范围：访问日志的 10KB 截断、local-browser 与 SSE 不记录、`LOG_LEVEL=warn` / `LOG_LEVEL=error` 的分级。
+
+## 11. 本地构建模式
+
+`PROBE_APP_IMAGE=official`（或缺省）是官方镜像模式，行为与加入本模式之前相同，只是每份证据的 `environment` 多一个 `app_source: "official"`。其他值以退出码 2 退出。
+
+有已登记产品补丁、又要出正式证据时，必须用本地构建模式：app 镜像由受测 HEAD 构建，frontend、docreader、postgres、redis 仍用登记的官方镜像。没有已登记补丁时也可以用，但不是必须。
+
+1. 工作区干净：`git status --porcelain` 没有任何输出，含未跟踪文件。命名空间之外与登记 release 的差异只能是已登记补丁；有未登记路径仍以 3 退出。
+2. 构建（不碰运行中的栈，不写覆盖文件，不起栈）：
+
+```bash
+scripts/agent24/probe/build-local-app.sh
+```
+
+成功后写入 `$STACK_DIR/agent24-local-app.json`（`revision`、`image_id`、`tag`、`version`、`base_release`、`patch_ids`、`built_at_utc`、`build_args`），并打印 compose 覆盖文件内容。镜像标签是 `weknora-app:agent24-<HEAD 的 8 位 sha>`。`VERSION_ARG` 是 `<登记 tag 去掉 v>+agent24.<8 位 sha>`，`COMMIT_ID_ARG` 是 HEAD 全长。不传 `GO_VERSION_ARG`：`get_version.sh` 取的是宿主机的 `go version`，不是镜像里实际编译用的 Go。
+
+3. 在 `STACK_DIR` 把打印的覆盖文件存下来（不要命名为 `docker-compose.override.yml` 或 `compose.override.yml`），把 app 的 image 换成该标签，再 `up -d`。脚本打印的示例命令带 `--no-build`，因为 compose 里的 app 服务有 `build:`，不带这个参数可能会按当前目录重建。
+4. 跑探测：
+
+```bash
+PROBE_APP_IMAGE=local PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
+```
+
+前置核对在 local 模式下：读不到 `$STACK_DIR/agent24-local-app.json` 以 3 停下。app 容器的镜像 ID（`docker inspect -f '{{.Image}}'`）必须等于文件里的 `image_id`；镜像 label `org.opencontainers.image.revision` 必须等于当前 HEAD 全长，`io.idoris.agent24.base-release` 必须等于登记 tag；文件里的 `revision` 也必须等于当前 HEAD。其余 4 个服务仍比登记的 RepoDigests。
+
+`/system/info`：`commit_id` 必须是当前 HEAD 的前缀且至少 7 位（构建传入的是全长，全长相等也通过）；`version` 必须等于 `<登记 tag 去掉 v>+agent24.<8 位 sha>`；`db_version` 与官方模式相同。
