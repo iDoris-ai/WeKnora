@@ -36,7 +36,7 @@ if ! git -C "$ROOT" cat-file -e "${REL_COMMIT}^{commit}" 2>/dev/null; then
 fi
 # shellcheck source=patches.sh
 . "$PROBE_DIR/patches.sh" || { echo "前置核对失败：加载 ${PROBE_DIR}/patches.sh 失败" >&2; exit 3; }
-# 未登记路径两种模式都拒绝。只有已登记补丁时，官方模式拒绝（官方镜像不含 fork 补丁）；本地模式放行，但要求工作区干净。
+# 未登记路径两种模式都拒绝。只有已登记补丁时，官方模式拒绝（官方镜像不含 fork 补丁）；本地模式放行。
 probe_namespace_diff || exit 3
 if [ "$NS_HAS_DIFF" = 1 ] && [ "$UNREG_N" -eq 0 ] && [ "$APP_IMAGE" != local ]; then
   echo "前置核对失败：fork 有已登记的产品补丁（${REG_IDS}，见 docs/agent24/PATCH-LEDGER.md），官方 ${REL_TAG} 镜像不含这些补丁，不能用官方镜像出正式证据。需要本地构建镜像的探测模式（用 PROBE_APP_IMAGE=local，先跑 build-local-app.sh，见 README §11）。不要为了通过核对去改登记。" >&2
@@ -44,7 +44,6 @@ if [ "$NS_HAS_DIFF" = 1 ] && [ "$UNREG_N" -eq 0 ] && [ "$APP_IMAGE" != local ]; 
 fi
 HEAD_REV=""
 if [ "$APP_IMAGE" = local ]; then
-  probe_require_clean_worktree || exit 3
   HEAD_REV=$(git -C "$ROOT" rev-parse HEAD) || { echo "前置核对失败：读不到 HEAD" >&2; exit 3; }
 fi
 FORMAL_OUT=$ROOT/docs/agent24/probe-evidence/$TESTED_SHA
@@ -250,10 +249,58 @@ take() {
 }
 want() { [[ $ST =~ ^($1)$ ]] || die "$2（HTTP ${ST}）"; }
 
+# probe_verify_local_app JSON路径 镜像ID 读label的命令
+# 读 json 与镜像 label，任一不符以 3 退出。第三个参数是读 label 的方式，调用形式与
+# docker image inspect 相同，缺省 docker。容器 Config.Image 用调用方已经放在 img 里的值。
+probe_verify_local_app() {
+  local lj=$1 id=$2 reader=${3:-docker}
+  local json_rev json_version json_base json_patch_ids app_tag
+  local ba_any ba_ver ba_commit want_version
+  local rev_label rel_label patch_label any_label ver_label
+  local_build_json=$(jq -ce '{revision, image_id, tag, version, base_release, patch_ids, built_at_utc, build_args}' "$lj") \
+    || fail3 "读不到 $lj 的本地构建字段"
+  json_rev=$(jq -er '.revision' <<<"$local_build_json") || fail3 "读不到 $lj 的 revision"
+  app_image_id=$(jq -er '.image_id' <<<"$local_build_json") || fail3 "读不到 $lj 的 image_id"
+  app_tag=$(jq -er '.tag' <<<"$local_build_json") || fail3 "读不到 $lj 的 tag"
+  [ "$json_rev" = "$HEAD_REV" ] || fail3 "agent24-local-app.json 的 revision=${json_rev} 与当前 HEAD ${HEAD_REV} 不符"
+  [ "$id" = "$app_image_id" ] || fail3 "app 容器镜像 ID 与 agent24-local-app.json 的 image_id 不符"
+  rev_label=$("$reader" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$id") \
+    || fail3 "读不到 app 镜像 label revision"
+  rel_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.base-release"}}' "$id") \
+    || fail3 "读不到 app 镜像 label base-release"
+  patch_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.patch-ids"}}' "$id") \
+    || fail3 "读不到 app 镜像 label patch-ids"
+  any_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.with-anydoc"}}' "$id") \
+    || fail3 "读不到 app 镜像 label with-anydoc"
+  ver_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.version"}}' "$id") \
+    || fail3 "读不到 app 镜像 label version"
+  [ "$rev_label" = "$HEAD_REV" ] || fail3 "app 镜像 label revision=${rev_label:-空} 与当前 HEAD ${HEAD_REV} 不符"
+  [ "$rel_label" = "$REL_TAG" ] || fail3 "app 镜像 label base-release=${rel_label:-空} 与登记 ${REL_TAG} 不符"
+  [ "$patch_label" = "$REG_IDS_CSV" ] || fail3 "app 镜像 label patch-ids=${patch_label:-空} 与当前登记 ${REG_IDS_CSV:-空} 不符"
+  [ "$any_label" = 1 ] || fail3 "app 镜像 label with-anydoc=${any_label:-空}，应为 1"
+  want_version="${REL_TAG#v}+agent24.${TESTED_SHA}"
+  [ "$ver_label" = "$want_version" ] || fail3 "app 镜像 label version=${ver_label:-空} 与 ${want_version} 不符"
+  [ "$img" = "$app_tag" ] || fail3 "容器 Config.Image=${img:-空} 与 agent24-local-app.json 的 tag=${app_tag} 不符"
+  # json 的字段各自对计算值（HEAD、登记 tag、版本串）核对一次；label 已对同一组值核对过，不再两两互比。
+  json_version=$(jq -er '.version' <<<"$local_build_json") || fail3 "读不到 $lj 的 version"
+  json_base=$(jq -er '.base_release' <<<"$local_build_json") || fail3 "读不到 $lj 的 base_release"
+  json_patch_ids=$(jq -er '.patch_ids | if type == "array" then join(",") else error("patch_ids") end' <<<"$local_build_json") \
+    || fail3 "读不到 $lj 的 patch_ids"
+  [ "$json_version" = "$want_version" ] || fail3 "agent24-local-app.json 的 version=${json_version} 与计算值 ${want_version} 不符"
+  [ "$json_base" = "$REL_TAG" ] || fail3 "agent24-local-app.json 的 base_release=${json_base} 与登记 ${REL_TAG} 不符"
+  [ "$json_patch_ids" = "$patch_label" ] || fail3 "agent24-local-app.json 的 patch_ids=${json_patch_ids} 与 label patch-ids 不符"
+  ba_any=$(jq -er '.build_args.WITH_ANYDOC' <<<"$local_build_json") || fail3 "读不到 $lj 的 build_args.WITH_ANYDOC"
+  ba_ver=$(jq -er '.build_args.VERSION_ARG' <<<"$local_build_json") || fail3 "读不到 $lj 的 build_args.VERSION_ARG"
+  ba_commit=$(jq -er '.build_args.COMMIT_ID_ARG' <<<"$local_build_json") || fail3 "读不到 $lj 的 build_args.COMMIT_ID_ARG"
+  [ "$ba_any" = 1 ] || fail3 "agent24-local-app.json 的 build_args.WITH_ANYDOC=${ba_any}，应为 1"
+  [ "$ba_ver" = "$want_version" ] || fail3 "agent24-local-app.json 的 build_args.VERSION_ARG=${ba_ver} 与计算值 ${want_version} 不符"
+  [ "$ba_commit" = "$HEAD_REV" ] || fail3 "agent24-local-app.json 的 build_args.COMMIT_ID_ARG=${ba_commit} 与当前 HEAD ${HEAD_REV} 不符"
+}
+
 # ---- 前置核对：任一不符以退出码 3 停下。除 /system/info 外都在写入任何数据之前完成。 ----
 precheck() {
   local t s line pair img id exp dg port_lines="" digests="" warns="" base_port app_port st running schema
-  local digest_note="RepoDigests 与登记值一致" local_build_json=null json_rev app_tag app_image_id rev_label rel_label lj
+  local digest_note="RepoDigests 与登记值一致" local_build_json=null app_image_id lj=""
   for t in curl jq docker openssl python3; do
     command -v "$t" >/dev/null || fail3 "缺少 $t"
   done
@@ -284,25 +331,15 @@ precheck() {
   if [ "$APP_IMAGE" = local ]; then
     lj="$STACK_DIR/agent24-local-app.json"
     [ -f "$lj" ] && [ -r "$lj" ] || fail3 "读不到 $lj"
-    local_build_json=$(jq -ce '{revision, image_id, tag, version, base_release, patch_ids, built_at_utc, build_args}' "$lj") \
-      || fail3 "读不到 $lj 的本地构建字段"
-    json_rev=$(jq -er '.revision' <<<"$local_build_json") || fail3 "读不到 $lj 的 revision"
-    app_image_id=$(jq -er '.image_id' <<<"$local_build_json") || fail3 "读不到 $lj 的 image_id"
-    app_tag=$(jq -er '.tag' <<<"$local_build_json") || fail3 "读不到 $lj 的 tag"
-    [ "$json_rev" = "$HEAD_REV" ] || fail3 "agent24-local-app.json 的 revision=${json_rev} 与当前 HEAD ${HEAD_REV} 不符"
-    digest_note="app 为本地构建（image_id 与 agent24-local-app.json 一致，label revision 为当前 HEAD，base-release 为 ${REL_TAG}）；其余服务 RepoDigests 与登记值一致"
+    digest_note="app 为本地构建：镜像 ID 与 agent24-local-app.json 一致；label 的 revision、base-release、patch-ids、with-anydoc、version 与当前 HEAD、登记一致；json 各字段与同一组值一致；Config.Image 等于 json 的 tag。其余服务 RepoDigests 与登记值一致"
   fi
   for pair in app:app frontend:ui docreader:docreader postgres:postgres redis:redis; do
     s=${pair%%:*}
     img=$(docker inspect -f '{{.Config.Image}}' "$(cid "$s")")
     id=$(docker inspect -f '{{.Image}}' "$(cid "$s")")   # 按容器实际使用的镜像 ID 查，避免标签已被改指
     if [ "$APP_IMAGE" = local ] && [ "$s" = app ]; then
-      [ "$id" = "$app_image_id" ] || fail3 "app 容器镜像 ID 与 agent24-local-app.json 的 image_id 不符"
-      rev_label=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$id")
-      rel_label=$(docker image inspect -f '{{index .Config.Labels "io.idoris.agent24.base-release"}}' "$id")
-      [ "$rev_label" = "$HEAD_REV" ] || fail3 "app 镜像 label revision=${rev_label:-空} 与当前 HEAD ${HEAD_REV} 不符"
-      [ "$rel_label" = "$REL_TAG" ] || fail3 "app 镜像 label base-release=${rel_label:-空} 与登记 ${REL_TAG} 不符"
-      digests+="app=${app_tag}@${app_image_id};"
+      probe_verify_local_app "$lj" "$id" docker
+      digests+="app=${img}@${app_image_id};"
       continue
     fi
     exp=$(jq -r --arg k "${pair#*:}" '.current_baseline.image_digests[$k]
@@ -352,9 +389,7 @@ check_system_info() {
   d=$(bj .data.db_version)
   v=$(bj .data.version)
   if [ "$APP_IMAGE" = local ]; then
-    # COMMIT_ID_ARG 传入的是 HEAD 全长。.dockerignore 排除 .git，build-prod 不会改写 COMMIT_ID。
-    # 若 /system/info 只回前缀，也接受（至少 7 位）。全长相等同样满足这个前缀判断。
-    [ ${#c} -ge 7 ] && [[ $HEAD_REV == "$c"* ]] || fail3 "/system/info commit_id=$c 与当前 HEAD ${HEAD_REV} 不符"
+    [ "$c" = "$HEAD_REV" ] || fail3 "/system/info commit_id=$c 与当前 HEAD ${HEAD_REV} 不符"
     [ "$v" = "${REL_TAG#v}+agent24.${TESTED_SHA}" ] || fail3 "/system/info version=$v 与本地构建版本 ${REL_TAG#v}+agent24.${TESTED_SHA} 不符"
   else
     [ ${#c} -ge 7 ] && [[ $WANT_COMMIT == "$c"* ]] || fail3 "/system/info commit_id=$c 与登记 $WANT_COMMIT 不符"

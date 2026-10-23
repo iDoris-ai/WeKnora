@@ -180,6 +180,8 @@ v0.8.2 中，只开关键词的 KB 也需要 embedding：`IndexingStrategy.Needs
 scripts/agent24/probe/check-redaction-selftest.sh
 ```
 
+本地构建模式自测不依赖 docker、也不访问网络：`scripts/agent24/probe/check-local-mode-selftest.sh`。
+
 清理：
 - 临时工作目录、伪 Ollama 进程由 trap 在退出时清理，出错或被中断时也一样。
 - 只跑部分项时，证据留在打印出的临时目录里，需要时自行删除。
@@ -222,7 +224,7 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
 读结果：
 - 文件名与矩阵一致；第 13 项是 `13-log-body.txt`，其余是 JSON。
 - JSON 字段：
-  - `environment`：前置核对的结果。字段有 `tested_dir_note`、`images`、`digest_check`、`schema_migrations`、`run_at_utc`、`base`、`running_services`、`storage_type`、`docker_port`、`embed_mode`，以及按情况出现的 `embedding_note`、`warnings`、`system_info`。官方模式另有 `app_source: "official"`，这是官方模式相对旧证据唯一允许的输出差异。本地模式为 `app_source: "local"`，并有 `local_build`（`revision`、`image_id`、`tag`、`version`、`base_release`、`patch_ids`、`built_at_utc`、`build_args`，取自 `$STACK_DIR/agent24-local-app.json`）。本地模式的 `digest_check` 说明 app 为本地构建；`images` 里 app 一项是 `app=<tag>@<image_id>`，其余 4 个服务仍是 `服务=镜像@登记 digest`。
+  - `environment`：前置核对的结果。字段有 `tested_dir_note`、`images`、`digest_check`、`schema_migrations`、`run_at_utc`、`base`、`running_services`、`storage_type`、`docker_port`、`embed_mode`，以及按情况出现的 `embedding_note`、`warnings`、`system_info`。官方模式另有 `app_source: "official"`，这是官方模式相对旧证据唯一允许的输出差异。本地模式为 `app_source: "local"`，并有 `local_build`（`revision`、`image_id`、`tag`、`version`、`base_release`、`patch_ids`、`built_at_utc`、`build_args`，取自 `$STACK_DIR/agent24-local-app.json`）。本地模式的 `digest_check` 说明 app 为本地构建；`images` 里 app 一项是 `app=<Config.Image>@<image_id>`（Config.Image 须等于 json 的 tag），其余 4 个服务仍是 `服务=镜像@登记 digest`。
   - `requests`：每个请求的主体、方法、路径、状态码，`fields` 是与结论相关的字段；
   - `checks`：期望值取自矩阵；
   - `observations`：只记录事实，不参与判定；
@@ -252,14 +254,14 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
 
 有已登记产品补丁、又要出正式证据时，必须用本地构建模式：app 镜像由受测 HEAD 构建，frontend、docreader、postgres、redis 仍用登记的官方镜像。没有已登记补丁时也可以用，但不是必须。
 
-1. 工作区干净：`git status --porcelain` 没有任何输出，含未跟踪文件。命名空间之外与登记 release 的差异只能是已登记补丁；有未登记路径仍以 3 退出。
+1. 镜像内容由 HEAD 决定。`build-local-app.sh` 用 `git archive` 把 HEAD 导出到临时目录再构建，被忽略文件、skip-worktree 和未提交改动都不进镜像。干净工作区不再是前提。命名空间之外与登记 release 的差异只能是已登记补丁；有未登记路径仍以 3 退出。
 2. 构建（不碰运行中的栈，不写覆盖文件，不起栈）：
 
 ```bash
 scripts/agent24/probe/build-local-app.sh
 ```
 
-成功后写入 `$STACK_DIR/agent24-local-app.json`（`revision`、`image_id`、`tag`、`version`、`base_release`、`patch_ids`、`built_at_utc`、`build_args`），并打印 compose 覆盖文件内容。镜像标签是 `weknora-app:agent24-<HEAD 的 8 位 sha>`。`VERSION_ARG` 是 `<登记 tag 去掉 v>+agent24.<8 位 sha>`，`COMMIT_ID_ARG` 是 HEAD 全长。不传 `GO_VERSION_ARG`：`get_version.sh` 取的是宿主机的 `go version`，不是镜像里实际编译用的 Go。
+成功后写入 `$STACK_DIR/agent24-local-app.json`（`revision`、`image_id`、`tag`、`version`、`base_release`、`patch_ids`、`built_at_utc`、`build_args`），并打印 compose 覆盖文件内容。镜像标签是 `weknora-app:agent24-<HEAD 的 8 位 sha>`。`VERSION_ARG` 是 `<登记 tag 去掉 v>+agent24.<8 位 sha>`，`COMMIT_ID_ARG` 是 HEAD 全长。不传 `GO_VERSION_ARG`：`get_version.sh` 取的是宿主机的 `go version`，不是镜像里实际编译用的 Go。镜像 label 还有 `io.idoris.agent24.patch-ids`（已登记补丁 id，逗号分隔，没有则为空）、`io.idoris.agent24.with-anydoc=1`、`io.idoris.agent24.version`（等于 `VERSION_ARG`）。
 
 3. 在 `STACK_DIR` 把打印的覆盖文件存下来（不要命名为 `docker-compose.override.yml` 或 `compose.override.yml`），把 app 的 image 换成该标签，再 `up -d`。脚本打印的示例命令带 `--no-build`，因为 compose 里的 app 服务有 `build:`，不带这个参数可能会按当前目录重建。
 4. 跑探测：
@@ -268,6 +270,6 @@ scripts/agent24/probe/build-local-app.sh
 PROBE_APP_IMAGE=local PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
 ```
 
-前置核对在 local 模式下：读不到 `$STACK_DIR/agent24-local-app.json` 以 3 停下。app 容器的镜像 ID（`docker inspect -f '{{.Image}}'`）必须等于文件里的 `image_id`；镜像 label `org.opencontainers.image.revision` 必须等于当前 HEAD 全长，`io.idoris.agent24.base-release` 必须等于登记 tag；文件里的 `revision` 也必须等于当前 HEAD。其余 4 个服务仍比登记的 RepoDigests。
+前置核对在 local 模式下：读不到 `$STACK_DIR/agent24-local-app.json` 以 3 停下。app 容器的镜像 ID（`docker inspect -f '{{.Image}}'`）必须等于文件里的 `image_id`；容器 `Config.Image` 必须等于文件里的 `tag`，`images` 里 app 一项是 `app=<Config.Image>@<image_id>`。镜像 label `org.opencontainers.image.revision` 必须等于当前 HEAD 全长，`io.idoris.agent24.base-release` 必须等于登记 tag，`io.idoris.agent24.patch-ids` 必须等于当前登记的补丁 id（逗号分隔），`io.idoris.agent24.with-anydoc` 必须为 1，`io.idoris.agent24.version` 必须等于 `<登记 tag 去掉 v>+agent24.<8 位 sha>`。文件里的 `revision` 必须等于当前 HEAD；`version`、`base_release`、`patch_ids`（数组合并）、`build_args` 的 `WITH_ANYDOC`、`VERSION_ARG`、`COMMIT_ID_ARG` 必须与对应 label 和计算值一致。其余 4 个服务仍比登记的 RepoDigests。
 
-`/system/info`：`commit_id` 必须是当前 HEAD 的前缀且至少 7 位（构建传入的是全长，全长相等也通过）；`version` 必须等于 `<登记 tag 去掉 v>+agent24.<8 位 sha>`；`db_version` 与官方模式相同。
+`/system/info`：`commit_id` 必须全长等于当前 HEAD；`version` 必须等于 `<登记 tag 去掉 v>+agent24.<8 位 sha>`；`db_version` 与官方模式相同。
