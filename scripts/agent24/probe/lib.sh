@@ -13,6 +13,11 @@ case $EMBED in
   none | fake-ollama) ;;
   *) echo "PROBE_EMBED 只接受 none 或 fake-ollama（收到 ${EMBED}）" >&2; exit 2 ;;
 esac
+APP_IMAGE=${PROBE_APP_IMAGE:-official}
+case $APP_IMAGE in
+  official | local) ;;
+  *) echo "PROBE_APP_IMAGE 只接受 official 或 local（收到 ${APP_IMAGE}）" >&2; exit 2 ;;
+esac
 PROBE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$PROBE_DIR/../../.." && pwd)
 OUT_EXPLICIT=${OUT:+yes}   # 没有显式指定 OUT 且只跑部分项时，run.sh 会改写到临时目录
@@ -29,38 +34,33 @@ TESTED_SHA=$(git -C "$ROOT" rev-parse --short=8 HEAD) || { echo "前置核对失
 if ! git -C "$ROOT" cat-file -e "${REL_COMMIT}^{commit}" 2>/dev/null; then
   echo "前置核对失败：本地缺 release 提交 ${REL_COMMIT}（浅克隆时先 git fetch --deepen=500）" >&2; exit 3
 fi
-if ! git -C "$ROOT" diff --quiet "$REL_COMMIT" HEAD -- . ':(exclude)docs/agent24' ':(exclude)scripts/agent24' \
-  ':(exclude).github/scripts/agent24-*' ':(exclude).github/workflows/agent24-*'; then
-  # 区分已登记的产品补丁与未登记的差异；两种都拒绝：官方镜像不含任何 fork 补丁，tested_dir_note 不成立。
-  DIFF_PATHS=$(git -C "$ROOT" diff --name-only --no-renames "$REL_COMMIT" HEAD -- . ':(exclude)docs/agent24' \
-    ':(exclude)scripts/agent24' ':(exclude).github/scripts/agent24-*' ':(exclude).github/workflows/agent24-*') \
-    || { echo "前置核对失败：读不到 fork 与 release ${REL_TAG} 的差异路径" >&2; exit 3; }
-  # product_patches 是数组时取全部 .paths[]；是 "none" 或读不到时当作空集。
-  REG_PATHS=$(jq -r '.current_baseline.product.product_patches
-    | if type == "array" then .[] | .paths[]? else empty end' "$BASELINE" 2>/dev/null) || REG_PATHS=""
-  REG_IDS=$(jq -r '.current_baseline.product.product_patches
-    | if type == "array" then [.[] | .id] | join(", ") else "" end' "$BASELINE" 2>/dev/null) || REG_IDS=""
-  UNREG_LIST=""
-  UNREG_N=0
-  while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    if [ -n "$REG_PATHS" ] && printf '%s\n' "$REG_PATHS" | grep -Fxq -- "$p"; then continue; fi
-    UNREG_N=$((UNREG_N + 1))
-    if [ "$UNREG_N" -le 10 ]; then UNREG_LIST=${UNREG_LIST:+$UNREG_LIST, }$p; fi
-  done <<<"$DIFF_PATHS"
-  if [ "$UNREG_N" -eq 0 ]; then
-    echo "前置核对失败：fork 有已登记的产品补丁（${REG_IDS}，见 docs/agent24/PATCH-LEDGER.md），官方 ${REL_TAG} 镜像不含这些补丁，不能用官方镜像出正式证据。需要本地构建镜像的探测模式（尚未实现，见 iDoris-ai/WeKnora#51）。不要为了通过核对去改登记。" >&2
-  else
-    if [ "$UNREG_N" -gt 10 ]; then UNREG_LIST="$UNREG_LIST 等 ${UNREG_N} 个"; fi
-    echo "前置核对失败：fork 命名空间之外有未登记的改动，与登记的 release ${REL_TAG} 不同：${UNREG_LIST}。产品补丁要先登记到 docs/agent24/PATCH-LEDGER.md 和 UPSTREAM-BASELINE.json 的 product_patches。" >&2
-  fi
+# shellcheck source=patches.sh
+. "$PROBE_DIR/patches.sh" || { echo "前置核对失败：加载 ${PROBE_DIR}/patches.sh 失败" >&2; exit 3; }
+# 未登记路径两种模式都拒绝。只有已登记补丁时，官方模式拒绝（官方镜像不含 fork 补丁）；本地模式放行。
+probe_namespace_diff || exit 3
+if [ "$NS_HAS_DIFF" = 1 ] && [ "$UNREG_N" -eq 0 ] && [ "$APP_IMAGE" != local ]; then
+  echo "前置核对失败：fork 有已登记的产品补丁（${REG_IDS}，见 docs/agent24/PATCH-LEDGER.md），官方 ${REL_TAG} 镜像不含这些补丁，不能用官方镜像出正式证据。需要本地构建镜像的探测模式（用 PROBE_APP_IMAGE=local，先跑 build-local-app.sh，见 README §11）。不要为了通过核对去改登记。" >&2
   exit 3
+fi
+HEAD_REV=""
+if [ "$APP_IMAGE" = local ]; then
+  HEAD_REV=$(git -C "$ROOT" rev-parse HEAD) || { echo "前置核对失败：读不到 HEAD" >&2; exit 3; }
+  probe_require_harness_at_head || exit 3
 fi
 FORMAL_OUT=$ROOT/docs/agent24/probe-evidence/$TESTED_SHA
 OUT=${OUT:-$FORMAL_OUT}
 DEFAULT_SERVICES="app docreader frontend postgres redis"
 ALLOW_HOST_OLLAMA=${PROBE_ALLOW_HOST_OLLAMA:-0}   # =1 时 none 模式允许宿主 11434 上有服务（只打 WARN）
-TESTED_DIR_NOTE="受测目录名 ${TESTED_SHA} = 受测 HEAD ${TESTED_SHA}；fork 命名空间之外与 ${REL_TAG}（${REL_COMMIT:0:7}）逐字节相同，所以直接用 ${REL_TAG} 官方镜像"
+if [ "$APP_IMAGE" = local ]; then
+  if [ -z "$REG_IDS" ]; then
+    _patch_ids="（无）"
+  else
+    _patch_ids=$REG_IDS
+  fi
+  TESTED_DIR_NOTE="受测目录名 ${TESTED_SHA} = 受测 HEAD ${TESTED_SHA}；app 镜像由受测 HEAD 本地构建；命名空间之外与 ${REL_TAG} 的差异全部是已登记补丁（${_patch_ids}）；其余 4 个服务用登记的官方镜像"
+else
+  TESTED_DIR_NOTE="受测目录名 ${TESTED_SHA} = 受测 HEAD ${TESTED_SHA}；fork 命名空间之外与 ${REL_TAG}（${REL_COMMIT:0:7}）逐字节相同，所以直接用 ${REL_TAG} 官方镜像"
+fi
 FAKE_MODEL=probe-fake-embed:latest
 SECRETS=()
 
@@ -253,9 +253,92 @@ take() {
 }
 want() { [[ $ST =~ ^($1)$ ]] || die "$2（HTTP ${ST}）"; }
 
+# probe_verify_local_app JSON 镜像ID 容器ConfigImage [读label命令]
+# 不读调用方的 img。核对结果通过全局变量 LOCAL_BUILD_JSON、LOCAL_APP_IMAGE_ID 交回：
+# LOCAL_BUILD_JSON 是 json 里的本地构建字段，LOCAL_APP_IMAGE_ID 是其中的 image_id。
+# 第四个参数是读 label 的命令，调用形式与 docker image inspect 相同，缺省 docker。
+# 任一不符以 3 退出。
+probe_verify_local_app() {
+  local lj=$1 id=$2 cfg_image=$3 reader=${4:-docker}
+  local json_rev json_version json_base json_patch_ids app_tag
+  local ba_any ba_ver ba_commit ba_time built_at want_version keys
+  local want_patch got_patch same_set
+  local rev_label rel_label patch_label any_label ver_label
+  LOCAL_BUILD_JSON=$(jq -ce '{revision, image_id, tag, version, base_release, patch_ids, built_at_utc, build_args}' "$lj") \
+    || fail3 "读不到 $lj 的本地构建字段"
+  json_rev=$(jq -er '.revision' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 revision"
+  LOCAL_APP_IMAGE_ID=$(jq -er '.image_id' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 image_id"
+  app_tag=$(jq -er '.tag' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 tag"
+  [ "$json_rev" = "$HEAD_REV" ] || fail3 "agent24-local-app.json 的 revision=${json_rev} 与当前 HEAD ${HEAD_REV} 不符"
+  [ "$id" = "$LOCAL_APP_IMAGE_ID" ] || fail3 "app 容器镜像 ID 与 agent24-local-app.json 的 image_id 不符"
+  rev_label=$("$reader" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$id") \
+    || fail3 "读不到 app 镜像 label revision"
+  rel_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.base-release"}}' "$id") \
+    || fail3 "读不到 app 镜像 label base-release"
+  patch_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.patch-ids"}}' "$id") \
+    || fail3 "读不到 app 镜像 label patch-ids"
+  any_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.with-anydoc"}}' "$id") \
+    || fail3 "读不到 app 镜像 label with-anydoc"
+  ver_label=$("$reader" image inspect -f '{{index .Config.Labels "io.idoris.agent24.version"}}' "$id") \
+    || fail3 "读不到 app 镜像 label version"
+  [ "$rev_label" = "$HEAD_REV" ] || fail3 "app 镜像 label revision=${rev_label:-空} 与当前 HEAD ${HEAD_REV} 不符"
+  [ "$rel_label" = "$REL_TAG" ] || fail3 "app 镜像 label base-release=${rel_label:-空} 与登记 ${REL_TAG} 不符"
+  [ "$patch_label" = "$REG_IDS_CSV" ] || fail3 "app 镜像 label patch-ids=${patch_label:-空} 与当前登记 ${REG_IDS_CSV:-空} 不符"
+  [ "$any_label" = 1 ] || fail3 "app 镜像 label with-anydoc=${any_label:-空}，应为 1"
+  want_version="${REL_TAG#v}+agent24.${TESTED_SHA}"
+  [ "$ver_label" = "$want_version" ] || fail3 "app 镜像 label version=${ver_label:-空} 与 ${want_version} 不符"
+  [ "$cfg_image" = "$app_tag" ] || fail3 "容器 Config.Image=${cfg_image:-空} 与 agent24-local-app.json 的 tag=${app_tag} 不符"
+  # json 的字段各自对计算值（HEAD、登记 tag、版本串）核对一次；label 已对同一组值核对过，不再两两互比。
+  json_version=$(jq -er '.version' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 version"
+  json_base=$(jq -er '.base_release' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 base_release"
+  [ "$json_version" = "$want_version" ] || fail3 "agent24-local-app.json 的 version=${json_version} 与计算值 ${want_version} 不符"
+  [ "$json_base" = "$REL_TAG" ] || fail3 "agent24-local-app.json 的 base_release=${json_base} 与登记 ${REL_TAG} 不符"
+  if ! jq -e '(.patch_ids | type) == "array" and all(.patch_ids[]; type == "string")' <<<"$LOCAL_BUILD_JSON" >/dev/null; then
+    fail3 "agent24-local-app.json 的 patch_ids 不是字符串数组"
+  fi
+  if jq -e 'any(.patch_ids[]; contains(","))' <<<"$LOCAL_BUILD_JSON" >/dev/null; then
+    fail3 "agent24-local-app.json 的 patch_ids 有元素含有逗号"
+  fi
+  # 空串对应 []。顺序不同单独报这一句；内容不同仍交给下面和 label 的核对。
+  if [ -z "$REG_IDS_CSV" ]; then
+    want_patch='[]'
+  else
+    want_patch=$(jq -cn --arg csv "$REG_IDS_CSV" '$csv | split(",")') || fail3 "拆不开当前登记差异中的补丁 id"
+  fi
+  got_patch=$(jq -c '.patch_ids' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 patch_ids"
+  if [ "$got_patch" != "$want_patch" ]; then
+    same_set=$(jq -n --argjson g "$got_patch" --argjson w "$want_patch" '($g|type)=="array" and ($w|type)=="array" and (($g|sort)==($w|sort))') || same_set=false
+    if [ "$same_set" = "true" ]; then
+      fail3 "agent24-local-app.json 的 patch_ids 顺序与 REG_IDS_CSV 不同"
+    fi
+  fi
+  json_patch_ids=$(jq -er '.patch_ids | if type == "array" then join(",") else error("patch_ids") end' <<<"$LOCAL_BUILD_JSON") \
+    || fail3 "读不到 $lj 的 patch_ids"
+  [ "$json_patch_ids" = "$patch_label" ] || fail3 "agent24-local-app.json 的 patch_ids=${json_patch_ids} 与 label patch-ids 不符"
+  if [ "$got_patch" != "$want_patch" ]; then
+    fail3 "agent24-local-app.json 的 patch_ids 与 REG_IDS_CSV 逐项不一致"
+  fi
+  keys=$(jq -r '.build_args | if type == "object" then (keys | join(",")) else "__not_object__" end' <<<"$LOCAL_BUILD_JSON") \
+    || fail3 "读不到 $lj 的 build_args"
+  [ "$keys" = "BUILD_TIME_ARG,COMMIT_ID_ARG,VERSION_ARG,WITH_ANYDOC" ] \
+    || fail3 "agent24-local-app.json 的 build_args 的键必须正好是 WITH_ANYDOC、VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG"
+  built_at=$(jq -er '.built_at_utc' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 built_at_utc"
+  ba_time=$(jq -er '.build_args.BUILD_TIME_ARG' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 build_args.BUILD_TIME_ARG"
+  [ "$built_at" = "$ba_time" ] || fail3 "agent24-local-app.json 的 built_at_utc=${built_at} 与 build_args.BUILD_TIME_ARG=${ba_time} 不符"
+  ba_any=$(jq -er '.build_args.WITH_ANYDOC' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 build_args.WITH_ANYDOC"
+  ba_ver=$(jq -er '.build_args.VERSION_ARG' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 build_args.VERSION_ARG"
+  ba_commit=$(jq -er '.build_args.COMMIT_ID_ARG' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到 $lj 的 build_args.COMMIT_ID_ARG"
+  [ "$ba_any" = 1 ] || fail3 "agent24-local-app.json 的 build_args.WITH_ANYDOC=${ba_any}，应为 1"
+  [ "$ba_ver" = "$want_version" ] || fail3 "agent24-local-app.json 的 build_args.VERSION_ARG=${ba_ver} 与计算值 ${want_version} 不符"
+  [ "$ba_commit" = "$HEAD_REV" ] || fail3 "agent24-local-app.json 的 build_args.COMMIT_ID_ARG=${ba_commit} 与当前 HEAD ${HEAD_REV} 不符"
+}
+
 # ---- 前置核对：任一不符以退出码 3 停下。除 /system/info 外都在写入任何数据之前完成。 ----
 precheck() {
   local t s line pair img id exp dg port_lines="" digests="" warns="" base_port app_port st running schema
+  local digest_note="RepoDigests 与登记值一致" lj=""
+  LOCAL_BUILD_JSON=null
+  LOCAL_APP_IMAGE_ID=""
   for t in curl jq docker openssl python3; do
     command -v "$t" >/dev/null || fail3 "缺少 $t"
   done
@@ -282,10 +365,21 @@ precheck() {
   [ "$st" = local ] || fail3 "app 的 STORAGE_TYPE=${st}，应为 local"
 
   # 5 个默认服务都按登记的 digest 比对（登记值是 {digest, as_of} 对象；兼容旧的纯字符串写法）。
+  # 本地构建模式：app 不比 RepoDigests，改为核对 agent24-local-app.json 与镜像 label。
+  if [ "$APP_IMAGE" = local ]; then
+    lj="$STACK_DIR/agent24-local-app.json"
+    [ -f "$lj" ] && [ -r "$lj" ] || fail3 "读不到 $lj"
+    digest_note="app 为本地构建：镜像 ID 与 agent24-local-app.json 一致；label 的 revision、base-release、patch-ids、with-anydoc、version 与当前 HEAD、登记一致；json 各字段与同一组值一致；Config.Image 等于 json 的 tag。其余服务 RepoDigests 与登记值一致"
+  fi
   for pair in app:app frontend:ui docreader:docreader postgres:postgres redis:redis; do
     s=${pair%%:*}
     img=$(docker inspect -f '{{.Config.Image}}' "$(cid "$s")")
     id=$(docker inspect -f '{{.Image}}' "$(cid "$s")")   # 按容器实际使用的镜像 ID 查，避免标签已被改指
+    if [ "$APP_IMAGE" = local ] && [ "$s" = app ]; then
+      probe_verify_local_app "$lj" "$id" "$img" docker
+      digests+="app=${img}@${LOCAL_APP_IMAGE_ID};"
+      continue
+    fi
     exp=$(jq -r --arg k "${pair#*:}" '.current_baseline.image_digests[$k]
       | if type == "object" then .digest else . end // empty' "$BASELINE")
     [[ $exp == sha256:* ]] || fail3 "UPSTREAM-BASELINE.json 的 current_baseline 里没有 ${pair#*:} 的 digest"
@@ -314,12 +408,26 @@ precheck() {
 
   ENVJ=$(jq -nc --arg d "$digests" --arg m "$schema" --arg t "$(date -u +%FT%TZ)" --arg e "$EMBED" \
     --arg en "$EN" --arg p "$port_lines" --arg b "$BASE" --arg r "$running" --arg st "$st" --arg w "$warns" \
-    --arg tn "$TESTED_DIR_NOTE" '
-    {tested_dir_note: $tn, images: ($d | split(";") | map(select(. != ""))), digest_check: "RepoDigests 与登记值一致",
+    --arg tn "$TESTED_DIR_NOTE" --arg src "$APP_IMAGE" --arg dc "$digest_note" --argjson lb "$LOCAL_BUILD_JSON" '
+    {tested_dir_note: $tn, images: ($d | split(";") | map(select(. != ""))), digest_check: $dc,
      schema_migrations: $m, run_at_utc: $t, base: $b, running_services: $r, storage_type: $st,
      docker_port: ($p | split(";") | map(select(. != ""))), embed_mode: $e}
+    + {app_source: $src}
+    + (if $src == "local" then {local_build: $lb} else {} end)
     + (if $en != "" then {embedding_note: $en} else {} end)
     + (if $w != "" then {warnings: ($w | split(";") | map(select(. != "")))} else {} end)')
+}
+
+# probe_check_system_info_local COMMIT VERSION BUILD_TIME
+# 本地构建的 /system/info：commit 全长等于 HEAD_REV；version 等于去掉 v 的登记 tag
+# 再接 +agent24.<TESTED_SHA>；build_time 等于 LOCAL_BUILD_JSON 里 build_args.BUILD_TIME_ARG。
+probe_check_system_info_local() {
+  local commit=$1 version=$2 build_time=$3 want_version want_bt
+  [ "$commit" = "$HEAD_REV" ] || fail3 "/system/info commit_id=$commit 与当前 HEAD ${HEAD_REV} 不符"
+  want_version="${REL_TAG#v}+agent24.${TESTED_SHA}"
+  [ "$version" = "$want_version" ] || fail3 "/system/info version=$version 与本地构建版本 ${want_version} 不符"
+  want_bt=$(jq -er '.build_args.BUILD_TIME_ARG' <<<"$LOCAL_BUILD_JSON") || fail3 "读不到本地构建的 build_args.BUILD_TIME_ARG"
+  [ "$build_time" = "$want_bt" ] || fail3 "/system/info build_time=$build_time 与 build_args.BUILD_TIME_ARG=${want_bt} 不符"
 }
 
 # /system/info 要鉴权，只能在注册并登录第一个测试用户之后核对；不符同样以 3 停下，不再写其他数据。
@@ -330,9 +438,13 @@ check_system_info() {
   c=$(bj .data.commit_id)
   d=$(bj .data.db_version)
   v=$(bj .data.version)
-  [ ${#c} -ge 7 ] && [[ $WANT_COMMIT == "$c"* ]] || fail3 "/system/info commit_id=$c 与登记 $WANT_COMMIT 不符"
-  # /system/info 的 version 不带 v 前缀（如 0.8.3），登记的 tag 带（如 v0.8.3）。
-  [ "v$v" = "$REL_TAG" ] || fail3 "/system/info version=$v 与登记 $REL_TAG 不符"
+  if [ "$APP_IMAGE" = local ]; then
+    probe_check_system_info_local "$c" "$v" "$(bj .data.build_time)"
+  else
+    [ ${#c} -ge 7 ] && [[ $WANT_COMMIT == "$c"* ]] || fail3 "/system/info commit_id=$c 与登记 $WANT_COMMIT 不符"
+    # /system/info 的 version 不带 v 前缀（如 0.8.3），登记的 tag 带（如 v0.8.3）。
+    [ "v$v" = "$REL_TAG" ] || fail3 "/system/info version=$v 与登记 $REL_TAG 不符"
+  fi
   [ "$d" = "$WANT_DB" ] || fail3 "/system/info db_version=${d}，应为 $WANT_DB"
   ENVJ=$(jq -c --argjson s "$(jq -c '.data | {version, edition, commit_id, db_version, build_time}' "$W/body")" \
     '.system_info = $s' <<<"$ENVJ")
