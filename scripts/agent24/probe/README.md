@@ -254,7 +254,7 @@ PROBE_EMBED=fake-ollama scripts/agent24/probe/run.sh
 
 有已登记产品补丁、又要出正式证据时，必须用本地构建模式：app 镜像由受测 HEAD 构建，frontend、docreader、postgres、redis 仍用登记的官方镜像。没有已登记补丁时也可以用，但不是必须。
 
-1. 镜像内容由 HEAD 决定。`build-local-app.sh` 用 `git archive` 把 HEAD 导出到临时目录再构建，被忽略文件、skip-worktree 和未提交改动都不进镜像。干净工作区不再是前提。探测依据（登记 `docs/agent24/UPSTREAM-BASELINE.json` 与探测脚本 `scripts/agent24/probe/`）必须与 HEAD 一致：这两处相对 HEAD 有未提交改动（含暂存区）、未跟踪文件（含被忽略的）或 skip-worktree / assume-unchanged 时，本地模式以 3 退出。其余工作区改动不影响。证据目录 `docs/agent24/probe-evidence/` 不在这组路径里。命名空间之外与登记 release 的差异只能是已登记补丁；有未登记路径仍以 3 退出。
+1. 镜像内容由 HEAD 决定。`build-local-app.sh` 用 `git archive` 把 HEAD 导出到临时目录再构建，被忽略文件、skip-worktree 和未提交改动都不进镜像。干净工作区不再是前提。探测依据（登记 `docs/agent24/UPSTREAM-BASELINE.json` 与探测脚本 `scripts/agent24/probe/`）必须与 HEAD 一致：这两处相对 HEAD 有未提交改动（含暂存区）、未跟踪文件（含被忽略的）或 skip-worktree / assume-unchanged 时，本地模式以 3 退出。暂存区与工作区分别对 HEAD 比，只改权限位也算改动（不受 `core.fileMode` 影响）。其余工作区改动不影响。登记里补丁的 `id` 必须是互不相同、非空、不含逗号的字符串，否则以 3 退出。证据目录 `docs/agent24/probe-evidence/` 不在这组路径里。命名空间之外与登记 release 的差异只能是已登记补丁；有未登记路径仍以 3 退出。
 2. 构建（不碰运行中的栈，不写覆盖文件，不起栈）：
 
 ```bash

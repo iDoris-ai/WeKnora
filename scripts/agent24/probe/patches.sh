@@ -8,7 +8,7 @@
 # 值不是数组（如 "none"）当空集。有未登记路径，或读不到差异路径时，打印原先的中文提示并返回 3。
 
 probe_namespace_diff() {
-  local p patches_json patches_type diff_json filtered_ids filtered_csv jq_rc
+  local p patches_json patches_type ids_ok diff_json filtered_ids filtered_csv
   NS_HAS_DIFF=0
   UNREG_N=0
   UNREG_LIST=""
@@ -19,15 +19,21 @@ probe_namespace_diff() {
   # 本机 jq 在解析失败时不加 -e 也可能退出 0，但这时没有输出。缺文件则非 0。
   # 成功时这个过滤器至少输出 null；空输出或非 0 都算读失败，不再静默当空。
   # 不是数组（null、"none" 等）才当空集。
-  patches_json=$(jq -c '.current_baseline.product.product_patches' "$BASELINE" 2>/dev/null)
-  jq_rc=$?
-  if [ "$jq_rc" -ne 0 ] || [ -z "$patches_json" ]; then
+  if ! patches_json=$(jq -c '.current_baseline.product.product_patches' "$BASELINE" 2>/dev/null) \
+    || [ -z "$patches_json" ]; then
     echo "前置核对失败：读 product_patches 失败" >&2
     return 3
   fi
   patches_type=$(jq -r 'type' <<<"$patches_json" 2>/dev/null) || patches_type=""
   if [ "$patches_type" != "array" ]; then
     patches_json='[]'
+  fi
+  # id 要进镜像 label 与 json（逗号分隔），所以必须是互不相同、非空、不含逗号的字符串。
+  ids_ok=$(jq -c 'all(.[]; (.id | type) == "string" and (.id | length) > 0 and ((.id | contains(",")) | not))
+    and ([.[] | .id] | unique | length) == length' <<<"$patches_json" 2>/dev/null) || ids_ok=""
+  if [ "$ids_ok" != true ]; then
+    echo "前置核对失败：product_patches 的 id 必须是互不相同、非空、不含逗号的字符串" >&2
+    return 3
   fi
   # 先取全部 id。没有命名空间外差异时再清空；有差异时再收成实际出现的补丁。
   REG_IDS=$(jq -r '[.[] | .id] | join(", ")' <<<"$patches_json") || {
@@ -84,12 +90,12 @@ probe_namespace_diff() {
 # 路径集合 H = docs/agent24/UPSTREAM-BASELINE.json 与 scripts/agent24/probe/。
 # 工作区里 H 有未提交改动（含暂存区）、未跟踪文件（含被忽略的），
 # 或 skip-worktree / assume-unchanged 时，打印中文原因并返回 3。
+# 工作区和暂存区分别对 HEAD 比；固定 core.fileMode=true，只改权限位也算改动。
 # docs/agent24/probe-evidence/ 不在 H 里。
 probe_require_harness_at_head() {
-  local others flagged bad rc
-  git -C "$ROOT" diff --quiet HEAD -- docs/agent24/UPSTREAM-BASELINE.json scripts/agent24/probe
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
+  local others flagged bad
+  if ! git -C "$ROOT" -c core.fileMode=true diff --quiet HEAD -- docs/agent24/UPSTREAM-BASELINE.json scripts/agent24/probe \
+    || ! git -C "$ROOT" -c core.fileMode=true diff --cached --quiet HEAD -- docs/agent24/UPSTREAM-BASELINE.json scripts/agent24/probe; then
     echo "前置核对失败：探测依据与 HEAD 不一致：docs/agent24/UPSTREAM-BASELINE.json 或 scripts/agent24/probe 有未提交改动，含暂存区。" >&2
     return 3
   fi

@@ -303,9 +303,9 @@ if [ "$bad" -eq 0 ] || [ -d "$d/out" ]; then
   elif ! grep -F -q 'digests+="app=${img}@${LOCAL_APP_IMAGE_ID};"' "$d/log"; then
     bad=1
     echo "不符 precheck 接线：没有用 LOCAL_APP_IMAGE_ID 写 digests"
-  elif ! grep -F -q 'probe_check_system_info_local' "$d/log"; then
+  elif ! grep -F -q 'probe_check_system_info_local "$c" "$v" "$(bj .data.build_time)"' "$d/log"; then
     bad=1
-    echo "不符 precheck 接线：check_system_info 没有调用 probe_check_system_info_local"
+    echo "不符 precheck 接线：check_system_info 没有按 commit、version、build_time 调用 probe_check_system_info_local"
   fi
 fi
 
@@ -327,6 +327,39 @@ rm -f "$r/scripts/agent24/probe/untracked-selftest.txt"
 g update-index --skip-worktree -- scripts/agent24/probe/lib.sh
 src_case local 3 "local lib.sh 带 skip-worktree" "skip-worktree 或 assume-unchanged"
 g update-index --no-skip-worktree -- scripts/agent24/probe/lib.sh
+
+g update-index --assume-unchanged -- scripts/agent24/probe/lib.sh
+src_case local 3 "local lib.sh 带 assume-unchanged" "skip-worktree 或 assume-unchanged"
+g update-index --no-assume-unchanged -- scripts/agent24/probe/lib.sh
+
+printf 'ignored-selftest.txt\n' >>"$r/.git/info/exclude"
+printf 'x\n' >"$r/scripts/agent24/probe/ignored-selftest.txt"
+src_case local 3 "local 探测目录有被忽略的文件" "有未跟踪文件（含被忽略的）"
+rm -f "$r/scripts/agent24/probe/ignored-selftest.txt"
+
+# 只在暂存区不同：工作区已回到 HEAD。
+cp "$r/scripts/agent24/probe/lib.sh" "$BASE/lib.orig" || { echo "FAIL 保存 lib.sh 失败" >&2; exit 1; }
+printf '# staged-only\n' >>"$r/scripts/agent24/probe/lib.sh"
+g add -- scripts/agent24/probe/lib.sh
+cp "$BASE/lib.orig" "$r/scripts/agent24/probe/lib.sh" || { echo "FAIL 恢复 lib.sh 失败" >&2; exit 1; }
+src_case local 3 "local lib.sh 只有暂存区改动" "有未提交改动，含暂存区"
+g reset -q -- scripts/agent24/probe/lib.sh
+
+g update-index --chmod=+x -- scripts/agent24/probe/patches.sh
+src_case local 3 "local patches.sh 只在暂存区改了权限" "有未提交改动，含暂存区"
+g reset -q -- scripts/agent24/probe/patches.sh
+
+printf 'x\n' >"$r/scripts/agent24/probe/staged-new.txt"
+g add -- scripts/agent24/probe/staged-new.txt
+rm -f "$r/scripts/agent24/probe/staged-new.txt"
+src_case local 3 "local 新文件已暂存但工作区已删" "有未提交改动，含暂存区"
+g reset -q -- scripts/agent24/probe/staged-new.txt
+
+g config core.fileMode false
+chmod +x "$r/scripts/agent24/probe/patches.sh"
+src_case local 3 "local core.fileMode=false 时改了权限" "有未提交改动，含暂存区"
+chmod -x "$r/scripts/agent24/probe/patches.sh"
+g config --unset core.fileMode
 
 if ! { printf 'x\n' >"$r/b.txt" && g add -A && g commit -q -m unregistered; } >"$BASE/third.log" 2>&1; then
   echo "FAIL 第三个提交失败" >&2
@@ -559,6 +592,43 @@ if ! grep -F -q 'probe_require_harness_at_head || exit 3' "$HERE/build-local-app
   bad=1
   echo "不符 build-local-app.sh 调用 probe_require_harness_at_head"
 fi
+
+n=$((n + 1))
+if ! grep -F -q -- '--label "io.idoris.agent24.patch-ids=${REG_IDS_CSV}"' "$HERE/build-local-app.sh"; then
+  bad=1
+  echo "不符 build-local-app.sh 的 label patch-ids 不是 REG_IDS_CSV"
+fi
+
+n=$((n + 1))
+if ! grep -F -x -q "  patch_ids='[]'" "$HERE/build-local-app.sh" \
+  || ! grep -F -q "patch_ids=\$(jq -cn --arg csv \"\$REG_IDS_CSV\" '\$csv | split(\",\")')" "$HERE/build-local-app.sh"; then
+  bad=1
+  echo "不符 build-local-app.sh 的 patch_ids：空集应为 []，否则由 REG_IDS_CSV 按逗号拆"
+fi
+
+# product_patches 的 id 必须是互不相同、非空、不含逗号的字符串。
+for bad_ids in '[{"paths":["a.txt"]}]' '[{"id":"","paths":["a.txt"]}]' '[{"id":"A,B","paths":["a.txt"]}]' \
+  '[{"id":"A","paths":["a.txt"]},{"id":"A","paths":["a.txt"]}]' '[{"id":5,"paths":["a.txt"]}]'; do
+  n=$((n + 1))
+  d=$BASE/c$n
+  mkdir -p "$d" || { bad=1; echo "不符 id 校验：建目录失败"; continue; }
+  (
+    ROOT=$r
+    BASELINE=$d/ids.json
+    REL_TAG=v0.8.3
+    REL_COMMIT=$(git -C "$r" rev-parse HEAD)
+    jq -n --argjson p "$bad_ids" '{current_baseline: {product: {product_patches: $p}}}' >"$BASELINE"
+    # shellcheck disable=SC1091
+    source "$r/scripts/agent24/probe/patches.sh"
+    probe_namespace_diff
+  ) >"$d/log" 2>"$d/err"
+  rc=$?
+  if [ "$rc" -ne 3 ] || ! grep -F -q 'id 必须是互不相同、非空、不含逗号的字符串' "$d/err"; then
+    bad=1
+    printf '不符 product_patches id 非法 %s：期望 rc=3 且报 id 规则，实际 rc=%s\n' "$bad_ids" "$rc"
+    show_err
+  fi
+done
 
 if [ "$n" -eq 0 ]; then
   echo "FAIL 自测总例数为 0" >&2
