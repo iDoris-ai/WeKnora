@@ -180,16 +180,10 @@ func (r agent24DBHitReader) Snapshot(ctx context.Context, tenantID uint64, kbIDs
 		}
 		snap.Docs, snap.Chunks = map[string]agent24HitDoc{}, map[string]agent24HitChunk{}
 		for i := range knowledges {
-			k, v := &knowledges[i], 0
-			if k.IsManual() {
-				meta, err := k.ManualMetadata()
-				if err != nil {
-					return err
-				}
-				v = 1
-				if meta != nil {
-					v = meta.Version
-				}
+			k := &knowledges[i]
+			v, err := agent24ManualVersion(k)
+			if err != nil {
+				return err
 			}
 			snap.Docs[k.ID] = agent24HitDoc{
 				ID: k.ID, KnowledgeBaseID: k.KnowledgeBaseID, Title: k.Title, FileName: k.FileName,
@@ -220,6 +214,19 @@ func (r agent24DBHitReader) Snapshot(ctx context.Context, tenantID uint64, kbIDs
 		return agent24HitSnapshot{}, err
 	}
 	return snap, nil
+}
+
+// agent24ManualVersion is the manual-knowledge version of the source fingerprint (R5.1): 0 for other
+// knowledge, 1 for manual knowledge without metadata; unreadable metadata is an error, not a guess.
+func agent24ManualVersion(k *types.Knowledge) (int, error) {
+	if !k.IsManual() {
+		return 0, nil
+	}
+	meta, err := k.ManualMetadata()
+	if err != nil || meta == nil {
+		return 1, err
+	}
+	return meta.Version, nil
 }
 
 // agent24AssembleHits turns candidates into hits in candidate order (R3.6, R3.8–R3.10, R5.3). A candidate
