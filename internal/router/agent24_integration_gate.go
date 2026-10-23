@@ -63,6 +63,15 @@ func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) error {
 	return nil
 }
 
+// installAgent24IntegrationAuthEnvelope must run right before middleware.Auth (A24-KB-11); the credential gate
+// after Auth releases what it holds.
+func installAgent24IntegrationAuthEnvelope(r *gin.Engine) {
+	mode, err := handler.Agent24KnowledgeModeFromEnv()
+	if err == nil && mode == handler.Agent24KnowledgeModeIntegration {
+		r.Use(handler.Agent24KnowledgeAuthEnvelope())
+	}
+}
+
 // installAgent24IntegrationCredentialGate must run right after middleware.Auth.
 func installAgent24IntegrationCredentialGate(r *gin.Engine) {
 	mode, err := handler.Agent24KnowledgeModeFromEnv()

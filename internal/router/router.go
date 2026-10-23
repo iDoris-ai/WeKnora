@@ -211,6 +211,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
 	r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
 
+	// Agent24 A24-KB-11: in integration mode Auth's rejections on the knowledge endpoints get the contract
+	// envelope.
+	installAgent24IntegrationAuthEnvelope(r)
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 	// Agent24 A24-KB-05: integration mode rejects platform API keys and direct principals.
