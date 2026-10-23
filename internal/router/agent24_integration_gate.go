@@ -22,6 +22,7 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	"GET /api/v1/system/capabilities":       {},
 	"POST /api/v1/agent24/knowledge/ready":  {},
 	"POST /api/v1/agent24/knowledge/search": {},
+	"POST /api/v1/agent24/knowledge/read":   {},
 }
 
 func agent24IntegrationGate() gin.HandlerFunc {

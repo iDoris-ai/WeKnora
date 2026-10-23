@@ -139,7 +139,7 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 				c.Next()
 			}, g.apiKeyAuthorizer.Middleware())
 			RegisterAgent24KnowledgeRoutes(v1, nil,
-				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs), g)
+				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs), nil, g)
 
 			body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},` +

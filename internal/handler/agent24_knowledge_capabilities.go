@@ -20,7 +20,6 @@ const (
 	agent24ServerVersionMaxBytes = 128
 )
 
-// max_read_bytes and max_page_limit take effect with the read endpoint (KB-C1-01c ②).
 const (
 	agent24KnowledgeMaxResults      = 50
 	agent24KnowledgeMaxConcurrency  = 4
@@ -62,11 +61,11 @@ func BuildAgent24KnowledgeCapability() Agent24KnowledgeCapability {
 	if err != nil {
 		mode = Agent24KnowledgeModeStandalone
 	}
-	// Non-nil so it serializes as [] rather than null. search needs the revision key (agent24SearchTagKey);
-	// read is not implemented yet (KB-C1-01c ②).
+	// Non-nil so it serializes as [] rather than null. search and read need the revision key
+	// (agent24SearchTagKey).
 	ops := []string{}
 	if agent24SearchTagKey() != nil {
-		ops = append(ops, "search")
+		ops = append(ops, "search", "read")
 	}
 	return Agent24KnowledgeCapability{
 		ProtocolVersions:    []int{agent24KnowledgeProtocolVersion},

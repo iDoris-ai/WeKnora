@@ -71,10 +71,10 @@ type agent24IndexReader interface {
 
 // Agent24KnowledgeReadyHandler serves POST /agent24/knowledge/ready.
 type Agent24KnowledgeReadyHandler struct {
-	probe          Agent24KnowledgeReadyProbe
-	scope          agent24ScopeResolver
-	index          agent24IndexReader
-	searchDisabled bool // no revision key: operations.search is disabled (agent24SearchTagKey)
+	probe      Agent24KnowledgeReadyProbe
+	scope      agent24ScopeResolver
+	index      agent24IndexReader
+	keyMissing bool // no revision key: operations.search and operations.read are disabled (agent24SearchTagKey)
 }
 
 // NewAgent24KnowledgeReadyHandler builds the handler with the default dependencies.
@@ -87,7 +87,7 @@ func NewAgent24KnowledgeReadyHandler(
 		scope: agent24DefaultScopeResolver{kbs: kbService},
 		index: agent24DBIndexReader{db: db},
 
-		searchDisabled: agent24SearchTagKey() == nil,
+		keyMissing: agent24SearchTagKey() == nil,
 	}
 }
 
@@ -191,8 +191,9 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 		logger.Warnf(ctx, "agent24 knowledge ready: storage=%v retrieve_engine=%v", storageErr, engineErr)
 	}
 	search, read := agent24State(storageErr == nil && engineErr == nil), agent24State(storageErr == nil)
-	if h.searchDisabled {
-		search = agent24OperationState{State: "disabled", Reason: agent24SearchDisabledReason}
+	if h.keyMissing {
+		search = agent24OperationState{State: "disabled", Reason: agent24TagKeyMissingReason}
+		read = search
 	}
 	resp := gin.H{
 		"protocol_version": agent24KnowledgeProtocolVersion,

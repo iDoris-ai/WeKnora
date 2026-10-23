@@ -402,21 +402,17 @@ func TestAgent24KnowledgeReadySearchDisabled(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		probe fakeAgent24ReadyProbe
-		reads []any
 	}{
-		{"deps up", fakeAgent24ReadyProbe{}, []any{
-			map[string]any{"state": "ready"}, map[string]any{"state": "not_ready", "reason": "index_building"},
-		}},
-		{"engine down", fakeAgent24ReadyProbe{engine: down}, []any{
-			map[string]any{"state": "ready"}, map[string]any{"state": "not_ready", "reason": "index_building"},
-		}},
+		{"deps up", fakeAgent24ReadyProbe{}},
+		{"engine down", fakeAgent24ReadyProbe{engine: down}},
+		{"storage down", fakeAgent24ReadyProbe{storage: down}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 			h := &Agent24KnowledgeReadyHandler{
-				probe: tc.probe, scope: agent24EveryKB{}, index: index, searchDisabled: true,
+				probe: tc.probe, scope: agent24EveryKB{}, index: index, keyMissing: true,
 			}
 			h.Ready(c)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -426,12 +422,13 @@ func TestAgent24KnowledgeReadySearchDisabled(t *testing.T) {
 				KnowledgeBases []map[string]any `json:"knowledge_bases"`
 			}
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			// Without the key both search and read are disabled, whatever the dependencies (R6.4).
 			assert.Equal(t, disabled, got.Operations["search"])
-			assert.Equal(t, map[string]any{"state": "ready"}, got.Operations["read"])
+			assert.Equal(t, disabled, got.Operations["read"])
 			require.Len(t, got.KnowledgeBases, 2)
-			for i, kb := range got.KnowledgeBases {
+			for _, kb := range got.KnowledgeBases {
 				assert.Equal(t, kbOff, kb["search"], kb["knowledge_base_id"])
-				assert.Equal(t, tc.reads[i], kb["read"], kb["knowledge_base_id"])
+				assert.Equal(t, kbOff, kb["read"], kb["knowledge_base_id"])
 			}
 		})
 	}

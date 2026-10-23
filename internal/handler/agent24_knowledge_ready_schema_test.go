@@ -30,6 +30,7 @@ var agent24KnowledgeSchemaSHA256 = map[string]string{
 	"search.schema.json": "6f714593bfaaeb1e3b3a5063b1610eaa19da74b3e37f28b1dd2b25c257fba16f",
 	"error.schema.json":  "02dea455203cf503f61e0995f62605fffbcd832af627a5fb4a210820cd81649e",
 	"common.schema.json": "97de36a9af3a1315bdacda1243c9f8dd84a1f15993f9c757698b73c2bc345f52",
+	"read.schema.json":   "de6e14ffb55e6bd5a19b2d1d14ac3209d853a71135d4f9b279bbde2d1e4042ca",
 }
 
 // agent24ReadySchemas checks the testdata digests and compiles ready.schema.json's request and response.
@@ -156,6 +157,7 @@ func TestAgent24KnowledgeReadySchemaNegative(t *testing.T) {
 // re-sync updates both.
 var agent24KnowledgeSchemaDefs = map[string]int{
 	"ready.schema.json": 5, "search.schema.json": 5, "error.schema.json": 9, "common.schema.json": 13,
+	"read.schema.json": 4,
 }
 
 // Every copy compiles, entry by entry: the roots and each $defs entry, so a broken reference anywhere in a
