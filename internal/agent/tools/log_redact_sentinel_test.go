@@ -75,12 +75,14 @@ func TestWebSearchExecuteLogOmitsQuery(t *testing.T) {
 }
 
 func TestShellExecLogOmitsCommand(t *testing.T) {
-	for _, command := range []string{
-		"grep " + agent24LogSentinel + " /workspace/a.txt", // runs
-		"rm -rf / # " + agent24LogSentinel,                 // rejected by the blacklist
+	for _, input := range []ShellExecInput{
+		{Command: "grep " + agent24LogSentinel + " /workspace/a.txt"},       // runs
+		{Command: "rm -rf / # " + agent24LogSentinel},                       // rejected by the blacklist
+		{Command: "python3 - # " + agent24LogSentinel, Stdin: "rm -rf /\n"}, // rejected executable stdin
 	} {
+		command := input.Command
 		buf := captureAgent24DebugLog(t)
-		args, err := json.Marshal(ShellExecInput{Command: command})
+		args, err := json.Marshal(input)
 		if err != nil {
 			t.Fatalf("marshal args: %v", err)
 		}

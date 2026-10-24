@@ -231,8 +231,8 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 			errMsg += editSandboxMissingFieldHint
 		}
 		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
-			"tool":   name,
-			"errors": errMsg,
+			"tool":       name,
+			"errors_len": len(errMsg),
 		})
 		return &types.ToolResult{
 			Success: false,
