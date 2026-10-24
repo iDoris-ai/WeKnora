@@ -56,10 +56,10 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	pipelineInfo(ctx, "Stream", "input", map[string]interface{}{
-		"session_id":     chatManage.SessionID,
-		"user_question":  chatManage.UserContent,
-		"history_rounds": len(chatManage.History),
-		"chat_model":     chatManage.ChatModelID,
+		"session_id":        chatManage.SessionID,
+		"user_question_len": len(chatManage.UserContent),
+		"history_rounds":    len(chatManage.History),
+		"chat_model":        chatManage.ChatModelID,
 	})
 
 	// Prepare chat model and options
@@ -75,11 +75,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	reportModelContextLeaks(ctx, "Stream", modelContext, chatMessages)
 	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
 	pipelineInfo(ctx, "Stream", "messages_ready", map[string]interface{}{
-		"message_count": len(chatMessages),
-		"system_prompt": chatMessages[0].Content,
+		"message_count":     len(chatMessages),
+		"system_prompt_len": len(chatMessages[0].Content),
 	})
 	pipelineInfo(ctx, "Stream", "user_message", map[string]interface{}{
-		"content": chatMessages[len(chatMessages)-1].Content,
+		"content_len": len(chatMessages[len(chatMessages)-1].Content),
 	})
 	// EventBus is required for event-driven streaming
 	if chatManage.EventBus == nil {
@@ -204,7 +204,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				if response.ResponseType == types.ResponseTypeError {
 					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
 						"session_id": chatManage.SessionID,
-						"error":      response.Content,
+						"error_len":  len(response.Content),
 					})
 					eventBus.Emit(ctx, types.Event{
 						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
