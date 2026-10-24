@@ -1048,7 +1048,7 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 	s.dispatchSideEffects(ctx, key)
 
 	s.publishChange(ctx, key)
-	s.emitChangeAudit(ctx, key, spec.Type, oldValue, encoded)
+	s.emitChangeAudit(ctx, key, spec.Type, oldValue, encoded, isSecret)
 	return persisted, nil
 }
 
@@ -1093,7 +1093,7 @@ func (s *systemSettingService) Reset(ctx context.Context, key string) error {
 	// is intentionally null to flag this as a reset (vs an Update
 	// which always writes a concrete new_value).
 	if deleted && prev != nil {
-		s.emitChangeAudit(ctx, key, spec.Type, prev.Value, nil)
+		s.emitChangeAudit(ctx, key, spec.Type, prev.Value, nil, prev.IsSecret)
 	}
 	return nil
 }
@@ -1194,17 +1194,28 @@ func (s *systemSettingService) consumeMessages(ctx context.Context, ch <-chan *r
 // This mirrors tenantMemberService.emitAudit's failure semantics: the
 // business op (config update) succeeds even if audit is broken.
 func (s *systemSettingService) emitChangeAudit(
-	ctx context.Context, key, valueType string, oldValue, newValue types.JSON,
+	ctx context.Context, key, valueType string, oldValue, newValue types.JSON, secret bool,
 ) {
 	if s.audit == nil {
 		return
 	}
-	details, _ := json.Marshal(map[string]any{
+	detailsMap := map[string]any{
 		"key":        key,
 		"value_type": valueType,
 		"old_value":  json.RawMessage(oldValue),
 		"new_value":  json.RawMessage(newValue),
-	})
+	}
+	if secret {
+		// nil stays JSON null; any stored value becomes the JSON string "***".
+		if oldValue != nil {
+			detailsMap["old_value"] = "***"
+		}
+		if newValue != nil {
+			detailsMap["new_value"] = "***"
+		}
+		detailsMap["redacted"] = true
+	}
+	details, _ := json.Marshal(detailsMap)
 	_ = s.audit.Log(ctx, &types.AuditLog{
 		// tenant_id=0 marks the row as system-scope (the audit_logs
 		// table itself is tenant-scoped; 0 is the convention for

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -43,7 +44,7 @@ func GinMiddleware() gin.HandlerFunc {
 			Metadata: map[string]interface{}{
 				"http.method": c.Request.Method,
 				"http.path":   c.FullPath(),
-				"http.query":  c.Request.URL.RawQuery,
+				"http.query":  secutils.RedactQueryValues(c.Request.URL.RawQuery),
 			},
 			Tags: []string{"http", strings.ToLower(c.Request.Method)},
 		}
