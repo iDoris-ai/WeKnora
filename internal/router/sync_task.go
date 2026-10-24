@@ -205,8 +205,8 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						logger.Errorf(ctx, "[SyncTask] final-failure hook panicked for type=%s id=%s: %v",
-							task.Type(), taskID, r)
+						logger.Errorf(ctx, "[SyncTask] final-failure hook panicked for type=%s id=%s: %s",
+							task.Type(), taskID, logger.PanicValue(r))
 					}
 				}()
 				onFinalFailure(cbCtx, task, lastErr)

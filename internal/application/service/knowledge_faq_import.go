@@ -1402,7 +1402,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			buf := make([]byte, 8192)
 			n := runtime.Stack(buf, false)
 			stack := string(buf[:n])
-			logger.Errorf(ctx, "FAQ import task %s panicked: %v\n%s", taskID, r, stack)
+			logger.Errorf(ctx, "FAQ import task %s panicked: %s\n%s", taskID, logger.PanicValue(r), stack)
 			err = fmt.Errorf("panic during FAQ import: %v", r)
 		}
 	}()

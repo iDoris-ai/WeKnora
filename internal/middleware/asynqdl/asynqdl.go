@@ -101,7 +101,7 @@ func MiddlewareWithCallback(repo interfaces.TaskDeadLetterRepository, cb OnDeadL
 func safeInvokeCallback(ctx context.Context, t *asynq.Task, taskErr error, cb OnDeadLetter) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Warnf(ctx, "asynq dead-letter callback panicked for %s: %v", t.Type(), r)
+			logger.Warnf(ctx, "asynq dead-letter callback panicked for %s: %s", t.Type(), logger.PanicValue(r))
 		}
 	}()
 	cb(context.Background(), t, taskErr)

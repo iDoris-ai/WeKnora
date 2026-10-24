@@ -306,7 +306,8 @@ func executeRecovered(
 ) (result *types.ToolResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf(ctx, "[ToolRegistry] Tool %s panicked: %v\n%s", tool.Name(), r, debug.Stack())
+			logger.Errorf(ctx, "[ToolRegistry] Tool %s panicked: %s\n%s",
+				tool.Name(), logger.PanicValue(r), debug.Stack())
 			// The panic value can carry internals (paths, addresses); the
 			// model and the user only need to know the call did not complete.
 			err = fmt.Errorf("tool %s failed with an internal error", tool.Name())

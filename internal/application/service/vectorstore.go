@@ -238,7 +238,7 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 		if r := recover(); r != nil {
 			logger.WarnWithFields(ctx, logger.Fields{
 				"store_id": secutils.SanitizeForLog(storeID),
-				"panic":    fmt.Sprint(r),
+				"panic":    logger.PanicValue(r),
 			}, "[vectorstore.delete] registry unregister panicked; engine may stay stale until restart")
 		}
 	}()
