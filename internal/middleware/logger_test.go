@@ -1,13 +1,17 @@
 package middleware
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -211,10 +215,10 @@ func TestReadRequestBodySkipsNonTextBodies(t *testing.T) {
 }
 
 func TestSanitizeQuery(t *testing.T) {
-	got := sanitizeQuery("code=secret-code&state=secret-state&next=%2Fsettings&state=second")
-	want := "code=%2A%2A%2A&next=%2Fsettings&state=%2A%2A%2A"
+	got := secutils.RedactQueryValues("code=secret-code&state=secret-state&next=%2Fsettings&state=second")
+	want := "code=%2A%2A%2A&next=%2A%2A%2A&state=%2A%2A%2A"
 	if got != want {
-		t.Fatalf("sanitizeQuery() = %q, want %q", got, want)
+		t.Fatalf("RedactQueryValues() = %q, want %q", got, want)
 	}
 }
 
@@ -223,12 +227,118 @@ func TestSanitizeQuery(t *testing.T) {
 // value for its TTL is enough to open a shell in the session's sandbox, so the
 // redaction is a security boundary, not cosmetics.
 func TestSanitizeQueryRedactsTerminalTicket(t *testing.T) {
-	got := sanitizeQuery("ticket=eyJhbGciOiJIUzI1NiJ9.payload.signature&provision=1&cols=120")
-	want := "cols=120&provision=1&ticket=%2A%2A%2A"
+	got := secutils.RedactQueryValues("ticket=eyJhbGciOiJIUzI1NiJ9.payload.signature&provision=1&cols=120")
+	want := "cols=%2A%2A%2A&provision=%2A%2A%2A&ticket=%2A%2A%2A"
 	if got != want {
-		t.Fatalf("sanitizeQuery() = %q, want %q", got, want)
+		t.Fatalf("RedactQueryValues() = %q, want %q", got, want)
 	}
-	if strings.Contains(got, "signature") {
-		t.Fatalf("sanitizeQuery() leaked the ticket: %q", got)
+	if strings.Contains(got, "signature") || strings.Contains(got, "cols=120") ||
+		strings.Contains(got, "provision=1") {
+		t.Fatalf("RedactQueryValues() leaked a query value: %q", got)
+	}
+}
+
+// agent24RunAccessLog serves, through RequestID and Logger with AGENT24_LOG_HTTP_BODY set to bodySwitch, a
+// JSON POST of payload, GET /r/S3NT1NEL-token, GET /api/v1/organizations/preview/S3NT1NEL-code, an unmatched
+// POST /r/S3NT1NEL-token and GET /api/v1/search?q=S3NT1NEL-query&sig=S3NT1NEL-sig at debug level, and
+// returns the log output and the body the POST handler read.
+func agent24RunAccessLog(t *testing.T, bodySwitch, payload string) (string, string) {
+	t.Helper()
+	t.Setenv(agent24LogHTTPBodyEnv, bodySwitch)
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stdout)
+
+	gin.SetMode(gin.TestMode)
+	var gotBody string
+	r := gin.New()
+	r.Use(RequestID(), Logger())
+	r.POST("/api/v1/x", func(c *gin.Context) {
+		body, _ := io.ReadAll(c.Request.Body)
+		gotBody = string(body)
+		c.JSON(http.StatusOK, gin.H{"echo": gotBody})
+	})
+	r.GET("/r/:token", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	r.GET("/api/v1/search", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.GET("/api/v1/organizations/preview/:code", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/x", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/r/S3NT1NEL-token", nil))
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet,
+		"/api/v1/organizations/preview/S3NT1NEL-code", nil))
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/r/S3NT1NEL-token", nil))
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet,
+		"/api/v1/search?q=S3NT1NEL-query&sig=S3NT1NEL-sig", nil))
+	return buf.String(), gotBody
+}
+
+// Sentinel negative case (A24-OBS-01): by default neither body is read or logged, a credential path
+// parameter is logged as the route template and every query value as ***; the handler still reads the
+// whole body. The response echoes the request, so a logged response body would leak too.
+func TestAccessLogOmitsBodiesAndCredentialsByDefault(t *testing.T) {
+	payload := `{"note":"S3NT1NEL-body","hmac_secret":"S3NT1NEL-secret"}`
+	logText, gotBody := agent24RunAccessLog(t, "", payload)
+	if gotBody != payload {
+		t.Fatalf("handler saw %q, want %q", gotBody, payload)
+	}
+	if strings.Contains(logText, "S3NT1NEL") {
+		t.Fatalf("access log contains a sentinel:\n%s", logText)
+	}
+	for _, want := range []string{
+		"/r/:token", "preview/:code", agent24UnmatchedRoutePath, "q=%2A%2A%2A", "sig=%2A%2A%2A", "status_code",
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("access log missing %q:\n%s", want, logText)
+		}
+	}
+}
+
+// With the switch on, bodies are logged as before: sanitizeBody masks password by field name, but body text
+// is in the log (here the echo, whose escaped quotes the field regex does not match), so only the path and
+// query sentinels are asserted absent.
+func TestAccessLogHTTPBodyEnabledRedactsPasswordAndCredentials(t *testing.T) {
+	payload := `{"password":"S3NT1NEL-secret","note":"visible-note"}`
+	logText, gotBody := agent24RunAccessLog(t, "true", payload)
+	if gotBody != payload {
+		t.Fatalf("handler saw %q, want %q", gotBody, payload)
+	}
+	for _, want := range []string{"request_body", `"password":"***"`, "visible-note", "/r/:token"} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("access log missing %q:\n%s", want, logText)
+		}
+	}
+	for _, leaked := range []string{"S3NT1NEL-token", "S3NT1NEL-code", "S3NT1NEL-query", "S3NT1NEL-sig"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("access log contains %q:\n%s", leaked, logText)
+		}
+	}
+}
+
+// Every credential parameter name is masked whatever its case, and the switch also accepts 1.
+func TestAgent24AccessLogPathCredentialNames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, name := range []string{"token", "Ticket", "code", "SECRET", "sig", "signature"} {
+		var got string
+		r := gin.New()
+		r.GET("/x/:"+name, func(c *gin.Context) { got = agent24AccessLogPath(c) })
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x/S3NT1NEL", nil))
+		if got != "/x/:"+name {
+			t.Fatalf("param %q: path %q, want the route template", name, got)
+		}
+	}
+	var got string
+	r := gin.New()
+	r.GET("/kb/:id", func(c *gin.Context) { got = agent24AccessLogPath(c) })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/kb/kb-1", nil))
+	if got != "/kb/kb-1" {
+		t.Fatalf("non-credential param: path %q, want the request path", got)
+	}
+
+	logText, _ := agent24RunAccessLog(t, "1", `{"note":"visible-note"}`)
+	if !strings.Contains(logText, "visible-note") {
+		t.Fatalf("AGENT24_LOG_HTTP_BODY=1 did not turn bodies on:\n%s", logText)
 	}
 }

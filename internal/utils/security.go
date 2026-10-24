@@ -473,6 +473,22 @@ func SanitizeForDisplay(input string) string {
 	return escaped
 }
 
+// RedactQueryValues returns raw with every parameter value replaced by "***", keeping the names (sorted,
+// repeated names collapsed to one). An unparsable query becomes "[invalid query omitted]".
+func RedactQueryValues(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return "[invalid query omitted]"
+	}
+	for key := range values {
+		values[key] = []string{"***"}
+	}
+	return values.Encode()
+}
+
 // SanitizeForLog 清理日志输入,防止日志注入攻击
 // 日志注入攻击是指攻击者通过在输入中插入换行符和其他控制字符,
 // 伪造日志条目,可能导致日志分析工具误判或隐藏恶意活动

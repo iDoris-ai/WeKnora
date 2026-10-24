@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -21,6 +21,10 @@ const (
 	// bodyTruncatedMarker 是日志里跟在被截断的 body 后面的标记。
 	bodyTruncatedMarker = "... [内容过长，已截断]"
 )
+
+// agent24LogHTTPBodyEnv turns on request/response bodies in the access log (fork patch A24-OBS-01). Off by
+// default: bodies carry queries, document text and credentials.
+const agent24LogHTTPBodyEnv = "AGENT24_LOG_HTTP_BODY"
 
 // replayedBody 把日志窥探消费掉的字节还给 handler，让它读到的 body 与没有这层
 // 中间件时完全一致；Close 仍然关闭原始 body，连接得以释放。
@@ -62,38 +66,6 @@ var sensitiveFieldRegex = regexp.MustCompile(
 // sanitizeBody 清理敏感信息
 func sanitizeBody(body string) string {
 	return sensitiveFieldRegex.ReplaceAllString(body, `$1:"***"`)
-}
-
-var sensitiveQueryFields = map[string]struct{}{
-	"access_token":          {},
-	"authorization_attempt": {},
-	"code":                  {},
-	"id_token":              {},
-	"refresh_token":         {},
-	"state":                 {},
-	// ticket is the sandbox terminal's WebSocket handshake credential. A
-	// browser cannot set Authorization on an upgrade, so it travels in the
-	// query string; anyone holding it for its 2-minute TTL can open a shell
-	// in the session's sandbox, which is why it must never reach a log line.
-	"ticket": {},
-	"token":  {},
-}
-
-// sanitizeQuery prevents OAuth authorization codes, CSRF/attempt state, and
-// handshake credentials from being copied into access logs. Parsing the query
-// also covers repeated and percent-encoded parameters without relying on
-// fragile string replacement.
-func sanitizeQuery(raw string) string {
-	values, err := url.ParseQuery(raw)
-	if err != nil {
-		return "[invalid query omitted]"
-	}
-	for key := range values {
-		if _, sensitive := sensitiveQueryFields[strings.ToLower(key)]; sensitive {
-			values[key] = []string{"***"}
-		}
-	}
-	return values.Encode()
 }
 
 // readRequestBody 读取请求体（限制大小用于日志，但把剩余字节原样交还后续handler）
@@ -175,8 +147,34 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
+// agent24UnmatchedRoutePath stands in for the path of a request no route matched: its path may still carry
+// a capability token (POST /r/<token>, GET /r/<token>/extra) that no route template can mask.
+const agent24UnmatchedRoutePath = "[unmatched route]"
+
+// agent24AccessLogPath is the path for the access log: agent24UnmatchedRoutePath when no route matched, the
+// route template (c.FullPath()) when a path parameter carries a credential (/r/:token), otherwise the
+// request path.
+func agent24AccessLogPath(c *gin.Context) string {
+	if c.FullPath() == "" {
+		return agent24UnmatchedRoutePath
+	}
+	for _, p := range c.Params {
+		switch strings.ToLower(p.Key) {
+		case "token", "ticket", "code", "secret", "sig", "signature":
+			return c.FullPath()
+		}
+	}
+	return c.Request.URL.Path
+}
+
 // Logger middleware logs request details with request ID, input and output
 func Logger() gin.HandlerFunc {
+	bodyFlag := os.Getenv(agent24LogHTTPBodyEnv)
+	logBodies := bodyFlag == "true" || bodyFlag == "1"
+	if logBodies {
+		logger.Warnf(context.Background(),
+			"AGENT24_LOG_HTTP_BODY is enabled: access logs record request and response bodies")
+	}
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
@@ -192,20 +190,21 @@ func Logger() gin.HandlerFunc {
 		// Keep access metadata, but never read or buffer these request/response bodies.
 		browserTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
 			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
-		// 读取请求体（在Next之前读取，因为Next会消费body）
+		// 读取请求体（在Next之前读取，因为Next会消费body）。默认不读、不缓存正文。
 		var requestBody string
-		if !browserTraffic && (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
+		if logBodies && !browserTraffic &&
+			(c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
 			requestBody = readRequestBody(c)
 		}
 
-		// 创建响应体捕获器
-		responseBody := &bytes.Buffer{}
-		responseWriter := &loggerResponseBodyWriter{
-			ResponseWriter: c.Writer,
-			body:           responseBody,
-		}
-		if !browserTraffic {
-			c.Writer = responseWriter
+		// 创建响应体捕获器。浏览器流量在开关打开时仍然不缓冲。
+		var responseBody *bytes.Buffer
+		if logBodies && !browserTraffic {
+			responseBody = &bytes.Buffer{}
+			c.Writer = &loggerResponseBodyWriter{
+				ResponseWriter: c.Writer,
+				body:           responseBody,
+			}
 		}
 
 		// Process request
@@ -229,13 +228,15 @@ func Logger() gin.HandlerFunc {
 		statusCode := c.Writer.Status()
 		method := c.Request.Method
 
+		// 日志路径在 Next 之后取。开头的 path 仍只用于前缀判断。
+		logPath := agent24AccessLogPath(c)
 		if raw != "" {
-			path = path + "?" + sanitizeQuery(raw)
+			logPath = logPath + "?" + secutils.RedactQueryValues(raw)
 		}
 
 		// 读取响应体
 		responseBodyStr := ""
-		if responseBody.Len() > 0 {
+		if responseBody != nil && responseBody.Len() > 0 {
 			contentType := c.Writer.Header().Get("Content-Type")
 			if strings.Contains(contentType, "text/event-stream") {
 				responseBodyStr = "[SSE流式响应，已跳过]"
@@ -258,7 +259,7 @@ func Logger() gin.HandlerFunc {
 		logMsg = logMsg.WithFields(map[string]interface{}{
 			"request_id":  safeRequestID,
 			"method":      method,
-			"path":        secutils.SanitizeForLog(path),
+			"path":        secutils.SanitizeForLog(logPath),
 			"status_code": statusCode,
 			"size":        c.Writer.Size(),
 			"latency":     latency.String(),
