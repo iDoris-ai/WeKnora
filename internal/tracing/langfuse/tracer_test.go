@@ -2,7 +2,9 @@ package langfuse
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,6 +35,7 @@ func newTestManager(t *testing.T) (*Manager, *tracetest.InMemoryExporter) {
 		QueueSize:      32,
 		RequestTimeout: 2 * time.Second,
 		SampleRate:     1.0,
+		ExportBodies:   true,
 		testExporter:   exp,
 	})
 	if err != nil {
@@ -482,4 +485,203 @@ func TestAttachTraceparent_LeavesExistingTrace(t *testing.T) {
 		return
 	}
 	t.Fatal("generation span not exported")
+}
+
+const bodySentinel = "S3NT1NEL"
+
+func newTestManagerWithBodies(t *testing.T, exportBodies bool) (*Manager, *tracetest.InMemoryExporter) {
+	t.Helper()
+	exp := tracetest.NewInMemoryExporter()
+	m, err := Init(Config{
+		Enabled:        true,
+		Host:           "http://test",
+		PublicKey:      "pk",
+		SecretKey:      "sk",
+		FlushAt:        1,
+		FlushInterval:  1 * time.Second,
+		QueueSize:      32,
+		RequestTimeout: 2 * time.Second,
+		SampleRate:     1.0,
+		ExportBodies:   exportBodies,
+		testExporter:   exp,
+	})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+	return m, exp
+}
+
+func exerciseBodyExport(m *Manager) {
+	ctx, tr := m.StartTrace(context.Background(), TraceOptions{
+		Name:  "root",
+		Input: bodySentinel,
+	})
+	_, span := m.StartSpan(ctx, SpanOptions{Name: "work", Input: bodySentinel})
+	span.Finish(bodySentinel, nil, errors.New(bodySentinel))
+	_, gen := m.StartGeneration(ctx, GenerationOptions{
+		Name:  "chat.completion",
+		Model: "m",
+		Input: bodySentinel,
+	})
+	gen.Finish(bodySentinel, nil, errors.New(bodySentinel))
+	tr.Finish(bodySentinel, nil)
+}
+
+func assertNoBodySentinel(t *testing.T, s tracetest.SpanStub) {
+	t.Helper()
+	for _, kv := range s.Attributes {
+		if strings.Contains(kv.Value.Emit(), bodySentinel) {
+			t.Errorf("span %s attr %s contains sentinel: %s", s.Name, kv.Key, kv.Value.Emit())
+		}
+	}
+	if strings.Contains(s.Status.Description, bodySentinel) {
+		t.Errorf("span %s status contains sentinel: %s", s.Name, s.Status.Description)
+	}
+	for _, ev := range s.Events {
+		for _, kv := range ev.Attributes {
+			if strings.Contains(kv.Value.Emit(), bodySentinel) {
+				t.Errorf("span %s event %s attr %s contains sentinel: %s",
+					s.Name, ev.Name, kv.Key, kv.Value.Emit())
+			}
+		}
+	}
+}
+
+func assertRedactedError(t *testing.T, s tracetest.SpanStub) {
+	t.Helper()
+	const wantType = "*errors.errorString"
+	if !strings.Contains(s.Status.Description, wantType) {
+		t.Errorf("span %s status %q missing %s", s.Name, s.Status.Description, wantType)
+	}
+	var sawType bool
+	for _, ev := range s.Events {
+		if ev.Name != "exception" {
+			continue
+		}
+		if strings.Contains(spanAttr(ev.Attributes, "exception.type"), wantType) {
+			sawType = true
+		}
+	}
+	if !sawType {
+		t.Errorf("span %s exception.type missing %s", s.Name, wantType)
+	}
+}
+
+func TestExportBodies_RedactsWhenOff(t *testing.T) {
+	m, exp := newTestManagerWithBodies(t, false)
+	exerciseBodyExport(m)
+
+	raw, err := json.Marshal(bodySentinel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf(`{"bytes":%d,"redacted":true}`, len(raw))
+	spans := exp.GetSpans()
+	if len(spans) == 0 {
+		t.Fatal("no spans exported")
+	}
+	var sawRoot, sawSpan, sawGen bool
+	for _, s := range spans {
+		assertNoBodySentinel(t, s)
+		switch spanType(s) {
+		case obsTypeTrace:
+			sawRoot = true
+			if got := spanAttr(s.Attributes, attrTraceInput); got != want {
+				t.Errorf("trace input = %q, want %q", got, want)
+			}
+			if got := spanAttr(s.Attributes, attrTraceOutput); got != want {
+				t.Errorf("trace output = %q, want %q", got, want)
+			}
+		case obsTypeSpan:
+			sawSpan = true
+			if got := spanAttr(s.Attributes, attrObsInput); got != want {
+				t.Errorf("span input = %q, want %q", got, want)
+			}
+			if got := spanAttr(s.Attributes, attrObsOutput); got != want {
+				t.Errorf("span output = %q, want %q", got, want)
+			}
+			assertRedactedError(t, s)
+		case obsTypeGeneration:
+			sawGen = true
+			if got := spanAttr(s.Attributes, attrObsInput); got != want {
+				t.Errorf("generation input = %q, want %q", got, want)
+			}
+			if got := spanAttr(s.Attributes, attrObsOutput); got != want {
+				t.Errorf("generation output = %q, want %q", got, want)
+			}
+			assertRedactedError(t, s)
+		}
+	}
+	if !sawRoot || !sawSpan || !sawGen {
+		t.Fatalf("missing spans root=%v span=%v gen=%v", sawRoot, sawSpan, sawGen)
+	}
+}
+
+func TestExportBodies_KeepsTextWhenOn(t *testing.T) {
+	m, exp := newTestManager(t)
+	exerciseBodyExport(m)
+
+	raw, err := json.Marshal(bodySentinel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := string(raw)
+	spans := exp.GetSpans()
+	if len(spans) == 0 {
+		t.Fatal("no spans exported")
+	}
+	var sawRoot, sawSpan, sawGen bool
+	for _, s := range spans {
+		switch spanType(s) {
+		case obsTypeTrace:
+			sawRoot = true
+			if got := spanAttr(s.Attributes, attrTraceInput); got != want {
+				t.Errorf("trace input = %q, want %q", got, want)
+			}
+			if got := spanAttr(s.Attributes, attrTraceOutput); got != want {
+				t.Errorf("trace output = %q, want %q", got, want)
+			}
+		case obsTypeSpan:
+			sawSpan = true
+			if got := spanAttr(s.Attributes, attrObsInput); got != want {
+				t.Errorf("span input = %q, want %q", got, want)
+			}
+			if got := spanAttr(s.Attributes, attrObsOutput); got != want {
+				t.Errorf("span output = %q, want %q", got, want)
+			}
+			if s.Status.Description != bodySentinel {
+				t.Errorf("span status = %q, want %q", s.Status.Description, bodySentinel)
+			}
+			if !eventAttrEquals(s, "exception.message", bodySentinel) {
+				t.Errorf("span exception.message missing %q", bodySentinel)
+			}
+		case obsTypeGeneration:
+			sawGen = true
+			if got := spanAttr(s.Attributes, attrObsInput); got != want {
+				t.Errorf("generation input = %q, want %q", got, want)
+			}
+			if got := spanAttr(s.Attributes, attrObsOutput); got != want {
+				t.Errorf("generation output = %q, want %q", got, want)
+			}
+			if s.Status.Description != bodySentinel {
+				t.Errorf("generation status = %q, want %q", s.Status.Description, bodySentinel)
+			}
+			if !eventAttrEquals(s, "exception.message", bodySentinel) {
+				t.Errorf("generation exception.message missing %q", bodySentinel)
+			}
+		}
+	}
+	if !sawRoot || !sawSpan || !sawGen {
+		t.Fatalf("missing spans root=%v span=%v gen=%v", sawRoot, sawSpan, sawGen)
+	}
+}
+
+func eventAttrEquals(s tracetest.SpanStub, key, want string) bool {
+	for _, ev := range s.Events {
+		if spanAttr(ev.Attributes, key) == want {
+			return true
+		}
+	}
+	return false
 }
