@@ -647,7 +647,7 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[Weaviate] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
+	log.Infof("[Weaviate] Performing keywords retrieval with query_len=%d, topK: %d", len(params.Query), params.TopK)
 
 	// Get all collections that match our base name pattern
 	collections, err := w.ListCollections(ctx)
@@ -707,7 +707,7 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 	}
 
 	if len(allResults) == 0 {
-		log.Warnf("[Weaviate] No keyword matches found for query: %s", params.Query)
+		log.Warnf("[Weaviate] No keyword matches found for query_len=%d", len(params.Query))
 	} else {
 		log.Infof("[Weaviate] Keywords retrieval found %d results", len(allResults))
 	}

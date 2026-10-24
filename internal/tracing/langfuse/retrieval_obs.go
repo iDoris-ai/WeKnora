@@ -97,7 +97,7 @@ func SummarizeSearchResults(results []*types.SearchResult, limit int) map[string
 			"match_type":      sr.MatchType,
 			"chunk_type":      sr.ChunkType,
 			"vector_score":    fmt.Sprintf("%.4f", sr.VectorScore),
-			"preview":         TruncateRunes(sr.Content, 160),
+			"content_bytes":   len(sr.Content),
 		}
 		if sr.Metadata != nil {
 			if base, ok := sr.Metadata["base_score"]; ok {
@@ -163,7 +163,7 @@ func summarizeIndexHits(hits []*types.IndexWithScore, limit int) []map[string]in
 			"match_type":        hit.MatchType,
 			"source_type":       hit.SourceType,
 			"vector_score":      fmt.Sprintf("%.4f", hit.VectorScore),
-			"preview":           TruncateRunes(hit.Content, 160),
+			"content_bytes":     len(hit.Content),
 		})
 	}
 	return out
@@ -260,13 +260,14 @@ func summarizeRetrieveHits(
 			"vector_score":      fmt.Sprintf("%.4f", hit.VectorScore),
 			"engine":            string(ref.engine),
 			"retriever":         string(ref.retriever),
-			"preview":           TruncateRunes(hit.Content, 160),
+			"content_bytes":     len(hit.Content),
 		})
 	}
 	return topHits, byRetriever
 }
 
-// SummarizePassagePreviews builds rerank passage previews aligned with candidates.
+// SummarizePassagePreviews builds rerank passage summaries aligned with candidates: sizes, not text
+// (A24-OBS-01).
 func SummarizePassagePreviews(
 	candidates []*types.SearchResult,
 	passages []string,
@@ -294,7 +295,7 @@ func SummarizePassagePreviews(
 			"match_type":      sr.MatchType,
 			"chunk_type":      sr.ChunkType,
 			"vector_score":    fmt.Sprintf("%.4f", sr.VectorScore),
-			"preview":         TruncateRunes(passages[i], 160),
+			"content_bytes":   len(passages[i]),
 		})
 	}
 	return out

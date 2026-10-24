@@ -737,7 +737,7 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	params typesLocal.RetrieveParams,
 ) ([]*typesLocal.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[ElasticsearchV7] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
+	log.Infof("[ElasticsearchV7] Keywords retrieval: query_len=%d, topK=%d", len(params.Query), params.TopK)
 
 	// Build search query
 	query, err := e.buildKeywordSearchQuery(ctx, params)
@@ -778,7 +778,7 @@ func (e *elasticsearchRepository) buildKeywordSearchQuery(ctx context.Context,
 		string(content), filter,
 	)
 
-	log.Debugf("[ElasticsearchV7] Executing keyword search with query: %s", query)
+	log.Debugf("[ElasticsearchV7] Executing keyword search with topK: %d", params.TopK)
 	return query, nil
 }
 
