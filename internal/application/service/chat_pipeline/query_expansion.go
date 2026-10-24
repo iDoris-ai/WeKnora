@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -89,8 +90,9 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 				res, err := p.knowledgeBaseService.HybridSearch(ctx, t.KnowledgeBaseID, paramsExp)
 				if err != nil {
 					pipelineWarn(ctx, "Search", "expansion_error", map[string]interface{}{
-						"kb_id": t.KnowledgeBaseID,
-						"error": err.Error(),
+						"kb_id":      t.KnowledgeBaseID,
+						"error_len":  len(err.Error()),
+						"error_type": fmt.Sprintf("%T", err),
 					})
 					return
 				}

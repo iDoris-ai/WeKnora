@@ -204,7 +204,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				if response.ResponseType == types.ResponseTypeError {
 					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
 						"session_id": chatManage.SessionID,
-						"error":      response.Content,
+						"error_len":  len(response.Content),
 					})
 					eventBus.Emit(ctx, types.Event{
 						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
