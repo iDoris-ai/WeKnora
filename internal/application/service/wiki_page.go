@@ -184,9 +184,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 				logger.Warnf(ctx,
 					"wiki page write refused (rewrite dropped %d of %d distinct table row identities, "+
 						"ratio %.2f > limit %.2f): slug=%s source=%s content %d -> %d chars; "+
-						"keeping the stored version (e.g. %s)",
+						"keeping the stored version (examples_len=%d)",
 					len(missing), storedIdentities, lossRatio, lossLimit, page.Slug, source,
-					len(existing.Content), len(page.Content), examples)
+					len(existing.Content), len(page.Content), len(examples))
 				common.PipelineWarn(ctx, "WikiWrite", "page_write_dropped_table_rows", map[string]interface{}{
 					"slug":               page.Slug,
 					"source":             source,
@@ -194,7 +194,7 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 					"missing_identities": len(missing),
 					"loss_ratio":         lossRatio,
 					"loss_limit":         lossLimit,
-					"examples":           examples,
+					"examples_len":       len(examples),
 				})
 				// The refusal is an explicit error, not "the stored page came
 				// back unchanged": a successful write that changes nothing
