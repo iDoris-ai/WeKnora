@@ -247,8 +247,8 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 	topK, vectorThreshold, keywordThreshold := t.retrievalParams(retrievalLimit)
 	logger.Infof(ctx,
-		"[Tool][SearchKnowledge] query=%q mode=%s limit=%d top_k=%d targets=%d kbs=%d",
-		query, mode, limit, topK, len(searchTargets), len(kbIDs))
+		"[Tool][SearchKnowledge] query_len=%d mode=%s limit=%d top_k=%d targets=%d kbs=%d",
+		len(query), mode, limit, topK, len(searchTargets), len(kbIDs))
 
 	allResults, searchFailures, searchCalls, embedFallbacks := t.concurrentSearchByTargets(ctx, query, mode,
 		kbModes, searchTargets, kbList, topK, vectorThreshold, keywordThreshold, kbTypeMap)

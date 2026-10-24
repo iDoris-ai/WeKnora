@@ -499,7 +499,7 @@ func (e *AgentEngine) runToolCall(
 		executionName, executionArgs = target.Name, target.Args
 	}
 
-	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
+	logger.Debugf(ctx, "%s args_len=%d", toolTag, len(tc.Function.Arguments))
 
 	toolCallStartTime := time.Now()
 
@@ -605,7 +605,9 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	if err != nil {
-		logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
+		// Tool errors can quote the call's input (a regex query, MCP output), so
+		// the logs carry their length and type only (fork patch A24-OBS-03).
+		logger.Errorf(ctx, "%s Failed in %dms: error_type=%T error_len=%d", toolTag, duration, err, len(err.Error()))
 		toolCall.Result = &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),
@@ -633,7 +635,7 @@ func (e *AgentEngine) runToolCall(
 		"success":      toolSuccess,
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
-		pipelineFields["error"] = toolCall.Result.Error
+		pipelineFields["error_len"] = len(toolCall.Result.Error)
 	}
 	if err != nil {
 		common.PipelineError(ctx, "Agent", "tool_call_result", pipelineFields)
@@ -644,14 +646,10 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	if toolCall.Result != nil && toolCall.Result.Output != "" {
-		preview := toolCall.Result.Output
-		if len(preview) > 500 {
-			preview = preview[:500] + "... (truncated)"
-		}
-		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
+		logger.Debugf(ctx, "%s output_len=%d", toolTag, len(toolCall.Result.Output))
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
-		logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
+		logger.Debugf(ctx, "%s Tool error: error_len=%d", toolTag, len(toolCall.Result.Error))
 	}
 
 	return toolCall

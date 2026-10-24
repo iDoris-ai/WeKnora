@@ -207,7 +207,7 @@ func (t *SequentialThinkingTool) Execute(ctx context.Context, args json.RawMessa
 		t.branches[input.BranchID] = append(t.branches[input.BranchID], input)
 	}
 
-	logger.Debugf(ctx, "[Tool][SequentialThinking] %s", input.Thought)
+	logger.Debugf(ctx, "[Tool][SequentialThinking] thought_len=%d", len(input.Thought))
 
 	// Prepare response data
 	branchKeys := make([]string, 0, len(t.branches))

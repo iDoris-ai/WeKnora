@@ -535,12 +535,8 @@ func (e *AgentEngine) callLLMWithRetry(
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, tool_calls=%v",
 				round, i, msg.Role, len(msg.Content), tcNames)
 		} else {
-			preview := msg.Content
-			if len(preview) > 100 {
-				preview = preview[:100] + "..."
-			}
-			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, content=%s",
-				round, i, msg.Role, len(msg.Content), preview)
+			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d",
+				round, i, msg.Role, len(msg.Content))
 		}
 	}
 	common.PipelineInfo(ctx, "Agent", "think_start", map[string]interface{}{
@@ -651,11 +647,7 @@ func (e *AgentEngine) callLLMWithRetry(
 		}
 	}
 	if response.Content != "" {
-		preview := response.Content
-		if len(preview) > 300 {
-			preview = preview[:300] + "..."
-		}
-		logger.Debugf(ctx, "[Agent][Round-%d] LLM content preview:\n%s", round, preview)
+		logger.Debugf(ctx, "[Agent][Round-%d] LLM content_len=%d", round, len(response.Content))
 	}
 
 	return response, nil
