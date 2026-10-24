@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -223,15 +225,19 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 
 const deletedItemConnectorType = "test-sync-deletion"
 
-type deletedItemConnector struct{}
+type deletedItemConnector struct {
+	listErr error
+}
 
 func (deletedItemConnector) Type() string { return deletedItemConnectorType }
 func (deletedItemConnector) Validate(context.Context, *types.DataSourceConfig) error {
 	return nil
 }
 
-func (deletedItemConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
-	return nil, nil
+func (c deletedItemConnector) ListResources(
+	context.Context, *types.DataSourceConfig, string,
+) ([]types.Resource, error) {
+	return nil, c.listErr
 }
 
 func (deletedItemConnector) ResolveResourceAncestors(
@@ -772,4 +778,29 @@ func TestIngestItem_URLCreationMetadataAttachFailure(t *testing.T) {
 	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "attach datasource metadata")
+}
+
+func TestListAvailableResourcesLogOmitsSentinel(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	ds := &types.DataSource{ID: "ds-list", Type: deletedItemConnectorType}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(deletedItemConnector{
+		listErr: fmt.Errorf("list failed: %s", sentinel),
+	}))
+	svc := &DataSourceService{
+		dsRepo:            newKBDeleteDSRepo("kb-1", ds),
+		connectorRegistry: registry,
+	}
+	_, err := svc.ListAvailableResources(context.Background(), ds.ID, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), sentinel)
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "error_len=")
+	assert.Contains(t, logs, "error_type=")
 }

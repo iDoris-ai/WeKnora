@@ -414,7 +414,8 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			logger.Infof(ctx, "Running knowledge QA for question_len=%d", len(qaPair.Question))
 			err = e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
 			if err != nil {
-				logger.Errorf(ctx, "Failed to process question %d: %v", i, err)
+				logger.Errorf(ctx, "Failed to process question %d: error_len=%d error_type=%T",
+					i, len(err.Error()), err)
 				return err
 			}
 

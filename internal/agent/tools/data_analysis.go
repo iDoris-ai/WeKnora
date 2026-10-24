@@ -290,8 +290,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	if err := validateDataAnalysisSQL(input.SQL, schema); err != nil {
 		// Validation errors quote SQL identifiers; log their length only.
-		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: error_len=%d",
-			t.sessionID, len(err.Error()))
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: error_len=%d error_type=%T",
+			t.sessionID, len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),
@@ -403,7 +403,8 @@ func (t *DataAnalysisTool) executeSingleQuery(
 	rows, err := conn.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		// Engine errors quote the SQL (a missing column, the failing clause).
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: error_len=%d", len(err.Error()))
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 	defer rows.Close()
@@ -586,7 +587,10 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
 
 		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
-			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
+			logger.Errorf(ctx,
+				"[Tool][DataAnalysis] Failed to create table from Excel (sheet_count=%d): error_len=%d "+
+					"error_type=%T",
+				len(sheetNames), len(err.Error()), err)
 			return nil, fmt.Errorf("failed to create table from Excel file (sheets=%v): %w", sheetNames, err)
 		}
 		t.markTableLoaded(tableName)

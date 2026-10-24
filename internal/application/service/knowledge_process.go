@@ -4315,7 +4315,7 @@ func (s *knowledgeService) callDocReaderWithTimeout(
 		}
 		return nil, err
 	}
-	logger.Infof(ctx, "[convert] docreader call ok in %s for %q", elapsed, req.FileName)
+	logger.Infof(ctx, "[convert] docreader call ok in %s file_name_len=%d", elapsed, len(req.FileName))
 	return result, nil
 }
 

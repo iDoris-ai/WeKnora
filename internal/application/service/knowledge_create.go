@@ -39,11 +39,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		if fileName == "" {
 			fileName = file.Filename
 		}
-		logger.Infof(ctx, "Using custom filename: %s (original: %s, folder: %s)",
-			fileName, file.Filename, folderPath)
+		logger.Infof(ctx, "Using custom filename: file_name_len=%d (original_len=%d, folder_len=%d)",
+			len(fileName), len(file.Filename), len(folderPath))
 	}
 
-	logger.Infof(ctx, "Knowledge base ID: %s, file: %s", kbID, fileName)
+	logger.Infof(ctx, "Knowledge base ID: %s, file_name_len=%d", kbID, len(fileName))
 
 	if IsVideoType(getFileType(fileName)) {
 		logger.Error(ctx, "Video file upload is not supported")
@@ -70,7 +70,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// Early reject before the whole-file hash below. resolveFileImportProcessConfig
 	// gates the same extension set, but this path must keep returning
 	// ErrInvalidFileType rather than the shared gate's localized message.
-	logger.Infof(ctx, "Checking file type: %s", fileName)
+	logger.Infof(ctx, "Checking file type: ext=%s", getFileType(fileName))
 	if !isValidFileType(fileName) {
 		logger.Error(ctx, "Invalid file type")
 		return nil, ErrInvalidFileType
@@ -112,7 +112,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, err
 	}
 	if exists {
-		logger.Infof(ctx, "File already exists: %s", fileName)
+		logger.Infof(ctx, "File already exists: file_name_len=%d", len(fileName))
 		// Update creation time for existing knowledge
 		if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
 			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
@@ -142,7 +142,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// 验证文件名安全性
 	safeFilename, isValid := secutils.ValidateInput(fileName)
 	if !isValid {
-		logger.Errorf(ctx, "Invalid filename: %s", fileName)
+		logger.Errorf(ctx, "Invalid filename: file_name_len=%d", len(fileName))
 		return nil, werrors.NewValidationError("文件名包含非法字符")
 	}
 
@@ -558,7 +558,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	if fileName != "" {
 		safeFilename, ok := secutils.ValidateInput(fileName)
 		if !ok {
-			logger.Errorf(ctx, "Invalid filename: %s", fileName)
+			logger.Errorf(ctx, "Invalid filename: file_name_len=%d", len(fileName))
 			return nil, werrors.NewValidationError("文件名包含非法字符")
 		}
 		fileName = safeFilename

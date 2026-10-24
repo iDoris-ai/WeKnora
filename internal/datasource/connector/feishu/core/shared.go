@@ -333,8 +333,9 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 
 	blocks, err := client.listDocumentBlocks(ctx, in.ObjToken)
 	if err != nil {
-		logger.Warnf(ctx, "[Feishu] blocks API failed for %s (%s), falling back to export: error_len=%d error_type=%T",
-			in.Title, in.ObjToken, len(err.Error()), err)
+		logger.Warnf(ctx,
+			"[Feishu] blocks API failed for title_len=%d (%s), falling back to export: error_len=%d error_type=%T",
+			len(in.Title), in.ObjToken, len(err.Error()), err)
 		item, ferr := exportDocxFallback(ctx, client, in)
 		if ferr != nil {
 			return nil, ferr

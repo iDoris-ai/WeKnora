@@ -365,11 +365,13 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	displayFileName = secutils.SanitizeForLog(displayFileName)
 	if customFileName != "" {
 		displayFileName = customFileName
-		logger.Infof(ctx, "Using custom filename: %s (original: %s)", customFileName, displayFileName)
+		logger.Infof(ctx, "Using custom filename: file_name_len=%d (original_len=%d)",
+			len(customFileName), len(file.Filename))
 	}
 
-	logger.Infof(ctx, "File upload successful, filename: %s, size: %.2f KB", displayFileName, float64(file.Size)/1024)
-	logger.Infof(ctx, "Creating knowledge, knowledge base ID: %s, filename: %s", kbID, displayFileName)
+	logger.Infof(ctx, "File upload successful, file_name_len=%d, size: %.2f KB",
+		len(displayFileName), float64(file.Size)/1024)
+	logger.Infof(ctx, "Creating knowledge, knowledge base ID: %s, file_name_len=%d", kbID, len(displayFileName))
 
 	// Parse metadata if provided
 	var metadata map[string]string
@@ -509,9 +511,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Received URL request: %s, file_name: %s, file_type: %s",
-		secutils.SanitizeForLog(req.URL),
-		secutils.SanitizeForLog(req.FileName),
+	logger.Infof(ctx, "Received URL request: %s, file_name_len=%d, file_type: %s",
+		secutils.RedactURL(req.URL),
+		len(req.FileName),
 		secutils.SanitizeForLog(req.FileType),
 	)
 

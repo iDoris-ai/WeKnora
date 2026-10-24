@@ -112,6 +112,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		pipelineWarn(ctx, "DataAnalysis", "analysis_failed", map[string]interface{}{
 			"knowledge_id": knowledge.ID,
 			"error_len":    len(err.Error()),
+			"error_type":   fmt.Sprintf("%T", err),
 		})
 		return next()
 	}
