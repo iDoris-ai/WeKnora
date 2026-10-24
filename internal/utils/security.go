@@ -490,10 +490,11 @@ func RedactQueryValues(raw string) string {
 }
 
 // RedactURL returns raw for a log line: userinfo and fragment dropped, every query value replaced by "***"
-// (RedactQueryValues). An unparsable URL becomes "[invalid url omitted]".
+// (RedactQueryValues). A URL that does not parse, or has no host (no scheme: "u:pw@host" parses as opaque),
+// becomes "[invalid url omitted]".
 func RedactURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || u.Host == "" {
 		return "[invalid url omitted]"
 	}
 	u.User = nil
