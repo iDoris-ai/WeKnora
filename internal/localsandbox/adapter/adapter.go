@@ -132,8 +132,8 @@ func executeResult(ctx context.Context, sessionID string, res *localsandbox.RunR
 	if res.Denial.IsDenied() {
 		// A denial is a normal, reportable outcome: the model must see why the
 		// command failed so it can choose a path inside the workspace.
-		logger.Warnf(ctx, "[LocalSandbox] exec denied session=%s reason=%d path=%q",
-			sessionID, res.Denial.Reason, res.Denial.Path)
+		logger.Warnf(ctx, "[LocalSandbox] exec denied session=%s reason=%d path_len=%d",
+			sessionID, res.Denial.Reason, len(res.Denial.Path))
 		out.Stderr += "\n[sandbox] denied by workspace policy"
 	}
 	return out
