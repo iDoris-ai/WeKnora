@@ -10,7 +10,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // maxRetrievalPoolSize bounds every retrieval depth derived from MatchCount:
@@ -161,11 +160,8 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 		searchKBIDs = []string{id}
 	}
 
-	// QueryText is user-controlled; sanitize before logging to prevent
-	// CR/LF/tab log injection. Matches the handler-layer sanitization at
-	// handler/knowledgebase.go.
-	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s",
-		searchKBIDs, secutils.SanitizeForLog(params.QueryText))
+	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query_len=%d",
+		searchKBIDs, len(params.QueryText))
 
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 
@@ -267,20 +263,8 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	// only) and a langfuse span around the entire retrieve step.
 	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))
 	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "retrieve",
-		Input: map[string]interface{}{
-			"query_text":             params.QueryText,
-			"kb_ids":                 searchKBIDs,
-			"knowledge_ids":          params.KnowledgeIDs,
-			"tag_ids":                params.TagIDs,
-			"scope_tag_ids":          params.ScopeTagIDs,
-			"match_count":            matchCount,
-			"vector_threshold":       params.VectorThreshold,
-			"keyword_threshold":      params.KeywordThreshold,
-			"disable_vector_match":   params.DisableVectorMatch,
-			"disable_keywords_match": params.DisableKeywordsMatch,
-			"group_count":            len(groups),
-		},
+		Name:  "retrieve",
+		Input: retrieveSpanInput(params, searchKBIDs, matchCount, len(groups)),
 		Metadata: map[string]interface{}{
 			"primary_kb_id":       kb.ID,
 			"primary_kb_type":     string(kb.Type),
@@ -293,7 +277,7 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_ids": searchKBIDs,
-			"query_text":         params.QueryText,
+			"query_len":          len(params.QueryText),
 		})
 		return nil, err
 	}
@@ -553,7 +537,7 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	logger.Info(ctx, "Starting to generate query embedding")
 	queryEmbedding, err := embeddingModel.Embed(types.WithEmbedQuery(ctx), params.QueryText)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
+		logger.Errorf(ctx, "Failed to embed query text, query_len=%d, error: %v", len(params.QueryText), err)
 		return nil, err
 	}
 	if err := validateQueryEmbeddingDimension(embeddingModel, len(queryEmbedding)); err != nil {
@@ -562,4 +546,22 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	}
 	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
 	return queryEmbedding, nil
+}
+
+// retrieveSpanInput is the retrieve span's input (fork patch A24-OBS-02): the
+// query as a byte length, so its text stays out of tracing.
+func retrieveSpanInput(params types.SearchParams, kbIDs []string, matchCount, groupCount int) map[string]interface{} {
+	return map[string]interface{}{
+		"query_len":              len(params.QueryText),
+		"kb_ids":                 kbIDs,
+		"knowledge_ids":          params.KnowledgeIDs,
+		"tag_ids":                params.TagIDs,
+		"scope_tag_ids":          params.ScopeTagIDs,
+		"match_count":            matchCount,
+		"vector_threshold":       params.VectorThreshold,
+		"keyword_threshold":      params.KeywordThreshold,
+		"disable_vector_match":   params.DisableVectorMatch,
+		"disable_keywords_match": params.DisableKeywordsMatch,
+		"group_count":            groupCount,
+	}
 }

@@ -609,7 +609,10 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		return nil, fmt.Errorf("FTS5 query failed: %w", err)
 	}
 
-	logger.GetLogger(ctx).Infof("[SQLite] keywordsRetrieve: query=%q, ftsQuery=%q, matched=%d rows", params.Query, ftsQuery, len(rows))
+	logger.GetLogger(ctx).Infof(
+		"[SQLite] keywordsRetrieve: query_len=%d, fts_query_len=%d, matched=%d rows",
+		len(params.Query), len(ftsQuery), len(rows),
+	)
 
 	items := make([]*types.IndexWithScore, len(rows))
 	for i, row := range rows {
@@ -618,8 +621,8 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		// to make it positive and human-readable.
 		score := row.Score
 
-		logger.GetLogger(ctx).Infof("[SQLite] keywordsRetrieve: #%d chunk_id=%s, score=%.4f, content_preview=%.60s",
-			i+1, row.ChunkID, score, row.Content)
+		logger.GetLogger(ctx).Infof("[SQLite] keywordsRetrieve: #%d chunk_id=%s, score=%.4f, content_bytes=%d",
+			i+1, row.ChunkID, score, len(row.Content))
 
 		items[i] = &types.IndexWithScore{
 			ID:              fmt.Sprintf("%d", row.ID),
@@ -719,8 +722,10 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 			continue
 		}
 
-		logger.GetLogger(ctx).Infof("[SQLite] vectorRetrieve: #%d chunk_id=%s, distance=%.4f, score=%.4f, content_preview=%.60s",
-			i+1, v.ChunkID, v.Distance, score, v.Content)
+		logger.GetLogger(ctx).Infof(
+			"[SQLite] vectorRetrieve: #%d chunk_id=%s, distance=%.4f, score=%.4f, content_bytes=%d",
+			i+1, v.ChunkID, v.Distance, score, len(v.Content),
+		)
 
 		items = append(items, &types.IndexWithScore{
 			ID:              fmt.Sprintf("%d", v.Rowid),

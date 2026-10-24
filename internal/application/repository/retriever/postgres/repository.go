@@ -190,7 +190,10 @@ func (g *pgRepository) Retrieve(ctx context.Context, params types.RetrieveParams
 func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
-	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
+	logger.GetLogger(ctx).Infof(
+		"[Postgres] Keywords retrieval: query_len=%d, topK=%d",
+		len(params.Query), params.TopK,
+	)
 	conds := make([]clause.Expression, 0)
 
 	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
@@ -250,11 +253,6 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		}).
 		Limit(int(params.TopK)).
 		Find(&embeddingDBList).Error
-
-	if err == gorm.ErrRecordNotFound {
-		logger.GetLogger(ctx).Warnf("[Postgres] No records found for keywords query: %s", params.Query)
-		return nil, nil
-	}
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Keywords retrieval failed: %v", err)
 		return nil, err
