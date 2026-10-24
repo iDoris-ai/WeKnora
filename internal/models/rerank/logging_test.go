@@ -11,7 +11,7 @@ func TestBuildRerankRequestDebugOmitsText(t *testing.T) {
 	query := "find " + sentinel
 	documents := []string{"doc " + sentinel, "second"}
 
-	got := buildRerankRequestDebug("model", "https://example.test", query, documents)
+	got := buildRerankRequestDebug("model", "https://u:"+sentinel+"@example.test?key="+sentinel, query, documents)
 	if strings.Contains(got, sentinel) {
 		t.Fatalf("rerank log contains text: %s", got)
 	}

@@ -263,20 +263,8 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	// only) and a langfuse span around the entire retrieve step.
 	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))
 	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "retrieve",
-		Input: map[string]interface{}{
-			"query_len":              len(params.QueryText),
-			"kb_ids":                 searchKBIDs,
-			"knowledge_ids":          params.KnowledgeIDs,
-			"tag_ids":                params.TagIDs,
-			"scope_tag_ids":          params.ScopeTagIDs,
-			"match_count":            matchCount,
-			"vector_threshold":       params.VectorThreshold,
-			"keyword_threshold":      params.KeywordThreshold,
-			"disable_vector_match":   params.DisableVectorMatch,
-			"disable_keywords_match": params.DisableKeywordsMatch,
-			"group_count":            len(groups),
-		},
+		Name:  "retrieve",
+		Input: retrieveSpanInput(params, searchKBIDs, matchCount, len(groups)),
 		Metadata: map[string]interface{}{
 			"primary_kb_id":       kb.ID,
 			"primary_kb_type":     string(kb.Type),
@@ -558,4 +546,22 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	}
 	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
 	return queryEmbedding, nil
+}
+
+// retrieveSpanInput is the retrieve span's input (fork patch A24-OBS-02): the
+// query as a byte length, so its text stays out of tracing.
+func retrieveSpanInput(params types.SearchParams, kbIDs []string, matchCount, groupCount int) map[string]interface{} {
+	return map[string]interface{}{
+		"query_len":              len(params.QueryText),
+		"kb_ids":                 kbIDs,
+		"knowledge_ids":          params.KnowledgeIDs,
+		"tag_ids":                params.TagIDs,
+		"scope_tag_ids":          params.ScopeTagIDs,
+		"match_count":            matchCount,
+		"vector_threshold":       params.VectorThreshold,
+		"keyword_threshold":      params.KeywordThreshold,
+		"disable_vector_match":   params.DisableVectorMatch,
+		"disable_keywords_match": params.DisableKeywordsMatch,
+		"group_count":            groupCount,
+	}
 }

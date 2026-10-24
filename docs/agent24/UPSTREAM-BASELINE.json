@@ -336,7 +336,7 @@
         {
           "id": "A24-OBS-02",
           "issue": "iDoris-ai/WeKnora#40",
-          "summary": "服务端默认不记正文与凭据第 2 片（KB-OBS-01）：检索路径 handler、service、repository 的 query 与命中正文日志改记长度，LLM 请求日志只记字节数，rerank 调试日志与检索路径的 Langfuse 属性只记长度，删除 postgres 一处死代码",
+          "summary": "服务端默认不记正文与凭据第 2 片（KB-OBS-01）：检索路径 handler、service、repository 的 query 与命中正文日志改记长度，LLM 请求日志只记字节数，rerank 调试日志与检索路径的 Langfuse 属性只记长度，删除 postgres 一处死代码，ES v7/v8 检索失败的错误只带状态码与错误类型，LLM 与 rerank 日志的 endpoint 去掉 userinfo、查询值打码",
           "upstream_commit": null,
           "paths": [
             "internal/application/repository/retriever/elasticsearch/v7/repository.go",
@@ -361,13 +361,17 @@
             "internal/application/service/knowledgebase_search_log_test.go",
             "internal/models/api/log_request_test.go",
             "internal/models/rerank/logging_test.go",
-            "internal/tracing/langfuse/retrieval_obs_log_test.go"
+            "internal/tracing/langfuse/retrieval_obs_log_test.go",
+            "internal/utils/security.go",
+            "internal/utils/redact_query_test.go",
+            "internal/application/repository/retriever/elasticsearch/v7/error_summary_test.go",
+            "internal/application/repository/retriever/elasticsearch/v8/search_error_test.go"
           ],
           "remove_when": "上游默认不记正文后撤掉（可回馈上游）；否则长期保留",
           "added_on": "2026-10-24"
         }
       ],
-      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-24 有十八项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，6 个路径）、A24-KB-02（iDoris-ai/WeKnora#37，11 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）、A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）、A24-KB-06（iDoris-ai/WeKnora#38，5 个路径）、A24-KB-07（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-08（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-09（iDoris-ai/WeKnora#38，9 个路径）、A24-KB-10（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-11（iDoris-ai/WeKnora#63，6 个路径）、A24-KB-12（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-13（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-14（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-15（iDoris-ai/WeKnora#38，19 个路径）、A24-OBS-01（iDoris-ai/WeKnora#40，14 个路径）、A24-OBS-02（iDoris-ai/WeKnora#40，23 个路径）；各项路径可以重叠（后一项改了前一项登记过的文件时两边都列）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
+      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-24 有十八项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，6 个路径）、A24-KB-02（iDoris-ai/WeKnora#37，11 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）、A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）、A24-KB-06（iDoris-ai/WeKnora#38，5 个路径）、A24-KB-07（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-08（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-09（iDoris-ai/WeKnora#38，9 个路径）、A24-KB-10（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-11（iDoris-ai/WeKnora#63，6 个路径）、A24-KB-12（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-13（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-14（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-15（iDoris-ai/WeKnora#38，19 个路径）、A24-OBS-01（iDoris-ai/WeKnora#40，14 个路径）、A24-OBS-02（iDoris-ai/WeKnora#40，27 个路径）；各项路径可以重叠（后一项改了前一项登记过的文件时两边都列）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
     },
     "absorbed_upstream_release": {
       "tag": "v0.8.3",

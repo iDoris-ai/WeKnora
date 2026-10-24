@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	stderrors "errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -58,10 +59,24 @@ func TestHybridSearchLogsQueryLengthNotText(t *testing.T) {
 	_, err = svc.HybridSearch(ctx, kb.ID, params)
 	require.Error(t, err)
 
+	// A retrieve failure reaches the ErrorWithFields line after the fan-out.
+	svc.modelService = &imageRecallModels{model: &scriptedEmbedder{}}
+	engine.cannedErr = stderrors.New("simulated retrieve failure")
+	_, err = svc.HybridSearch(ctx, kb.ID, params)
+	require.Error(t, err)
+
 	logs := buf.String()
 	require.NotContains(t, logs, sentinel)
 	require.Contains(t, logs, "query_len=")
 	require.Contains(t, logs, "Failed to embed query text")
+	require.Contains(t, logs, "simulated retrieve failure")
+}
+
+func TestRetrieveSpanInputOmitsQueryText(t *testing.T) {
+	params := types.SearchParams{QueryText: "find S3NT1NEL", KnowledgeIDs: []string{"k-1"}}
+	input := retrieveSpanInput(params, []string{"kb-1"}, 3, 1)
+	require.Equal(t, len(params.QueryText), input["query_len"])
+	require.NotContains(t, fmt.Sprint(input), "S3NT1NEL")
 }
 
 // hybridSearchLogRepo returns one KB. The package's fakeKBRepo answers

@@ -489,6 +489,19 @@ func RedactQueryValues(raw string) string {
 	return values.Encode()
 }
 
+// RedactURL returns raw for a log line: userinfo and fragment dropped, every query value replaced by "***"
+// (RedactQueryValues). An unparsable URL becomes "[invalid url omitted]".
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "[invalid url omitted]"
+	}
+	u.User = nil
+	u.RawQuery = RedactQueryValues(u.RawQuery)
+	u.Fragment, u.RawFragment = "", ""
+	return u.String()
+}
+
 // SanitizeForLog 清理日志输入,防止日志注入攻击
 // 日志注入攻击是指攻击者通过在输入中插入换行符和其他控制字符,
 // 伪造日志条目,可能导致日志分析工具误判或隐藏恶意活动

@@ -24,11 +24,12 @@ func TestLogRequestOmitsBody(t *testing.T) {
 		logger.SetLogLevel(logLevelFromEnv())
 	})
 
-	LogRequest(context.Background(), "https://example.test/v1", "m", body, true)
+	LogRequest(context.Background(), "https://u:"+sentinel+"@example.test/v1?key="+sentinel, "m", body, true)
 
 	logs := buf.String()
 	require.NotContains(t, logs, sentinel)
 	require.Contains(t, logs, fmt.Sprintf("request_bytes=%d", len(body)))
+	require.Contains(t, logs, "endpoint=https://example.test/v1?key=%2A%2A%2A")
 }
 
 func logLevelFromEnv() logger.LogLevel {

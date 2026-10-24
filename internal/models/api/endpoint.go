@@ -243,8 +243,9 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 }
 
 // LogRequest emits the standard request log line. The body is recorded as a
-// byte length so prompts stay out of this log.
+// byte length so prompts stay out of this log, and the endpoint loses its
+// userinfo and query values (some vendors take the API key there).
 func LogRequest(ctx context.Context, url, model string, body []byte, stream bool) {
 	logger.Infof(ctx, "[LLM Request] endpoint=%s, model=%s, stream=%v, request_bytes=%d",
-		url, model, stream, len(body))
+		secutils.RedactURL(url), model, stream, len(body))
 }

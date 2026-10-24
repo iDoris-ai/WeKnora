@@ -3,6 +3,7 @@ package v8
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -486,6 +487,16 @@ func (e *elasticsearchRepository) buildVectorScriptScoreQuery(
 	}, nil
 }
 
+// esSearchError keeps only the status and error type of a failed search (fork patch A24-OBS-02): the
+// reason can echo the query ("failed to create query: ..."), and this error reaches logs and tracing.
+func esSearchError(err error) error {
+	var esErr *types.ElasticsearchError
+	if !errors.As(err, &esErr) {
+		return err
+	}
+	return &types.ElasticsearchError{Status: esErr.Status, ErrorCause: types.ErrorCause{Type: esErr.ErrorCause.Type}}
+}
+
 // VectorRetrieve performs vector similarity search using cosine similarity
 // Returns a slice of RetrieveResult containing matching documents
 func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
@@ -513,6 +524,7 @@ func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
 		Source_: sourceFilter,
 	}).Do(ctx)
 	if err != nil {
+		err = esSearchError(err)
 		log.Errorf("[Elasticsearch] Vector search failed: %v", err)
 		return nil, err
 	}
@@ -575,6 +587,7 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 		Source_: sourceFilter,
 	}).Do(ctx)
 	if err != nil {
+		err = esSearchError(err)
 		log.Errorf("[Elasticsearch] Keywords search failed: %v", err)
 		return nil, err
 	}
