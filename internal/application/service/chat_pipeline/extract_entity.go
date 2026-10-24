@@ -265,7 +265,8 @@ func (e *Extractor) RemoveUnknownRelation(ctx context.Context, graph *types.Grap
 		if _, ok := relationType[relation.Type]; ok {
 			relationNew = append(relationNew, relation)
 		} else {
-			logger.Infof(ctx, "Unknown relation type %s with %v, ignore it", relation.Type, e.template.Tags)
+			logger.Infof(ctx, "Unknown relation type (type_len=%d, %d tags), ignore it",
+				len(relation.Type), len(e.template.Tags))
 		}
 	}
 	graph.Relation = relationNew
