@@ -395,7 +395,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 		qaPair := qaPair
 		i := i
 		g.Go(func() error {
-			logger.Infof(ctx, "Processing QA pair %d, question: %s", i, qaPair.Question)
+			logger.Infof(ctx, "Processing QA pair %d, question_len=%d", i, len(qaPair.Question))
 
 			// Prepare chat management parameters for this QA pair
 			chatManage := detail.Params.Clone()
@@ -411,7 +411,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			}
 
 			// Execute knowledge QA pipeline
-			logger.Infof(ctx, "Running knowledge QA for question: %s", qaPair.Question)
+			logger.Infof(ctx, "Running knowledge QA for question_len=%d", len(qaPair.Question))
 			err = e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
 			if err != nil {
 				logger.Errorf(ctx, "Failed to process question %d: %v", i, err)

@@ -140,29 +140,29 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 		}, fmt.Errorf("missing sql parameter")
 	}
 
-	logger.Infof(ctx, "[Tool][DatabaseQuery] Original SQL query:\n%s", input.SQL)
+	logger.Infof(ctx, "[Tool][DatabaseQuery] Original SQL query: sql_len=%d", len(input.SQL))
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Tenant ID: %d", tenantID)
 
 	// Validate and secure the SQL query
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Validating and securing SQL...")
 	securedSQL, err := t.validateAndSecureSQL(input.SQL, tenantID)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: %v", err)
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: error_len=%d", len(err.Error()))
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("SQL validation failed: %v", err),
 		}, err
 	}
 
-	logger.Infof(ctx, "[Tool][DatabaseQuery] Secured SQL query:\n%s", securedSQL)
-	logger.Infof(ctx, "Executing secured SQL query - original: %s, secured: %s, tenant_id: %d",
-		input.SQL, securedSQL, tenantID)
+	logger.Infof(ctx, "[Tool][DatabaseQuery] Secured SQL query: sql_len=%d", len(securedSQL))
+	logger.Infof(ctx, "Executing secured SQL query - original sql_len=%d, secured sql_len=%d, tenant_id: %d",
+		len(input.SQL), len(securedSQL), tenantID)
 
 	// Execute the query
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Executing query against database...")
 	rows, err := t.db.WithContext(ctx).Raw(securedSQL).Rows()
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DatabaseQuery] Query execution failed: %v", err)
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] Query execution failed: error_len=%d", len(err.Error()))
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Query execution failed: %v", err),
@@ -221,15 +221,6 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Retrieved %d rows with %d columns", len(results), len(columns))
-	logger.Debugf(ctx, "[Tool][DatabaseQuery] Columns: %v", columns)
-
-	// Log first few rows for debugging
-	if len(results) > 0 {
-		logger.Debugf(ctx, "[Tool][DatabaseQuery] First row sample:")
-		for key, value := range results[0] {
-			logger.Debugf(ctx, "[Tool][DatabaseQuery]   %s: %v", key, value)
-		}
-	}
 
 	// Format output
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Formatting query results...")

@@ -1299,7 +1299,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned unusable content")
 		return nil, err
 	}
-	logger.GetLogger(ctx).WithField("summary", result.Summary).
+	logger.GetLogger(ctx).WithField("summary_len", len(result.Summary)).
 		WithField("has_profile", result.Profile != nil).Infof("GetSummary success")
 	return result, nil
 }
@@ -3899,7 +3899,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 					logger.Warnf(ctx, "Failed to update knowledge title from extracted page title: %v", err)
 				} else {
-					logger.Infof(ctx, "Updated knowledge title to extracted page title: %s", extractedTitle)
+					logger.Infof(ctx, "Updated knowledge title to extracted page title (title_len=%d)",
+						len(extractedTitle))
 				}
 			}
 		}

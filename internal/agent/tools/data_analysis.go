@@ -267,7 +267,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.SQL, schema); len(fixes) > 0 {
-		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
+		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote %d SQL identifiers for session %s",
+			len(fixes), t.sessionID)
 		input.SQL = rewrittenSQL
 	}
 
@@ -277,7 +278,9 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	if !isReadOnly {
 		// Reject modification queries
-		logger.Warnf(ctx, "[Tool][DataAnalysis] Modification query rejected for session %s: %s", t.sessionID, input.SQL)
+		logger.Warnf(ctx,
+			"[Tool][DataAnalysis] Modification query rejected for session %s: sql_len=%d",
+			t.sessionID, len(input.SQL))
 		return &types.ToolResult{
 			Success: false,
 			Error: "DuckDB tool only supports read-only SELECT queries. " +
@@ -286,14 +289,16 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	if err := validateDataAnalysisSQL(input.SQL, schema); err != nil {
-		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, err)
+		// Validation errors quote SQL identifiers; log their length only.
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: error_len=%d",
+			t.sessionID, len(err.Error()))
 		return &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),
 		}, err
 	}
 
-	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.SQL)
+	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: sql_len=%d", t.sessionID, len(input.SQL))
 	// Execute single query and get results
 	results, err := t.executeSingleQuery(ctx, input.SQL, schema.TableName)
 	if err != nil {
@@ -397,7 +402,8 @@ func (t *DataAnalysisTool) executeSingleQuery(
 
 	rows, err := conn.QueryContext(ctx, sqlQuery)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: %v", err)
+		// Engine errors quote the SQL (a missing column, the failing clause).
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: error_len=%d", len(err.Error()))
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 	defer rows.Close()

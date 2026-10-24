@@ -554,7 +554,9 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 		if chunk, exists := existingStdQToChunk[standardQ]; exists {
 			// 标准问在 KB 中已存在 → 标记为合并候选
 			mergeChunkMap[i] = chunk
-			logger.Infof(ctx, "FAQ entry %d: standard question '%s' exists in KB, marking as merge candidate (chunk_id=%s)", i, standardQ, chunk.ID)
+			logger.Infof(ctx,
+				"FAQ entry %d: standard_question_len=%d exists in KB, marking as merge candidate (chunk_id=%s)",
+				i, len(standardQ), chunk.ID)
 		} else if conflictChunkID, hit := existingQuestionToChunkID[standardQ]; hit {
 			// 标准问未与任何已有标准问重复，但撞上了 KB 中其他条目的相似问
 			// → 前置校验失败，避免下游 calculateAppendOperations 静默丢弃导致统计失真
@@ -566,8 +568,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			fe.FailureType = "pre_validation"
 			progress.FailedEntries = append(progress.FailedEntries, fe)
 			logger.Infof(ctx,
-				"FAQ entry %d: standard question '%s' conflicts with existing similar question of chunk_id=%s (std='%s')",
-				i, standardQ, conflictChunkID, conflictStdQ)
+				"FAQ entry %d: standard_question_len=%d conflicts with existing similar question of chunk_id=%s",
+				i, len(standardQ), conflictChunkID)
 			continue
 		}
 
@@ -741,7 +743,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			fe := buildFAQFailedEntry(i, reason, entry)
 			fe.FailureType = "post_validation"
 			progress.FailedEntries = append(progress.FailedEntries, fe)
-			logger.Infof(ctx, "FAQ entry %d: post-validation failed, conflicting negatives after merge: %v", i, conflictingNegatives)
+			logger.Infof(ctx, "FAQ entry %d: post-validation failed, conflicting negatives after merge: %d",
+				i, len(conflictingNegatives))
 		} else {
 			mergeCount++
 		}
@@ -868,13 +871,17 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			// 相似问校验：对比所有标准问+相似问 → 单条问法失败「相似问冲突」
 			// 如果该相似问与其他条目的标准问或相似问冲突（且不是自己的标准问），则移除
 			if firstIdx, exists := batchAllQuestions[q]; exists && firstIdx != i {
-				logger.Infof(ctx, "FAQ entry %d: similar question '%s' conflicts with entry %d, removing", i, q, firstIdx+1)
+				logger.Infof(ctx,
+					"FAQ entry %d: similar_question_len=%d conflicts with entry %d, removing",
+					i, len(q), firstIdx+1)
 				removedSimilarQuestions = append(removedSimilarQuestions, fmt.Sprintf(`「相似问冲突」："%s"与第 %d 行"标准问/相似问"冲突`, q, firstIdx+1))
 				continue
 			}
 			// 相似问不能与自己的标准问相同
 			if q == standardQ {
-				logger.Infof(ctx, "FAQ entry %d: similar question '%s' same as standard question, removing", i, q)
+				logger.Infof(ctx,
+					"FAQ entry %d: similar_question_len=%d same as standard question, removing",
+					i, len(q))
 				removedSimilarQuestions = append(removedSimilarQuestions, fmt.Sprintf(`「相似问冲突」："%s"与本条"标准问"冲突`, q))
 				continue
 			}
@@ -919,7 +926,9 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			}
 			// 反例校验：对比当前QA下所有标准问+相似问 → 单条问法失败「反例冲突」
 			if currentQAQuestions[q] {
-				logger.Infof(ctx, "FAQ entry %d: negative question '%s' conflicts with current QA's questions, removing", i, q)
+				logger.Infof(ctx,
+					"FAQ entry %d: negative_question_len=%d conflicts with current QA's questions, removing",
+					i, len(q))
 				removedNegativeQuestions = append(removedNegativeQuestions, fmt.Sprintf(`「反例冲突」："%s"与本条"标准问/相似问"冲突`, q))
 				continue
 			}
@@ -1087,7 +1096,9 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 				answerStrategyChanged := meta.AnswerStrategy != existingMeta.AnswerStrategy
 				if existingChunk.ContentHash == newHash && !enabledChanged && !recommendedChanged && !answerStrategyChanged {
 					skippedCount++
-					logger.Infof(ctx, "Skipping merge for unchanged FAQ entry: %s", meta.StandardQuestion)
+					logger.Infof(ctx,
+						"Skipping merge for unchanged FAQ entry: standard_question_len=%d",
+						len(meta.StandardQuestion))
 					continue
 				}
 
@@ -1137,9 +1148,9 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		if existingQuestions[meta.StandardQuestion] || batchQuestions[meta.StandardQuestion] {
 			skippedCount++
 			logger.Warnf(ctx,
-				"calculateAppendOperations: dropping FAQ entry with duplicate standard question %q "+
-					"(should have been filtered at validation); entry_idx=%d",
-				meta.StandardQuestion, entryIdx)
+				"calculateAppendOperations: dropping FAQ entry with duplicate standard question "+
+					"(should have been filtered at validation); standard_question_len=%d entry_idx=%d",
+				len(meta.StandardQuestion), entryIdx)
 			continue
 		}
 
@@ -1194,7 +1205,9 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		// 检查标准问是否在同批次中重复
 		if batchQuestions[meta.StandardQuestion] {
 			batchSkippedCount++
-			logger.Infof(ctx, "Skipping FAQ entry with duplicate standard question in batch: %s", meta.StandardQuestion)
+			logger.Infof(ctx,
+				"Skipping FAQ entry with duplicate standard question in batch: standard_question_len=%d",
+				len(meta.StandardQuestion))
 			continue
 		}
 
@@ -1203,7 +1216,10 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		for _, q := range meta.SimilarQuestions {
 			if batchQuestions[q] {
 				hasDuplicateSimilar = true
-				logger.Infof(ctx, "Skipping FAQ entry with duplicate similar question in batch: %s (standard: %s)", q, meta.StandardQuestion)
+				logger.Infof(ctx,
+					"Skipping FAQ entry with duplicate similar question in batch: "+
+						"similar_question_len=%d (standard_question_len=%d)",
+					len(q), len(meta.StandardQuestion))
 				break
 			}
 		}
@@ -1966,13 +1982,14 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 
 	// 输出详细的变化日志
 	if len(deletedQuestions) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleted similar questions: %v", deletedQuestions)
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleted similar questions: %d", len(deletedQuestions))
 	}
 	if len(addedQuestions) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: added similar questions: %v", addedQuestions)
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: added similar questions: %d", len(addedQuestions))
 	}
 	if len(updatedQuestions) > 0 {
-		logger.Debugf(ctx, "incrementalIndexFAQEntry: updated similar questions (answers changed): %v", updatedQuestions)
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: updated similar questions (answers changed): %d",
+			len(updatedQuestions))
 	}
 
 	// 3. 删除不再存在的相似问索引，以及即将重建的旧索引。
