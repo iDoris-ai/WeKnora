@@ -147,7 +147,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Validating and securing SQL...")
 	securedSQL, err := t.validateAndSecureSQL(input.SQL, tenantID)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: %v", err)
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: error_len=%d", len(err.Error()))
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("SQL validation failed: %v", err),

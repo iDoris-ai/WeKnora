@@ -267,7 +267,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.SQL, schema); len(fixes) > 0 {
-		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
+		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote %d SQL identifiers for session %s",
+			len(fixes), t.sessionID)
 		input.SQL = rewrittenSQL
 	}
 
@@ -288,7 +289,9 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	if err := validateDataAnalysisSQL(input.SQL, schema); err != nil {
-		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, err)
+		// Validation errors quote SQL identifiers; log their length only.
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: error_len=%d",
+			t.sessionID, len(err.Error()))
 		return &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),

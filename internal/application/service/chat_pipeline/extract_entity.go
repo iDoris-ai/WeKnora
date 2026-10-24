@@ -151,7 +151,8 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	extractor := NewExtractor(model, template)
 	graph, err := extractor.Extract(ctx, query)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to extract entities, session_id: %s, error: %v", chatManage.SessionID, err)
+		logger.Errorf(ctx, "Failed to extract entities, session_id: %s, error_len=%d",
+			chatManage.SessionID, len(err.Error()))
 		return next()
 	}
 	nodes := []string{}
@@ -244,7 +245,8 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 			err = fmt.Errorf("graph extraction stopped before JSON (finish_reason=%q): %v",
 				chatResponse.FinishReason, err)
 		}
-		logger.Errorf(ctx, "failed to parse graph: %v", err)
+		// The error quotes the start of the model's answer.
+		logger.Errorf(ctx, "failed to parse graph: error_len=%d", len(err.Error()))
 		return nil, err
 	}
 	// e.RemoveUnknownRelation(ctx, graph)
