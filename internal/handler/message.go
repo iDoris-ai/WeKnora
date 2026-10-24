@@ -269,8 +269,8 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 		SessionIDs: request.SessionIDs,
 	}
 
-	logger.Infof(ctx, "Searching messages with params: query=%s, mode=%s, limit=%d, session_ids=%v",
-		params.Query, params.Mode, params.Limit, params.SessionIDs)
+	logger.Infof(ctx, "Searching messages with params: query_len=%d, mode=%s, limit=%d, session_ids=%v",
+		len(params.Query), params.Mode, params.Limit, params.SessionIDs)
 
 	result, err := h.MessageService.SearchMessages(ctx, params)
 	if err != nil {

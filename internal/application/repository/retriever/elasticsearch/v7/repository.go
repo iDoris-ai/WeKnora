@@ -737,7 +737,7 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	params typesLocal.RetrieveParams,
 ) ([]*typesLocal.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[ElasticsearchV7] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
+	log.Infof("[ElasticsearchV7] Keywords retrieval: query_len=%d, topK=%d", len(params.Query), params.TopK)
 
 	// Build search query
 	query, err := e.buildKeywordSearchQuery(ctx, params)
@@ -778,7 +778,7 @@ func (e *elasticsearchRepository) buildKeywordSearchQuery(ctx context.Context,
 		string(content), filter,
 	)
 
-	log.Debugf("[ElasticsearchV7] Executing keyword search with query: %s", query)
+	log.Debugf("[ElasticsearchV7] Executing keyword search with topK: %d", params.TopK)
 	return query, nil
 }
 
@@ -809,6 +809,20 @@ func (e *elasticsearchRepository) executeKeywordSearch(
 	return results, nil
 }
 
+// esErrorSummary describes a failed search by status and error type only (fork patch A24-OBS-02): the
+// error body can echo the query (parse errors quote it), and this text reaches logs and tracing.
+func esErrorSummary(response *esapi.Response) string {
+	var body struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if response.Body != nil {
+		_ = json.NewDecoder(response.Body).Decode(&body)
+	}
+	return fmt.Sprintf("status=%d error_type=%s", response.StatusCode, body.Error.Type)
+}
+
 // processSearchResponse Process search response
 func (e *elasticsearchRepository) processSearchResponse(ctx context.Context,
 	response *esapi.Response, retrieverType typesLocal.RetrieverType,
@@ -816,7 +830,7 @@ func (e *elasticsearchRepository) processSearchResponse(ctx context.Context,
 	log := logger.GetLogger(ctx)
 
 	if response.IsError() {
-		errMsg := fmt.Sprintf("failed to retrieve: %s", response.String())
+		errMsg := "failed to retrieve: " + esErrorSummary(response)
 		log.Errorf("[ElasticsearchV7] %s", errMsg)
 		return nil, errors.New(errMsg)
 	}

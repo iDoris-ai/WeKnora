@@ -43,3 +43,22 @@ func TestRedactQueryValues(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactURL(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{"https://user:pw@host.test/v1/rerank?key=abc#frag", "https://host.test/v1/rerank?key=%2A%2A%2A"},
+		{"https://host.test/v1", "https://host.test/v1"},
+		{"http://[::1", "[invalid url omitted]"},
+		{"u:S3NT1NEL@api.test/v1", "[invalid url omitted]"},
+		{"api.test/v1?key=S3NT1NEL", "[invalid url omitted]"},
+		{"sk-S3NT1NEL@api.test/v1", "[invalid url omitted]"},
+	}
+	for _, tt := range tests {
+		if got := RedactURL(tt.raw); got != tt.want {
+			t.Fatalf("RedactURL(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
