@@ -76,11 +76,11 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	}
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
-		"session_id":     chatManage.SessionID,
-		"rewrite_query":  chatManage.RewriteQuery,
-		"search_targets": len(chatManage.SearchTargets),
-		"tenant_id":      chatManage.TenantID,
-		"web_enabled":    chatManage.WebSearchEnabled,
+		"session_id":        chatManage.SessionID,
+		"rewrite_query_len": len(chatManage.RewriteQuery),
+		"search_targets":    len(chatManage.SearchTargets),
+		"tenant_id":         chatManage.TenantID,
+		"web_enabled":       chatManage.WebSearchEnabled,
 	})
 
 	// Run KB search and web search concurrently
@@ -196,8 +196,8 @@ func removeDuplicateResults(results []*types.SearchResult) []*types.SearchResult
 		if sig != "" {
 			if firstChunk, exists := contentSig[sig]; exists {
 				logger.Debugf(context.Background(),
-					"Dedup: chunk %s removed due to content signature (dup of %s, sig prefix: %.50s...)",
-					r.ID, firstChunk.ID, sig)
+					"Dedup: chunk %s removed due to content signature (dup of %s)",
+					r.ID, firstChunk.ID)
 				searchutil.InheritImageEvidence(firstChunk, r)
 				continue
 			}
@@ -585,7 +585,7 @@ func (p *PluginSearch) searchSingleTarget(
 		pipelineWarn(ctx, "Search", "kb_search_error", map[string]interface{}{
 			"kb_id":       t.KnowledgeBaseID,
 			"target_type": t.Type,
-			"query":       params.QueryText,
+			"query_len":   len(params.QueryText),
 			"error":       err.Error(),
 		})
 		return err

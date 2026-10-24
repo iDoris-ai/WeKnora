@@ -140,7 +140,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 		}, fmt.Errorf("missing sql parameter")
 	}
 
-	logger.Infof(ctx, "[Tool][DatabaseQuery] Original SQL query:\n%s", input.SQL)
+	logger.Infof(ctx, "[Tool][DatabaseQuery] Original SQL query: sql_len=%d", len(input.SQL))
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Tenant ID: %d", tenantID)
 
 	// Validate and secure the SQL query
@@ -154,9 +154,9 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 		}, err
 	}
 
-	logger.Infof(ctx, "[Tool][DatabaseQuery] Secured SQL query:\n%s", securedSQL)
-	logger.Infof(ctx, "Executing secured SQL query - original: %s, secured: %s, tenant_id: %d",
-		input.SQL, securedSQL, tenantID)
+	logger.Infof(ctx, "[Tool][DatabaseQuery] Secured SQL query: sql_len=%d", len(securedSQL))
+	logger.Infof(ctx, "Executing secured SQL query - original sql_len=%d, secured sql_len=%d, tenant_id: %d",
+		len(input.SQL), len(securedSQL), tenantID)
 
 	// Execute the query
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Executing query against database...")
@@ -222,14 +222,6 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Retrieved %d rows with %d columns", len(results), len(columns))
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Columns: %v", columns)
-
-	// Log first few rows for debugging
-	if len(results) > 0 {
-		logger.Debugf(ctx, "[Tool][DatabaseQuery] First row sample:")
-		for key, value := range results[0] {
-			logger.Debugf(ctx, "[Tool][DatabaseQuery]   %s: %v", key, value)
-		}
-	}
 
 	// Format output
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Formatting query results...")

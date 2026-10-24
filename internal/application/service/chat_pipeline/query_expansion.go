@@ -99,9 +99,9 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 						r.KnowledgeBaseID = t.KnowledgeBaseID
 					}
 					pipelineInfo(ctx, "Search", "expansion_hits", map[string]interface{}{
-						"kb_id": t.KnowledgeBaseID,
-						"query": q,
-						"hits":  len(res),
+						"kb_id":     t.KnowledgeBaseID,
+						"query_len": len(q),
+						"hits":      len(res),
 					})
 					muExp.Lock()
 					expResults = append(expResults, res...)

@@ -499,7 +499,7 @@ func (e *AgentEngine) runToolCall(
 		executionName, executionArgs = target.Name, target.Args
 	}
 
-	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
+	logger.Debugf(ctx, "%s args_len=%d", toolTag, len(tc.Function.Arguments))
 
 	toolCallStartTime := time.Now()
 
@@ -644,11 +644,7 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	if toolCall.Result != nil && toolCall.Result.Output != "" {
-		preview := toolCall.Result.Output
-		if len(preview) > 500 {
-			preview = preview[:500] + "... (truncated)"
-		}
-		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
+		logger.Debugf(ctx, "%s output_len=%d", toolTag, len(toolCall.Result.Output))
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
 		logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
