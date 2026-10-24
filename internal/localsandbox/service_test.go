@@ -445,6 +445,27 @@ func TestServiceRunLogOmitsCommandText(t *testing.T) {
 	require.Contains(t, logs, "command_len=")
 }
 
+// The denied path is read out of the command's output, so it is as much the
+// command's text as the command itself.
+func TestServiceRunDeniedLogOmitsPath(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	backend := &fakeBackend{stderr: "touch: /" + sentinel + ": Operation not permitted\n", exit: ExitStatus{Code: 1}}
+	svc := serviceFixture(t, backend, ModeAuto)
+
+	res, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "touch /x"})
+	require.NoError(t, err)
+	require.True(t, res.Denial.IsDenied())
+	require.Equal(t, "/"+sentinel, res.Denial.Path)
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "path_len=")
+}
+
 // Two sessions on the same project share one directory. Overlapping Run
 // would let them stomp each other's files and git state.
 func TestServiceRunSerializesSharedProjectRoot(t *testing.T) {

@@ -234,8 +234,8 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 
 	denial := ClassifyRunDenial(policy, status, stdout, stderr)
 	if denial.IsDenied() {
-		logger.Warnf(ctx, "[LocalSandbox] denied session=%s reason=%d path=%q exit=%d killed=%t duration=%s",
-			req.SessionID, denial.Reason, denial.Path, status.Code, status.Killed, status.Duration)
+		logger.Warnf(ctx, "[LocalSandbox] denied session=%s reason=%d path_len=%d exit=%d killed=%t duration=%s",
+			req.SessionID, denial.Reason, len(denial.Path), status.Code, status.Killed, status.Duration)
 	} else {
 		logger.Infof(ctx, "[LocalSandbox] done session=%s exit=%d killed=%t duration=%s stdout=%d stderr=%d",
 			req.SessionID, status.Code, status.Killed, status.Duration, len(stdout), len(stderr))
