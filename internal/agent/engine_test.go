@@ -1257,11 +1257,12 @@ func TestRunToolCallLangfuseUnknownToolExportsArguments(t *testing.T) {
 
 func TestCallLLMWithRetryLogsOmitUnknownToolName(t *testing.T) {
 	const nameSentinel = "S3NT1NEL"
+	const leakID = "550e8400-e29b-41d4-a716-446655440000"
 	toolName := longUnregisteredToolName(nameSentinel)
 	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{{
 		ResponseType: types.ResponseTypeAnswer,
 		ToolCalls: []types.LLMToolCall{
-			{Type: "function", Function: types.FunctionCall{Name: toolName, Arguments: `{}`}},
+			{Type: "function", Function: types.FunctionCall{Name: toolName, Arguments: `{"slug":"res://0099"}`}},
 			{Type: "function", Function: types.FunctionCall{Name: "known_tool", Arguments: `{}`}},
 		},
 		Done:         true,
@@ -1279,9 +1280,11 @@ func TestCallLLMWithRetryLogsOmitUnknownToolName(t *testing.T) {
 	messages := []chat.Message{
 		{Role: "user", Content: "q"},
 		{Role: "assistant", ToolCalls: []chat.ToolCall{
-			{ID: "c1", Type: "function", Function: chat.FunctionCall{Name: toolName, Arguments: `{}`}},
+			{ID: "c1", Type: "function", Function: chat.FunctionCall{
+				Name: toolName, Arguments: `{"q":"` + leakID + `"}`,
+			}},
 		}},
-		{Role: "tool", ToolCallID: "c1", Name: toolName, Content: "tool not found"},
+		{Role: "tool", ToolCallID: "c1", Name: toolName, Content: "tool not found: " + leakID},
 	}
 	_, err := engine.callLLMWithRetry(context.Background(), &messages, nil, &types.AgentState{}, "q", 1, "s")
 	require.NoError(t, err)
@@ -1291,4 +1294,7 @@ func TestCallLLMWithRetryLogsOmitUnknownToolName(t *testing.T) {
 	require.Contains(t, logs, "role=tool, name=unknown")
 	require.Contains(t, logs, "tool_calls=[unknown]")
 	require.Contains(t, logs, "tools=[unknown known_tool]")
+	require.Contains(t, logs, "assistant/unknown tool_call_arguments")
+	require.Contains(t, logs, "tool/unknown content")
+	require.Contains(t, logs, "[Agent][Stream] Tool unknown")
 }

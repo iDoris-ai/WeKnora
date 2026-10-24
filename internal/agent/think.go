@@ -58,7 +58,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 
 	// Model-context encoding owns codec ordering and temporary-handle lifecycle.
 	messages = e.modelContext.EncodeMessages(messages)
-	reportModelContextLeaks(ctx, "Agent", e.modelContext, messages)
+	e.reportModelContextLeaks(ctx, "Agent", messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	// ChatStream may wait for connection setup and response headers before
@@ -668,13 +668,16 @@ func (e *AgentEngine) loggedToolName(name string) string {
 
 // reportModelContextLeaks logs any durable identifier that survived encoding.
 // Each line names the producing role or tool so the leak can be fixed at its
-// source; see modelcontext/leaks.go.
-func reportModelContextLeaks(
-	ctx context.Context, scope string, registry *modelcontext.Registry, messages []chat.Message,
-) {
-	leaks := registry.LeakedIdentifiers(messages)
+// source; see modelcontext/leaks.go. Tool names go through loggedToolName.
+func (e *AgentEngine) reportModelContextLeaks(ctx context.Context, scope string, messages []chat.Message) {
+	leaks := e.modelContext.LeakedIdentifiers(messages)
 	if len(leaks) == 0 {
 		return
+	}
+	for i := range leaks {
+		if leaks[i].ToolName != "" {
+			leaks[i].ToolName = e.loggedToolName(leaks[i].ToolName)
+		}
 	}
 	logger.Warnf(ctx, "[%s][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
 		scope, len(leaks), modelcontext.SummarizeLeaks(leaks))
