@@ -401,11 +401,11 @@ func (s *sessionService) ListSessions(
 	items, total, err := s.sessionRepo.QueryPaged(ctx, query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": query.TenantID,
-			"user_id":   query.UserID,
-			"keyword":   query.Keyword,
-			"source":    query.Source,
-			"agent_id":  query.AgentID,
+			"tenant_id":   query.TenantID,
+			"user_id":     query.UserID,
+			"keyword_len": len(query.Keyword),
+			"source":      query.Source,
+			"agent_id":    query.AgentID,
 		})
 		return nil, err
 	}

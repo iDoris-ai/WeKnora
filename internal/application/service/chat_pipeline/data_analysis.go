@@ -232,7 +232,7 @@ func runDataAnalysis(
 		default:
 			errText = "tool returned no result"
 		}
-		lastErr = fmt.Errorf("attempt %d: sql=%q: %s", attempt, plan.SQL, errText)
+		lastErr = fmt.Errorf("attempt %d: sql_len=%d: %s", attempt, len(plan.SQL), errText)
 		logger.Warnf(ctx, "[DataAnalysis] %v", lastErr)
 		messages = append(messages,
 			chat.Message{Role: "assistant", Content: response.Content},

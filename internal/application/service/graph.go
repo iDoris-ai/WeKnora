@@ -256,8 +256,8 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		if rel == nil {
 			continue
 		}
-		log.Infof("[Relation %d] Source: '%s', Target: '%s', Description: '%s', Strength: %d",
-			i+1, rel.Source, rel.Target, rel.Description, rel.Strength)
+		log.Infof("[Relation %d] source_len=%d, target_len=%d, description_len=%d, Strength: %d",
+			i+1, len(rel.Source), len(rel.Target), len(rel.Description), rel.Strength)
 	}
 	log.Info("===========================================")
 
@@ -274,7 +274,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		key := fmt.Sprintf("%s#%s", relationship.Source, relationship.Target)
 		relationChunkIDs := b.findRelationChunkIDs(relationship.Source, relationship.Target, entities)
 		if len(relationChunkIDs) == 0 {
-			log.Debugf("Skipping relationship %s -> %s: no common chunks", relationship.Source, relationship.Target)
+			log.Debugf("Skipping relationship: no common chunks")
 			continue
 		}
 		if existingRel, exists := b.relationshipMap[key]; !exists {
@@ -283,8 +283,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 			relationship.ChunkIDs = relationChunkIDs
 			b.relationshipMap[key] = relationship
 			relationshipsAdded++
-			log.Debugf("New relationship added: %s -> %s (ID: %s)",
-				relationship.Source, relationship.Target, relationship.ID)
+			log.Debugf("New relationship added (ID: %s)", relationship.ID)
 		} else {
 			// This relationship already exists, update its properties
 			if existingRel == nil {
@@ -306,8 +305,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 
 			if chunkIDsAdded > 0 {
 				relationshipsUpdated++
-				log.Debugf("Updated relationship: %s -> %s with %d new chunks",
-					relationship.Source, relationship.Target, chunkIDsAdded)
+				log.Debugf("Updated relationship (ID: %s) with %d new chunks", existingRel.ID, chunkIDsAdded)
 			}
 		}
 	}
@@ -473,8 +471,8 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 
 	// generate knowledge graph visualization diagram
 	mermaidDiagram := b.generateKnowledgeGraphDiagram(ctx)
-	log.Info("Knowledge graph visualization diagram:")
-	log.Info(mermaidDiagram)
+	// The diagram labels nodes with entity titles; log its size only.
+	log.Infof("Knowledge graph visualization diagram: %d bytes", len(mermaidDiagram))
 
 	return nil
 }
@@ -626,7 +624,8 @@ func (b *graphBuilder) buildChunkGraph(ctx context.Context) {
 		targetEntity := b.entityMapByTitle[rel.Target]
 
 		if sourceEntity == nil || targetEntity == nil {
-			log.Warnf("Missing entity for relationship %s -> %s", rel.Source, rel.Target)
+			log.Warnf("Missing entity for relationship %s (source_len=%d, target_len=%d)",
+				rel.ID, len(rel.Source), len(rel.Target))
 			continue
 		}
 

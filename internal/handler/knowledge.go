@@ -1096,12 +1096,12 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s "+
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword_len=%d file_type=%s "+
 			"parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s "+
 			"sort_by=%s sort_order=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
-		secutils.SanitizeForLog(filter.Keyword),
+		len(filter.Keyword),
 		secutils.SanitizeForLog(filter.FileType),
 		secutils.SanitizeForLog(filter.ParseStatus),
 		secutils.SanitizeForLog(filter.Source),

@@ -1312,7 +1312,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned unusable content")
 		return nil, err
 	}
-	logger.GetLogger(ctx).WithField("summary", result.Summary).
+	logger.GetLogger(ctx).WithField("summary_len", len(result.Summary)).
 		WithField("has_profile", result.Profile != nil).Infof("GetSummary success")
 	return result, nil
 }

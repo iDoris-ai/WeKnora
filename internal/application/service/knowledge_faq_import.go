@@ -568,8 +568,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			fe.FailureType = "pre_validation"
 			progress.FailedEntries = append(progress.FailedEntries, fe)
 			logger.Infof(ctx,
-				"FAQ entry %d: standard question '%s' conflicts with existing similar question of chunk_id=%s (std='%s')",
-				i, standardQ, conflictChunkID, conflictStdQ)
+				"FAQ entry %d: standard_question_len=%d conflicts with existing similar question of chunk_id=%s",
+				i, len(standardQ), conflictChunkID)
 			continue
 		}
 
@@ -743,7 +743,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			fe := buildFAQFailedEntry(i, reason, entry)
 			fe.FailureType = "post_validation"
 			progress.FailedEntries = append(progress.FailedEntries, fe)
-			logger.Infof(ctx, "FAQ entry %d: post-validation failed, conflicting negatives after merge: %v", i, conflictingNegatives)
+			logger.Infof(ctx, "FAQ entry %d: post-validation failed, conflicting negatives after merge: %d",
+				i, len(conflictingNegatives))
 		} else {
 			mergeCount++
 		}
@@ -1147,9 +1148,9 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		if existingQuestions[meta.StandardQuestion] || batchQuestions[meta.StandardQuestion] {
 			skippedCount++
 			logger.Warnf(ctx,
-				"calculateAppendOperations: dropping FAQ entry with duplicate standard question %q "+
-					"(should have been filtered at validation); entry_idx=%d",
-				meta.StandardQuestion, entryIdx)
+				"calculateAppendOperations: dropping FAQ entry with duplicate standard question "+
+					"(should have been filtered at validation); standard_question_len=%d entry_idx=%d",
+				len(meta.StandardQuestion), entryIdx)
 			continue
 		}
 

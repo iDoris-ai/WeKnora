@@ -158,7 +158,7 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	for _, node := range graph.Node {
 		nodes = append(nodes, node.Name)
 	}
-	logger.Debugf(ctx, "extracted node: %v", nodes)
+	logger.Debugf(ctx, "extracted nodes: %d", len(nodes))
 	chatManage.Entity = nodes
 	return next()
 }
@@ -517,7 +517,7 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 				Type:  fmt.Sprintf("%v", group[f.relationPrefix]),
 			})
 		default:
-			logger.Warnf(ctx, "Unsupported graph group: %v", group)
+			logger.Warnf(ctx, "Unsupported graph group (%d fields)", len(group))
 			continue
 		}
 	}
@@ -534,7 +534,7 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 	nodes := make([]*types.GraphNode, 0, len(graph.Node))
 	for _, node := range graph.Node {
 		if prenode, ok := nodeMap[node.Name]; ok {
-			logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
+			logger.Infof(ctx, "Duplicate node ID (name_len=%d), merge attribute", len(node.Name))
 			// 修复panic：检查Attributes是否为nil
 			if node.Attributes == nil {
 				node.Attributes = make([]string, 0)
@@ -559,13 +559,13 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 			node := &types.GraphNode{Name: relation.Node1}
 			nodes = append(nodes, node)
 			nodeMap[relation.Node1] = node
-			logger.Infof(ctx, "Add unknown source node ID: %s", relation.Node1)
+			logger.Infof(ctx, "Add unknown source node ID (name_len=%d)", len(relation.Node1))
 		}
 		if _, ok := nodeMap[relation.Node2]; !ok {
 			node := &types.GraphNode{Name: relation.Node2}
 			nodes = append(nodes, node)
 			nodeMap[relation.Node2] = node
-			logger.Infof(ctx, "Add unknown target node ID: %s", relation.Node2)
+			logger.Infof(ctx, "Add unknown target node ID (name_len=%d)", len(relation.Node2))
 		}
 
 		relations = append(relations, relation)
