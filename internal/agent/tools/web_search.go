@@ -221,7 +221,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	)
 	webResults, err := t.webSearchService.Search(ctx, resolvedProviderID, searchConfig, query)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][WebSearch] Web search failed: %v", err)
+		logger.Errorf(ctx, "[Tool][WebSearch] Web search failed: error_len=%d error_type=%T", len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("web search failed: %v", err),

@@ -500,8 +500,7 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn) {
 }
 
 func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, frame wsFrame) {
-	// Log raw message body for debugging
-	logger.Debugf(ctx, "[WeCom] Raw callback body: %s", string(frame.Body))
+	logger.Debugf(ctx, "[WeCom] Raw callback body body_bytes=%d", len(frame.Body))
 
 	var msg botMessage
 	if err := json.Unmarshal(frame.Body, &msg); err != nil {
@@ -509,9 +508,10 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 		return
 	}
 
-	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s text=%q image_url=%q file_url=%q voice=%q mixed_items=%d",
+	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s "+
+		"text_len=%d image_url=%q file_url=%q voice_len=%d mixed_items=%d",
 		msg.MsgID, msg.MsgType, msg.From.UserID, msg.ChatType,
-		msg.Text.Content, msg.Image.URL, msg.File.URL, msg.Voice.Content, len(msg.Mixed.MsgItem))
+		len(msg.Text.Content), msg.Image.URL, msg.File.URL, len(msg.Voice.Content), len(msg.Mixed.MsgItem))
 
 	// Handle server-side events (e.g. disconnected_event) before normal messages.
 	if msg.MsgType == "event" {

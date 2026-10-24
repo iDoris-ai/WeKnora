@@ -295,7 +295,7 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	state.mu.Unlock()
 
 	if err := a.client.PatchPostMessage(ctx, postID, fullContent); err != nil {
-		logger.Warnf(ctx, "[Mattermost] Patch post failed: %v", err)
+		logger.Warnf(ctx, "[Mattermost] Patch post failed: error_len=%d error_type=%T", len(err.Error()), err)
 	}
 	return nil
 }
@@ -324,7 +324,7 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	state.mu.Unlock()
 
 	if err := a.client.PatchPostMessage(ctx, postID, full); err != nil {
-		logger.Warnf(ctx, "[Mattermost] EndStream patch failed: %v", err)
+		logger.Warnf(ctx, "[Mattermost] EndStream patch failed: error_len=%d error_type=%T", len(err.Error()), err)
 	}
 	logger.Infof(ctx, "[Mattermost] Streaming ended: post_id=%s", postID)
 	return nil

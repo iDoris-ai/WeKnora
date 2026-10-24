@@ -277,8 +277,8 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 			return lastErr
 		}
 
-		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
-			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
+		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d",
+			method, path, resp.StatusCode, len(respBody))
 
 		if isFeishuRateLimited(resp.StatusCode, respBody) {
 			wait := feishuRateLimitWait(resp.Header, time.Now())
@@ -360,7 +360,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 			return nil, fmt.Errorf("list wiki spaces: %w", err)
 		}
 		if resp.Code != 0 {
-			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg=%s", resp.Code, resp.Msg)
+			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg_len=%d", resp.Code, len(resp.Msg))
 			return nil, fmt.Errorf("list wiki spaces error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
@@ -477,8 +477,9 @@ func (c *Client) listAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 						Node: node,
 						Err:  wrappedErr,
 					})
-					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-						spaceID, node.NodeToken, err)
+					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s "+
+						"error_len=%d error_type=%T",
+						spaceID, node.NodeToken, len(err.Error()), err)
 					continue
 				}
 				walk(children)
@@ -520,8 +521,8 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 	children, err := c.ListWikiNodes(ctx, spaceID, root.NodeToken)
 	if err != nil {
 		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
-		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-			spaceID, root.NodeToken, err)
+		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s error_len=%d error_type=%T",
+			spaceID, root.NodeToken, len(err.Error()), err)
 		return nil, &PartialWikiNodeListError{
 			Failures: []WikiNodeListFailure{{
 				Node: root,
@@ -548,8 +549,9 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 					Node: node,
 					Err:  wrappedErr,
 				})
-				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-					spaceID, node.NodeToken, err)
+				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s "+
+					"error_len=%d error_type=%T",
+					spaceID, node.NodeToken, len(err.Error()), err)
 				continue
 			}
 			walk(grandChildren)
@@ -780,8 +782,8 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			if !isFeishuRateLimited(resp.StatusCode, body) {
-				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
-					path, resp.StatusCode, truncate(string(body), 500))
+				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d bodyLen=%d",
+					path, resp.StatusCode, len(body))
 				return nil, fmt.Errorf("download failed: status=%d body=%s",
 					resp.StatusCode, truncate(string(body), 500))
 			}
@@ -813,7 +815,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
-			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
+			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d bodyLen=%d", path, resp.StatusCode, len(body))
 			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 		}
 
@@ -959,8 +961,8 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 				FolderToken: folderToken,
 				Err:         wrappedErr,
 			})
-			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s err=%v",
-				folderToken, err)
+			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s error_len=%d error_type=%T",
+				folderToken, len(err.Error()), err)
 			return
 		}
 

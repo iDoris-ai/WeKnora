@@ -80,14 +80,14 @@ func (p *BingProvider) Search(
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}
-	logger.Infof(ctx, "[WebSearch][Bing] query=%q maxResults=%d url=%s", query, maxResults, p.baseURL)
+	logger.Infof(ctx, "[WebSearch][Bing] query_len=%d maxResults=%d url=%s", len(query), maxResults, p.baseURL)
 	req, err := p.buildParams(ctx, query, maxResults, includeDate)
 	if err != nil {
 		return nil, err
 	}
 	results, err := p.doSearch(ctx, req)
 	if err != nil {
-		logger.Warnf(ctx, "[WebSearch][Bing] failed: %v", err)
+		logger.Warnf(ctx, "[WebSearch][Bing] failed: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 	logger.Infof(ctx, "[WebSearch][Bing] returned %d results", len(results))
@@ -107,7 +107,7 @@ func (p *BingProvider) doSearch(ctx context.Context, req *http.Request) ([]*type
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Warnf(ctx, "[WebSearch][Bing] API returned status %d: %s", resp.StatusCode, string(body))
+		logger.Warnf(ctx, "[WebSearch][Bing] API returned status %d body_bytes=%d", resp.StatusCode, len(body))
 		return nil, fmt.Errorf("bing API returned status %d: %s", resp.StatusCode, string(body))
 	}
 

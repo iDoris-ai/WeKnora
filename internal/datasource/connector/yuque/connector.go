@@ -102,14 +102,15 @@ func (c *Connector) ListResources(
 			// Yuque returns 404 when the user has not joined any groups (teams),
 			// instead of an empty list. Treat this as "no groups" and continue
 			// — personal repos were already fetched above.
-			logger.Warnf(ctx, "[Yuque] list user groups failed (treating as empty): %v", err)
+			logger.Warnf(ctx, "[Yuque] list user groups failed (treating as empty): error_len=%d error_type=%T",
+				len(err.Error()), err)
 			groups = nil
 		}
 		for _, g := range groups {
 			teamRepos, err := cli.ListGroupRepos(ctx, g.Login)
 			if err != nil {
 				// Skip this group but continue others (e.g., 403 on a restricted group).
-				logger.Warnf(ctx, "[Yuque] skip group %s: %v", g.Login, err)
+				logger.Warnf(ctx, "[Yuque] skip group %s: error_len=%d error_type=%T", g.Login, len(err.Error()), err)
 				continue
 			}
 			for _, r := range teamRepos {
@@ -194,8 +195,9 @@ func (c *Connector) walk(
 		if settings.FolderMode == folderModeTOC {
 			toc, tocErr := cli.ListBookTOC(ctx, bookID)
 			if tocErr != nil {
-				logger.Warnf(ctx, "[Yuque] book %d: fetch TOC failed, falling back to flat file names: %v",
-					bookID, tocErr)
+				logger.Warnf(ctx, "[Yuque] book %d: fetch TOC failed, falling back to flat file names: "+
+					"error_len=%d error_type=%T",
+					bookID, len(tocErr.Error()), tocErr)
 			} else {
 				tocSegs, inTOC = buildTOCPaths(toc)
 				tocOK = true
