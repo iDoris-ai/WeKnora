@@ -132,7 +132,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	// Parse JSON response
 	var extractedEntities []*types.Entity
 	if err := common.ParseLLMJsonResponse(resp.Content, &extractedEntities); err != nil {
-		log.WithError(err).Errorf("Failed to parse entity extraction response, rsp content: %s", resp.Content)
+		log.WithError(err).Errorf("Failed to parse entity extraction response, rsp_len=%d", len(resp.Content))
 		return nil, fmt.Errorf("failed to parse entity extraction response: %w", err)
 	}
 	log.Infof("Extracted %d entities from chunk", len(extractedEntities))
@@ -143,7 +143,8 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		if entity == nil {
 			continue
 		}
-		log.Infof("[Entity %d] Title: '%s', Description: '%s'", i+1, entity.Title, entity.Description)
+		log.Infof("[Entity %d] Title: title_len=%d, Description: description_len=%d",
+			i+1, len(entity.Title), len(entity.Description))
 	}
 	log.Info("=========================================")
 
@@ -158,7 +159,8 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			continue
 		}
 		if entity.Title == "" || entity.Description == "" {
-			log.WithField("entity", entity).Warn("Invalid entity with empty title or description")
+			log.Warnf("Invalid entity with empty title or description (title_len=%d, description_len=%d)",
+				len(entity.Title), len(entity.Description))
 			continue
 		}
 		if existEntity, exists := b.entityMapByTitle[entity.Title]; !exists {
@@ -169,7 +171,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			b.entityMapByTitle[entity.Title] = entity
 			b.entityMap[entity.ID] = entity
 			entities = append(entities, entity)
-			log.Debugf("New entity added: %s (ID: %s)", entity.Title, entity.ID)
+			log.Debugf("New entity added: title_len=%d (ID: %s)", len(entity.Title), entity.ID)
 		} else {
 			if existEntity == nil {
 				log.Warnf("existEntity is nil, skip update")
@@ -178,7 +180,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			// Entity already exists, update its ChunkIDs
 			if !slices.Contains(existEntity.ChunkIDs, chunk.ID) {
 				existEntity.ChunkIDs = append(existEntity.ChunkIDs, chunk.ID)
-				log.Debugf("Updated existing entity: %s with chunk: %s", entity.Title, chunk.ID)
+				log.Debugf("Updated existing entity: title_len=%d with chunk: %s", len(entity.Title), chunk.ID)
 			}
 			existEntity.Frequency++
 			entities = append(entities, existEntity)

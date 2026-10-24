@@ -68,7 +68,7 @@ func (h *Handler) GenerateTitle(c *gin.Context) {
 	}
 
 	// Return generated title
-	logger.Infof(ctx, "Session title generated successfully, session ID: %s, title: %s", sessionID, title)
+	logger.Infof(ctx, "Session title generated successfully, session ID: %s, title_len=%d", sessionID, len(title))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    title,

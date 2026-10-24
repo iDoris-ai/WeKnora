@@ -453,7 +453,7 @@ func (h *Handler) handleAgentEventsForSSE(
 									emitStreamEvent(ctx, c, evt, requestID, resourceRewriter)
 									// If we got the title, we can exit
 									if evt.Type == types.ResponseTypeSessionTitle {
-										log.Infof("Title event received: %s", evt.Content)
+										log.Infof("Title event received: title_len=%d", len(evt.Content))
 										break titleWaitLoop
 									}
 								}
