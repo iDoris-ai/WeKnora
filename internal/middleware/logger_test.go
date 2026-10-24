@@ -316,3 +316,29 @@ func TestAccessLogHTTPBodyEnabledRedactsPasswordAndCredentials(t *testing.T) {
 		}
 	}
 }
+
+// Every credential parameter name is masked whatever its case, and the switch also accepts 1.
+func TestAgent24AccessLogPathCredentialNames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, name := range []string{"token", "Ticket", "code", "SECRET", "sig", "signature"} {
+		var got string
+		r := gin.New()
+		r.GET("/x/:"+name, func(c *gin.Context) { got = agent24AccessLogPath(c) })
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x/S3NT1NEL", nil))
+		if got != "/x/:"+name {
+			t.Fatalf("param %q: path %q, want the route template", name, got)
+		}
+	}
+	var got string
+	r := gin.New()
+	r.GET("/kb/:id", func(c *gin.Context) { got = agent24AccessLogPath(c) })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/kb/kb-1", nil))
+	if got != "/kb/kb-1" {
+		t.Fatalf("non-credential param: path %q, want the request path", got)
+	}
+
+	logText, _ := agent24RunAccessLog(t, "1", `{"note":"visible-note"}`)
+	if !strings.Contains(logText, "visible-note") {
+		t.Fatalf("AGENT24_LOG_HTTP_BODY=1 did not turn bodies on:\n%s", logText)
+	}
+}
