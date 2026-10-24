@@ -120,11 +120,11 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	// delivers (or doesn't). This is the single chokepoint for all message
 	// types — adding it here catches text/file/image/post uniformly.
 	logger.Infof(context.Background(),
-		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q",
+		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content_len=%d",
 		region.Label,
 		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
 		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
-		ptrStr(msg.ThreadId), ptrStr(msg.Content),
+		ptrStr(msg.ThreadId), len(ptrStr(msg.Content)),
 	)
 
 	if msg.MessageType == nil {

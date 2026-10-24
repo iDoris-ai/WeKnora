@@ -482,31 +482,18 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// 打印每个Chunk的详细信息
 	for idx, chunkData := range chunks {
-		contentPreview := chunkData.Content
-		if len(contentPreview) > 200 {
-			contentPreview = contentPreview[:200] + "..."
-		}
 		logger.Infof(ctx, "[DocReader] Chunk #%d (seq=%d): 内容长度=%d, 图片数=%d, 范围=[%d-%d]",
 			idx, chunkData.Seq, len(chunkData.Content), len(chunkData.Images), chunkData.Start, chunkData.End)
-		logger.Debugf(ctx, "[DocReader] Chunk #%d 内容预览: %s", idx, contentPreview)
 
 		// 打印图片详细信息
 		for imgIdx, img := range chunkData.Images {
 			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.URL)
 			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalURL)
 			if img.Caption != "" {
-				captionPreview := img.Caption
-				if len(captionPreview) > 100 {
-					captionPreview = captionPreview[:100] + "..."
-				}
-				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, captionPreview)
+				logger.Infof(ctx, "[DocReader]   图片 #%d: caption_len=%d", imgIdx, len(img.Caption))
 			}
 			if img.OCRText != "" {
-				ocrPreview := img.OCRText
-				if len(ocrPreview) > 100 {
-					ocrPreview = ocrPreview[:100] + "..."
-				}
-				logger.Infof(ctx, "[DocReader]   图片 #%d: OCRText=%s", imgIdx, ocrPreview)
+				logger.Infof(ctx, "[DocReader]   图片 #%d: ocr_len=%d", imgIdx, len(img.OCRText))
 			}
 			logger.Infof(ctx, "[DocReader]   图片 #%d: 位置=[%d-%d]", imgIdx, img.Start, img.End)
 		}
@@ -4261,15 +4248,16 @@ func (s *knowledgeService) convert(
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	if err != nil {
 		code, message := docReaderFailure(err)
-		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
+		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: error_len=%d error_type=%T",
+			knowledge.ID, code, len(err.Error()), err)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			code, message, err)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 	}
 	sanitizeReadResult(result)
 	if result.Error != "" {
-		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
-			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
+		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q error_len=%d",
+			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, len(result.Error))
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()

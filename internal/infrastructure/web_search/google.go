@@ -64,7 +64,7 @@ func (p *GoogleProvider) Search(
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}
-	logger.Infof(ctx, "[WebSearch][Google] query=%q maxResults=%d engineID=%s", query, maxResults, p.engineID)
+	logger.Infof(ctx, "[WebSearch][Google] query_len=%d maxResults=%d engineID=%s", len(query), maxResults, p.engineID)
 	cseCall := p.srv.Cse.List().Context(ctx).Cx(p.engineID).Q(query)
 
 	if maxResults > 0 {
@@ -76,7 +76,7 @@ func (p *GoogleProvider) Search(
 
 	resp, err := cseCall.Do()
 	if err != nil {
-		logger.Warnf(ctx, "[WebSearch][Google] failed: %v", err)
+		logger.Warnf(ctx, "[WebSearch][Google] failed: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 	results := make([]*types.WebSearchResult, 0)

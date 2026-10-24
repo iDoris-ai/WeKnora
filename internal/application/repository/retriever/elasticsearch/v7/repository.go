@@ -272,7 +272,7 @@ func (e *elasticsearchRepository) Save(ctx context.Context,
 	defer resp.Body.Close()
 
 	if resp.IsError() {
-		log.Errorf("[ElasticsearchV7] Failed to index document: %s", resp.String())
+		log.Errorf("[ElasticsearchV7] Failed to index document: status=%d", resp.StatusCode)
 		return fmt.Errorf("failed to index document: %s", resp.String())
 	}
 
@@ -387,7 +387,7 @@ func (e *elasticsearchRepository) processBulkResponse(ctx context.Context,
 
 	// Check for bulk operation errors
 	if resp.IsError() {
-		log.Errorf("[ElasticsearchV7] Bulk operation failed: %s", resp.String())
+		log.Errorf("[ElasticsearchV7] Bulk operation failed: status=%d", resp.StatusCode)
 		return fmt.Errorf("failed to index documents: %s", resp.String())
 	}
 
@@ -490,8 +490,7 @@ func (e *elasticsearchRepository) deleteByFieldList(ctx context.Context, field s
 	defer resp.Body.Close()
 
 	if resp.IsError() {
-		errMsg := fmt.Sprintf("failed to delete by query: %s", resp.String())
-		log.Errorf("[ElasticsearchV7] %s", errMsg)
+		log.Errorf("[ElasticsearchV7] failed to delete by query: status=%d", resp.StatusCode)
 		return fmt.Errorf("failed to delete by query: %s", resp.String())
 	}
 
@@ -1126,7 +1125,7 @@ func (e *elasticsearchRepository) querySourceBatch(ctx context.Context,
 	defer response.Body.Close()
 
 	if response.IsError() {
-		log.Errorf("[ElasticsearchV7] Failed to query source index data: %s", response.String())
+		log.Errorf("[ElasticsearchV7] Failed to query source index data: status=%d", response.StatusCode)
 		return nil, fmt.Errorf("failed to query source index data: %s", response.String())
 	}
 
@@ -1326,7 +1325,7 @@ func (e *elasticsearchRepository) saveCopiedIndices(ctx context.Context,
 	// Perform batch save
 	err := e.BatchSave(ctx, indexInfoList, additionalParams)
 	if err != nil {
-		log.Errorf("[ElasticsearchV7] Failed to batch save copied indices: %v", err)
+		log.Errorf("[ElasticsearchV7] Failed to batch save copied indices: error_len=%d", len(err.Error()))
 		return err
 	}
 
@@ -1387,7 +1386,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
 				log.Errorf("[ElasticsearchV7] Error parsing the response body: %v", err)
 			} else {
-				log.Errorf("[ElasticsearchV7] Error updating enabled chunks: %v", e["error"])
+				log.Errorf("[ElasticsearchV7] Error updating enabled chunks: status=%d", res.StatusCode)
 			}
 			return fmt.Errorf("elasticsearch update_by_query failed with status: %d", res.StatusCode)
 		}
@@ -1422,7 +1421,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
 				log.Errorf("[ElasticsearchV7] Error parsing the response body: %v", err)
 			} else {
-				log.Errorf("[ElasticsearchV7] Error updating disabled chunks: %v", e["error"])
+				log.Errorf("[ElasticsearchV7] Error updating disabled chunks: status=%d", res.StatusCode)
 			}
 			return fmt.Errorf("elasticsearch update_by_query failed with status: %d", res.StatusCode)
 		}
@@ -1483,7 +1482,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkTagID(
 			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
 				log.Errorf("[ElasticsearchV7] Error parsing the response body: %v", err)
 			} else {
-				log.Errorf("[ElasticsearchV7] Error updating chunks with tag_id: %v", e["error"])
+				log.Errorf("[ElasticsearchV7] Error updating chunks with tag_id: status=%d", res.StatusCode)
 			}
 			return fmt.Errorf("elasticsearch update_by_query failed with status: %d", res.StatusCode)
 		}

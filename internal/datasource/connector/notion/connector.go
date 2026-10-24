@@ -258,7 +258,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		if pg == nil {
 			continue
 		}
-		logger.Debugf(ctx, "[Notion] changed: %s (%s, %s)", pg.Title, pg.ID, pg.Object)
+		logger.Debugf(ctx, "[Notion] changed: title_len=%d (%s, %s)", len(pg.Title), pg.ID, pg.Object)
 		if pg.isDatabase() {
 			// Incremental database sync: query records, diff against cursor,
 			// only fetch blocks for records whose edit time actually changed.
@@ -363,7 +363,8 @@ func (c *Connector) fetchPage(
 	if page.Parent.Type == parentTypeDatabaseID || page.Parent.Type == parentTypeDataSourceID {
 		dbTitle := ""
 		if dbInfo, err := getDatabaseOrDataSourceInfo(ctx, client, page.Parent.GetParentID()); err != nil {
-			logger.Debugf(ctx, "[Notion] failed to resolve parent db title for record %s: %v", page.ID, err)
+			logger.Debugf(ctx, "[Notion] failed to resolve parent db title for record %s: error_len=%d error_type=%T",
+				page.ID, len(err.Error()), err)
 		} else {
 			dbTitle = dbInfo.Page.Title
 		}
@@ -448,7 +449,8 @@ func (c *Connector) fetchPage(
 		case "child_page":
 			childPage, err := client.GetPage(ctx, block.ID)
 			if err != nil {
-				logger.Warnf(ctx, "[Notion] failed to get child page %s: %v", block.ID, err)
+				logger.Warnf(ctx, "[Notion] failed to get child page %s: error_len=%d error_type=%T",
+					block.ID, len(err.Error()), err)
 				continue
 			}
 			childItems, childTruncated, err := c.fetchPage(ctx, client, childPage, visited)
@@ -580,7 +582,8 @@ func (c *Connector) queryDatabaseRecords(
 ) ([]notionPage, string, string, bool, error) {
 	dbInfo, err := getDatabaseOrDataSourceInfo(ctx, client, id)
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to get database/data_source info %s: %v", id, err)
+		logger.Warnf(ctx, "[Notion] failed to get database/data_source info %s: error_len=%d error_type=%T",
+			id, len(err.Error()), err)
 		return nil, "", "", false, err
 	}
 
@@ -591,15 +594,15 @@ func (c *Connector) queryDatabaseRecords(
 	records, err := client.QueryDatabaseAll(ctx, queryID)
 	truncated := errors.Is(err, errQueryResultTruncated)
 	if err != nil && !truncated {
-		logger.Warnf(ctx, "[Notion] failed to query database %s: %v", id, err)
+		logger.Warnf(ctx, "[Notion] failed to query database %s: error_len=%d error_type=%T", id, len(err.Error()), err)
 		return nil, "", "", false, err
 	}
 
 	if truncated {
-		logger.Warnf(ctx, "[Notion] database %s (%s): %d records, the vendor query limit was hit and the "+
-			"created_time window could not advance: result set incomplete", id, dbInfo.Page.Title, len(records))
+		logger.Warnf(ctx, "[Notion] database %s title_len=%d: %d records, the vendor query limit was hit and the "+
+			"created_time window could not advance: result set incomplete", id, len(dbInfo.Page.Title), len(records))
 	} else {
-		logger.Infof(ctx, "[Notion] database %s (%s): %d records", id, dbInfo.Page.Title, len(records))
+		logger.Infof(ctx, "[Notion] database %s title_len=%d: %d records", id, len(dbInfo.Page.Title), len(records))
 	}
 	return records, dbInfo.Page.Title, queryID, truncated, nil
 }
@@ -630,7 +633,8 @@ func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, r
 	// Database records may contain page-style block content beyond their properties
 	blocks, err := client.GetBlockChildrenAll(ctx, record.ID)
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to get blocks for record %s: %v", record.ID, err)
+		logger.Warnf(ctx, "[Notion] failed to get blocks for record %s: error_len=%d error_type=%T",
+			record.ID, len(err.Error()), err)
 	} else if len(blocks) > 0 {
 		resolveFileUploads(ctx, client, blocks)
 		markdown, _ := BlocksToMarkdown(blocks)
@@ -835,7 +839,8 @@ func resolveFileUploads(ctx context.Context, client *notionClient, blocks []noti
 			if file.GetFileUploadID() != "" {
 				resolved, err := client.ResolveBlock(ctx, blocks[i].ID)
 				if err != nil {
-					logger.Warnf(ctx, "[Notion] failed to resolve file_upload in block %s: %v", blocks[i].ID, err)
+					logger.Warnf(ctx, "[Notion] failed to resolve file_upload in block %s: error_len=%d error_type=%T",
+						blocks[i].ID, len(err.Error()), err)
 					continue
 				}
 				blocks[i].RawContent = resolved.RawContent
@@ -1026,7 +1031,8 @@ func computeExcludedSet(visibleIDs []string, parentOf map[string]string, selecte
 func (c *Connector) excludedSetFromListResources(ctx context.Context, config *types.DataSourceConfig, selectedIDs []string) map[string]bool {
 	visible, err := c.ListResources(ctx, config, "")
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to list visible resources for exclusion: %v", err)
+		logger.Warnf(ctx, "[Notion] failed to list visible resources for exclusion: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return map[string]bool{}
 	}
 	ids := make([]string, 0, len(visible))

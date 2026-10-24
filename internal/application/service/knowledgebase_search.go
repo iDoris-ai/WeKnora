@@ -537,7 +537,8 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	logger.Info(ctx, "Starting to generate query embedding")
 	queryEmbedding, err := embeddingModel.Embed(types.WithEmbedQuery(ctx), params.QueryText)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to embed query text, query_len=%d, error: %v", len(params.QueryText), err)
+		logger.Errorf(ctx, "Failed to embed query text, query_len=%d, error_len=%d error_type=%T",
+			len(params.QueryText), len(err.Error()), err)
 		return nil, err
 	}
 	if err := validateQueryEmbeddingDimension(embeddingModel, len(queryEmbedding)); err != nil {

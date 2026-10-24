@@ -648,7 +648,9 @@ func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage
 	if isImage && s.documentReader != nil {
 		result, err = s.documentReader.Read(attachmentCtx, request)
 		if err != nil {
-			logger.Warnf(ctx, "[IM] image OCR/document parsing failed, continuing with vision input: %v", err)
+			logger.Warnf(ctx,
+				"[IM] image OCR/document parsing failed, continuing with vision input: error_len=%d error_type=%T",
+				len(err.Error()), err)
 			result, err = nil, nil
 		}
 	}
@@ -658,7 +660,9 @@ func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage
 		result, err = s.documentReader.Read(attachmentCtx, request)
 	}
 	if err != nil {
-		logger.Warnf(ctx, "[IM] attachment parsing failed, continuing with attachment metadata: %v", err)
+		logger.Warnf(ctx,
+			"[IM] attachment parsing failed, continuing with attachment metadata: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 	if result != nil {
 		applyIMAttachmentTruncation(result.MarkdownContent, &attachment)
@@ -1761,7 +1765,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			Content: hint,
 			IsFinal: true,
 		}); err != nil {
-			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: %v", err)
+			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: error_len=%d error_type=%T",
+				len(err.Error()), err)
 		}
 		return nil
 	}
@@ -1957,7 +1962,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	if err != nil {
 		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
 		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: %v", sendErr)
+			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: error_len=%d error_type=%T",
+				len(sendErr.Error()), sendErr)
 		}
 		return
 	}
@@ -1980,7 +1986,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 				ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
 				progressSender, req.adapter, req.userKey, req.tenant,
 			); err != nil {
-				logger.Errorf(ctx, "[IM] Full-output QA failed: %v", err)
+				logger.Errorf(ctx, "[IM] Full-output QA failed: error_len=%d error_type=%T", len(err.Error()), err)
 			}
 			return
 		}
@@ -1990,7 +1996,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 			ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
 			streamer, req.adapter, req.userKey, req.tenant,
 		); err != nil {
-			logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
+			logger.Errorf(ctx, "[IM] Stream QA failed: error_len=%d error_type=%T", len(err.Error()), err)
 		}
 		return
 	}
@@ -2008,7 +2014,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
-		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
+		logger.Errorf(ctx, "[IM] Send reply failed: error_len=%d error_type=%T", len(err.Error()), err)
 		return
 	}
 
@@ -2035,7 +2041,9 @@ func (s *Service) handleMessageFullOutput(
 ) error {
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
-		logger.Warnf(ctx, "[IM] StartStream failed for full output, falling back to plain reply: %v", err)
+		logger.Warnf(ctx,
+			"[IM] StartStream failed for full output, falling back to plain reply: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return s.fallbackNonStream(
 			ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant,
 		)
@@ -2056,7 +2064,8 @@ func (s *Service) handleMessageFullOutput(
 
 	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalContent)
 	if finalizeErr != nil {
-		logger.Warnf(ctx, "[IM] FinalizeStream failed for full output: %v", finalizeErr)
+		logger.Warnf(ctx, "[IM] FinalizeStream failed for full output: error_len=%d error_type=%T",
+			len(finalizeErr.Error()), finalizeErr)
 	}
 	endErr := streamer.EndStream(outCtx, msg, streamID)
 	if endErr != nil {
@@ -2069,7 +2078,9 @@ func (s *Service) handleMessageFullOutput(
 	if finalizeErr != nil {
 		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
 		if fallbackErr != nil {
-			logger.Errorf(ctx, "[IM] Plain reply fallback after full-output finalize failure failed: %v", fallbackErr)
+			logger.Errorf(ctx,
+				"[IM] Plain reply fallback after full-output finalize failure failed: error_len=%d error_type=%T",
+				len(fallbackErr.Error()), fallbackErr)
 		}
 	}
 
@@ -2491,7 +2502,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// Start the stream on the IM platform (e.g., create Feishu streaming card)
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
-		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: %v", err)
+		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant)
 	}
 
@@ -2846,7 +2858,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc, s.storageResolver)
 		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
-			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: %v", err)
+			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: error_len=%d error_type=%T", len(err.Error()), err)
 		}
 	}
 
@@ -2902,7 +2914,8 @@ loop:
 
 	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalDisplay)
 	if finalizeErr != nil {
-		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", finalizeErr)
+		logger.Warnf(ctx, "[IM] FinalizeStream failed: error_len=%d error_type=%T",
+			len(finalizeErr.Error()), finalizeErr)
 	}
 
 	// End the stream
@@ -2917,7 +2930,9 @@ loop:
 	if finalizeErr != nil {
 		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalDisplay, IsFinal: true})
 		if fallbackErr != nil {
-			logger.Errorf(ctx, "[IM] Plain reply fallback after stream finalize failure failed: %v", fallbackErr)
+			logger.Errorf(ctx,
+				"[IM] Plain reply fallback after stream finalize failure failed: error_len=%d error_type=%T",
+				len(fallbackErr.Error()), fallbackErr)
 		}
 	}
 
