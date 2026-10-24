@@ -922,11 +922,11 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
+		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query_len=%d",
 		secutils.SanitizeForLogArray(knowledgeBaseIDs),
 		secutils.SanitizeForLogArray(request.KnowledgeIDs),
 		len(tagScopes),
-		secutils.SanitizeForLog(request.Query),
+		len(request.Query),
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization

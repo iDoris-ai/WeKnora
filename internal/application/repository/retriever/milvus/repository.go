@@ -817,7 +817,7 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[Milvus] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
+	log.Infof("[Milvus] Performing keywords retrieval with query_len=%d, topK: %d", len(params.Query), params.TopK)
 
 	// Get all collections
 	collections, err := m.client.ListCollections(ctx, client.NewListCollectionOption())
@@ -975,7 +975,7 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 	case len(allResults) > 0:
 		log.Infof("[Milvus] Keywords retrieval found %d results", len(allResults))
 	default:
-		log.Warnf("[Milvus] No keyword matches found for query: %s", params.Query)
+		log.Warnf("[Milvus] No keyword matches found for query_len=%d", len(params.Query))
 	}
 
 	retrieved := buildRetrieveResult(allResults, types.KeywordsRetrieverType)
