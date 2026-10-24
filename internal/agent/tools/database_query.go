@@ -221,7 +221,6 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Retrieved %d rows with %d columns", len(results), len(columns))
-	logger.Debugf(ctx, "[Tool][DatabaseQuery] Columns: %v", columns)
 
 	// Format output
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Formatting query results...")

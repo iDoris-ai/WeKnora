@@ -4,44 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const agent24LogSentinel = "S3NT1NEL"
 
-// agent24LogLevelFromEnv mirrors logger startup so a test can put the level back.
-// The logger package does not export the current level.
-func agent24LogLevelFromEnv() logger.LogLevel {
-	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
-	case "info":
-		return logger.LevelInfo
-	case "warn", "warning":
-		return logger.LevelWarn
-	case "error":
-		return logger.LevelError
-	case "fatal":
-		return logger.LevelFatal
-	default:
-		return logger.LevelDebug
-	}
-}
-
 func captureAgent24DebugLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
-	original := agent24LogLevelFromEnv()
 	logger.SetLogLevel(logger.LevelDebug)
 	var buf bytes.Buffer
 	logger.SetOutput(&buf)
-	t.Cleanup(func() {
-		logger.SetOutput(os.Stdout)
-		logger.SetLogLevel(original)
-	})
+	t.Cleanup(logger.ConfigureFromEnv)
 	return &buf
 }
 
@@ -91,5 +71,56 @@ func TestWebSearchExecuteLogOmitsQuery(t *testing.T) {
 	want := fmt.Sprintf("query_len=%d", len(query))
 	if !strings.Contains(logs, want) {
 		t.Fatalf("log = %s, want substring %s", logs, want)
+	}
+}
+
+func TestShellExecLogOmitsCommand(t *testing.T) {
+	for _, command := range []string{
+		"grep " + agent24LogSentinel + " /workspace/a.txt", // runs
+		"rm -rf / # " + agent24LogSentinel,                 // rejected by the blacklist
+	} {
+		buf := captureAgent24DebugLog(t)
+		args, err := json.Marshal(ShellExecInput{Command: command})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		executor := &fakeShellExecutor{result: &sandbox.ExecuteResult{}}
+		if _, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), args); err != nil {
+			t.Fatalf("Execute(%q): %v", command, err)
+		}
+		logs := buf.String()
+		if strings.Contains(logs, agent24LogSentinel) {
+			t.Fatalf("log leaked command: %s", logs)
+		}
+		if want := fmt.Sprintf("command_len=%d", len(command)); !strings.Contains(logs, want) {
+			t.Fatalf("log = %s, want substring %s", logs, want)
+		}
+	}
+}
+
+// failingTool returns a tool error and an execution error that quote its input.
+type failingTool struct{ mockTool }
+
+func (f *failingTool) Execute(_ context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	text := fmt.Sprintf("invalid regex query %q", string(args))
+	return &types.ToolResult{Success: false, Error: text}, errors.New(text)
+}
+
+func TestToolRegistryLogOmitsToolErrorText(t *testing.T) {
+	buf := captureAgent24DebugLog(t)
+	registry := NewToolRegistry()
+	registry.RegisterTool(&failingTool{mockTool{name: "failing"}})
+	args := json.RawMessage(`{"query":"` + agent24LogSentinel + `("}`)
+
+	result, err := registry.ExecuteTool(context.Background(), "failing", args)
+	if err == nil || result == nil || !strings.Contains(result.Error, agent24LogSentinel) {
+		t.Fatalf("the tool's own result must be unchanged: result=%#v err=%v", result, err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, agent24LogSentinel) {
+		t.Fatalf("log leaked tool error text: %s", logs)
+	}
+	if !strings.Contains(logs, "error_len=") || !strings.Contains(logs, "error_type=") {
+		t.Fatalf("log = %s, want error_len and error_type", logs)
 	}
 }

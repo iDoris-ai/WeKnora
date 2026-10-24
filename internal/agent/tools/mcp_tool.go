@@ -344,7 +344,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	}
 
 	if result.IsError {
-		logger.GetLogger(ctx).Warnf("MCP tool returned error: %s", output)
+		logger.GetLogger(ctx).Warnf("MCP tool returned error: %s (output_len=%d)", t.mcpTool.Name, len(output))
 		return &types.ToolResult{Success: false, Error: output, Data: data}, nil
 	}
 
