@@ -272,7 +272,7 @@ func (e *elasticsearchRepository) Save(ctx context.Context,
 	defer resp.Body.Close()
 
 	if resp.IsError() {
-		log.Errorf("[ElasticsearchV7] Failed to index document: %s", resp.String())
+		log.Errorf("[ElasticsearchV7] Failed to index document: status=%d", resp.StatusCode)
 		return fmt.Errorf("failed to index document: %s", resp.String())
 	}
 
@@ -387,7 +387,7 @@ func (e *elasticsearchRepository) processBulkResponse(ctx context.Context,
 
 	// Check for bulk operation errors
 	if resp.IsError() {
-		log.Errorf("[ElasticsearchV7] Bulk operation failed: %s", resp.String())
+		log.Errorf("[ElasticsearchV7] Bulk operation failed: status=%d", resp.StatusCode)
 		return fmt.Errorf("failed to index documents: %s", resp.String())
 	}
 
@@ -490,8 +490,7 @@ func (e *elasticsearchRepository) deleteByFieldList(ctx context.Context, field s
 	defer resp.Body.Close()
 
 	if resp.IsError() {
-		errMsg := fmt.Sprintf("failed to delete by query: %s", resp.String())
-		log.Errorf("[ElasticsearchV7] %s", errMsg)
+		log.Errorf("[ElasticsearchV7] failed to delete by query: status=%d", resp.StatusCode)
 		return fmt.Errorf("failed to delete by query: %s", resp.String())
 	}
 
@@ -1112,7 +1111,7 @@ func (e *elasticsearchRepository) querySourceBatch(ctx context.Context,
 	defer response.Body.Close()
 
 	if response.IsError() {
-		log.Errorf("[ElasticsearchV7] Failed to query source index data: %s", response.String())
+		log.Errorf("[ElasticsearchV7] Failed to query source index data: status=%d", response.StatusCode)
 		return nil, fmt.Errorf("failed to query source index data: %s", response.String())
 	}
 

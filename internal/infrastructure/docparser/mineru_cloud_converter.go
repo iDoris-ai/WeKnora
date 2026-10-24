@@ -304,13 +304,8 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 		return nil, nil
 	}
 
-	// Dump the raw extract_result JSON for debugging
-	rawExtract := string(pollResp.Data.ExtractResult)
-	if len(rawExtract) > 4000 {
-		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...", rawExtract[:4000])
-	} else {
-		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result: %s", rawExtract)
-	}
+	logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result raw_bytes=%d",
+		len(pollResp.Data.ExtractResult))
 
 	// Pretty-print the structure to reveal all available fields
 	var rawObj interface{}

@@ -130,8 +130,8 @@ func (c *client) doRequest(ctx context.Context, method, path string, result inte
 		}
 
 		bodyPreview := truncate(string(body), 500)
-		logger.Infof(ctx, "[Yuque] %s %s → status=%d bodyLen=%d body=%s",
-			method, path, resp.StatusCode, len(body), bodyPreview)
+		logger.Infof(ctx, "[Yuque] %s %s → status=%d bodyLen=%d",
+			method, path, resp.StatusCode, len(body))
 
 		if resp.StatusCode == 429 {
 			wait := parseRetryAfter(resp.Header.Get("Retry-After"), backoff[min(attempt, len(backoff)-1)])

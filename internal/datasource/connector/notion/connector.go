@@ -258,7 +258,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		if pg == nil {
 			continue
 		}
-		logger.Debugf(ctx, "[Notion] changed: %s (%s, %s)", pg.Title, pg.ID, pg.Object)
+		logger.Debugf(ctx, "[Notion] changed: title_len=%d (%s, %s)", len(pg.Title), pg.ID, pg.Object)
 		if pg.isDatabase() {
 			// Incremental database sync: query records, diff against cursor,
 			// only fetch blocks for records whose edit time actually changed.
@@ -596,10 +596,10 @@ func (c *Connector) queryDatabaseRecords(
 	}
 
 	if truncated {
-		logger.Warnf(ctx, "[Notion] database %s (%s): %d records, the vendor query limit was hit and the "+
-			"created_time window could not advance: result set incomplete", id, dbInfo.Page.Title, len(records))
+		logger.Warnf(ctx, "[Notion] database %s title_len=%d: %d records, the vendor query limit was hit and the "+
+			"created_time window could not advance: result set incomplete", id, len(dbInfo.Page.Title), len(records))
 	} else {
-		logger.Infof(ctx, "[Notion] database %s (%s): %d records", id, dbInfo.Page.Title, len(records))
+		logger.Infof(ctx, "[Notion] database %s title_len=%d: %d records", id, len(dbInfo.Page.Title), len(records))
 	}
 	return records, dbInfo.Page.Title, queryID, truncated, nil
 }

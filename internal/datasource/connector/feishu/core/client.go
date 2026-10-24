@@ -277,8 +277,8 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 			return lastErr
 		}
 
-		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
-			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
+		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d",
+			method, path, resp.StatusCode, len(respBody))
 
 		if isFeishuRateLimited(resp.StatusCode, respBody) {
 			wait := feishuRateLimitWait(resp.Header, time.Now())
@@ -780,8 +780,8 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			if !isFeishuRateLimited(resp.StatusCode, body) {
-				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
-					path, resp.StatusCode, truncate(string(body), 500))
+				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d bodyLen=%d",
+					path, resp.StatusCode, len(body))
 				return nil, fmt.Errorf("download failed: status=%d body=%s",
 					resp.StatusCode, truncate(string(body), 500))
 			}
@@ -813,7 +813,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
-			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
+			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d bodyLen=%d", path, resp.StatusCode, len(body))
 			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 		}
 

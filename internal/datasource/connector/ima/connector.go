@@ -449,21 +449,21 @@ func fetchNote(
 ) (types.FetchedItem, fetchOutcome) {
 	noteID := info.NotebookExtInfo.NotebookID
 	if noteID == "" {
-		logger.Warnf(ctx, "[IMA] note %s (title=%q) has no notebook_id, skipping", f.MediaID, f.Title)
+		logger.Warnf(ctx, "[IMA] note %s (title_len=%d) has no notebook_id, skipping", f.MediaID, len(f.Title))
 		return types.FetchedItem{}, fetchSkipped
 	}
 
 	content, err := cli.GetNoteContent(ctx, noteID)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] get_doc_content(note %s, title=%q) failed, will retry next sync: %v",
-			noteID, f.Title, err)
+		logger.Warnf(ctx, "[IMA] get_doc_content(note %s, title_len=%d) failed, will retry next sync: %v",
+			noteID, len(f.Title), err)
 		return types.FetchedItem{}, fetchFailed
 	}
 	if strings.TrimSpace(content) == "" {
 		// A cleared note still exists. Keep its title as content so ingestion
 		// replaces the stale body instead of silently acknowledging the edit:
 		// skipping here would leave the old text indexed forever.
-		logger.Infof(ctx, "[IMA] note %s (title=%q) is empty, syncing its title only", noteID, f.Title)
+		logger.Infof(ctx, "[IMA] note %s (title_len=%d) is empty, syncing its title only", noteID, len(f.Title))
 		content = "# " + f.Title + "\n"
 	}
 

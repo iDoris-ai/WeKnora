@@ -107,7 +107,9 @@ func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		logger.Errorf(context.Background(), "[WeKnoraCloud] http read unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
+		logger.Errorf(context.Background(),
+			"[WeKnoraCloud] http read unexpected status %d body_bytes=%d",
+			resp.StatusCode, len(bodyBytes))
 		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 	var submit weKnoraCloudAsyncSubmitResponse
@@ -167,7 +169,9 @@ func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, t
 			if resp.StatusCode != http.StatusOK {
 				bodyBytes, _ := io.ReadAll(resp.Body)
 				err = fmt.Errorf("http poll task status %d: %s", resp.StatusCode, string(bodyBytes))
-				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s status %d: %s", taskID, resp.StatusCode, string(bodyBytes))
+				logger.Errorf(context.Background(),
+					"[WeKnoraCloud] poll task_id=%s status %d body_bytes=%d",
+					taskID, resp.StatusCode, len(bodyBytes))
 				return
 			}
 			if decodeErr := json.NewDecoder(resp.Body).Decode(&taskResp); decodeErr != nil {

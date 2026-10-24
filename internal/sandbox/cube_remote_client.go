@@ -1437,14 +1437,14 @@ func logCubeDataPlaneExec(
 	}
 	logger.Infof(ctx,
 		"[CubeRemote] data-plane exec sandbox=%s envd_host=%s exec_user=%s "+
-			"api_key=%s envd_token=%s traffic_token=%s cmd=%q",
+			"api_key=%s envd_token=%s traffic_token=%s cmd_len=%d",
 		sb.SandboxID,
 		sb.GetHost(CubeEnvdPort),
 		strings.TrimSpace(execUser),
 		cubeCredentialPresence(client.config.CubeAPIKey),
 		cubeCredentialPresence(sb.EnvdAccessToken),
 		cubeCredentialPresence(sb.TrafficAccessToken),
-		commandLine,
+		len(commandLine),
 	)
 }
 
