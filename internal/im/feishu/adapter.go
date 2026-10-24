@@ -641,8 +641,8 @@ func (a *Adapter) sendWithFallback(
 			return fmt.Errorf("%s reply api error: code=%d msg=%s", a.region.Label, code, msg)
 		default:
 			// Fallback-eligible: retry via plain send-message API.
-			logger.Warnf(ctx, "[%s] reply API returned code=%d msg=%s, falling back to send-message API",
-				a.region.Label, code, msg)
+			logger.Warnf(ctx, "[%s] reply API returned code=%d msg_len=%d, falling back to send-message API",
+				a.region.Label, code, len(msg))
 		}
 	} else if incoming.MessageID != "" {
 		// message_id present but contains unsafe characters — refuse rather

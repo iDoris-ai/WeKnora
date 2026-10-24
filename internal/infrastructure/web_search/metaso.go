@@ -98,7 +98,7 @@ func (p *MetasoProvider) Search(ctx context.Context, query string, maxResults in
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
-	logger.Infof(ctx, "[WebSearch][Metaso] query=%q maxResults=%d scope=%s", query, maxResults, p.scope)
+	logger.Infof(ctx, "[WebSearch][Metaso] query_len=%d maxResults=%d scope=%s", len(query), maxResults, p.scope)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute Metaso request: %w", err)

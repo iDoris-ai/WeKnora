@@ -112,7 +112,7 @@ func (p *SearxngProvider) Search(
 	q.Set("language", "all")
 
 	reqURL := p.baseURL + "/search?" + q.Encode()
-	logger.Infof(ctx, "[WebSearch][SearXNG] query=%q maxResults=%d url=%s", query, maxResults, p.baseURL)
+	logger.Infof(ctx, "[WebSearch][SearXNG] query_len=%d maxResults=%d url=%s", len(query), maxResults, p.baseURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {

@@ -6,7 +6,13 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/binary"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/gin-gonic/gin"
 )
 
 func TestWebhookAdapterDecryptPadding(t *testing.T) {
@@ -82,4 +88,42 @@ func encryptWeComTestPayload(t *testing.T, key []byte, corpID string, message []
 	ciphertext := make([]byte, len(plaintext))
 	cipher.NewCBCEncrypter(block, key[:aes.BlockSize]).CryptBlocks(ciphertext, plaintext)
 	return base64.StdEncoding.EncodeToString(ciphertext), padLen
+}
+
+func TestParseCallbackDebugLogOmitsMessageContent(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	key := []byte("0123456789abcdef0123456789abcdef")
+	corpID := "ww_corp_id"
+	adapter := &WebhookAdapter{aesKey: key, corpID: corpID}
+
+	const sentinel = "S3NT1NEL"
+	inner := "<xml><MsgType>text</MsgType><Content>" + sentinel +
+		"</Content><FromUserName>user</FromUserName><MsgId>1</MsgId>" +
+		"<PicUrl>https://example.com/p.png</PicUrl><MediaId>media-1</MediaId></xml>"
+	encrypted, _ := encryptWeComTestPayload(t, key, corpID, []byte(inner))
+	outer := "<xml><Encrypt>" + encrypted + "</Encrypt></xml>"
+
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/wecom/callback", strings.NewReader(outer))
+
+	msg, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("ParseCallback: %v", err)
+	}
+	if msg == nil || !strings.Contains(msg.Content, sentinel) {
+		t.Fatalf("message content = %+v, want sentinel preserved on the returned message", msg)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "body_bytes=") || !strings.Contains(logs, "content_len=") {
+		t.Fatalf("log missing length fields: %s", logs)
+	}
 }

@@ -220,16 +220,16 @@ func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, err
 		return nil, fmt.Errorf("decrypt message: %w", err)
 	}
 
-	// Log raw decrypted message for debugging
-	logger.Debugf(c.Request.Context(), "[WeCom] Raw decrypted callback: %s", string(decrypted))
+	logger.Debugf(c.Request.Context(), "[WeCom] Raw decrypted callback body_bytes=%d", len(decrypted))
 
 	var msg wecomMessage
 	if err := xml.Unmarshal(decrypted, &msg); err != nil {
 		return nil, fmt.Errorf("unmarshal decrypted message: %w", err)
 	}
 
-	logger.Debugf(c.Request.Context(), "[WeCom] Parsed webhook message: msgid=%s msgtype=%s from=%s content=%q picurl=%q mediaid=%q",
-		msg.MsgID, msg.MsgType, msg.FromUserName, msg.Content, msg.PicUrl, msg.MediaId)
+	logger.Debugf(c.Request.Context(),
+		"[WeCom] Parsed webhook message: msgid=%s msgtype=%s from=%s content_len=%d picurl=%q mediaid=%q",
+		msg.MsgID, msg.MsgType, msg.FromUserName, len(msg.Content), msg.PicUrl, msg.MediaId)
 
 	// Determine chat type
 	chatType := im.ChatTypeDirect

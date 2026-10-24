@@ -225,7 +225,9 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d status %d: %s", pollCount, resp.StatusCode, string(respBody))
+			logger.Errorf(context.Background(),
+				"[PaddleOCR-VL Cloud] poll #%d status %d body_bytes=%d",
+				pollCount, resp.StatusCode, len(respBody))
 			sleepCtx(ctx, c.pollInterval)
 			continue
 		}

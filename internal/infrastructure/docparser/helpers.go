@@ -67,7 +67,7 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 }
 
 // logResponseStructure recursively logs the structure of an API response,
-// truncating large string values. label identifies the subsystem (e.g. "MinerU").
+// logging string values by length only. label identifies the subsystem (e.g. "MinerU").
 func logResponseStructure(label string, obj interface{}, prefix string) {
 	switch v := obj.(type) {
 	case map[string]interface{}:
@@ -97,11 +97,7 @@ func logResponseStructure(label string, obj interface{}, prefix string) {
 					}
 				}
 			case string:
-				if len(inner) > 200 {
-					logger.Infof(context.Background(), "[%s] %s = string(%d chars): %.200s...", label, path, len(inner), inner)
-				} else {
-					logger.Infof(context.Background(), "[%s] %s = %q", label, path, inner)
-				}
+				logger.Infof(context.Background(), "[%s] %s = string(%d bytes)", label, path, len(inner))
 			case float64:
 				logger.Infof(context.Background(), "[%s] %s = %v (number)", label, path, inner)
 			case bool:
@@ -124,6 +120,8 @@ func logResponseStructure(label string, obj interface{}, prefix string) {
 				logger.Infof(context.Background(), "[%s] ... and %d more items in %s", label, len(v)-1, prefix)
 			}
 		}
+	case string:
+		logger.Infof(context.Background(), "[%s] %s = string(%d bytes)", label, prefix, len(v))
 	default:
 		logger.Infof(context.Background(), "[%s] %s = %v (%T)", label, prefix, v, v)
 	}

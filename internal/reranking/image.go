@@ -123,7 +123,8 @@ func scoreCandidates(
 		imageModel, _ := rerank.AsImageReranker(model)
 		imageScores, imgErr := imageModel.RerankImages(ctx, query, images)
 		if imgErr != nil {
-			logger.Warnf(ctx, "[Rerank] Image scoring failed, scoring those hits as text: %v", imgErr)
+			logger.Warnf(ctx, "[Rerank] Image scoring failed, scoring those hits as text: error_len=%d error_type=%T",
+				len(imgErr.Error()), imgErr)
 		} else {
 			for _, s := range imageScores {
 				if s.Index < 0 || s.Index >= len(imagePositions) {

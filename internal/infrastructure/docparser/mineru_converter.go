@@ -333,13 +333,7 @@ func (c *MinerUReader) callFileParse(
 		return "", nil, nil, fmt.Errorf("read response body: %w", err)
 	}
 
-	// Dump raw response for debugging (truncate if too large)
-	rawStr := string(respBody)
-	if len(rawStr) > 4000 {
-		logger.Infof(context.Background(), "[MinerU] Raw response (truncated to 4000 chars): %s ...", rawStr[:4000])
-	} else {
-		logger.Infof(context.Background(), "[MinerU] Raw response: %s", rawStr)
-	}
+	logger.Infof(context.Background(), "[MinerU] Raw response raw_bytes=%d", len(respBody))
 
 	// Also pretty-print the top-level structure (without large base64 blobs)
 	var rawMap map[string]interface{}
