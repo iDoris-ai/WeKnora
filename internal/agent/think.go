@@ -174,7 +174,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 		}
 		logger.Warnf(ctx,
 			"[Agent][Stream] Tool %s (%s) contains unresolvable model handle(s): %v",
-			toolCall.Function.Name, toolCall.ID, toolCall.UnresolvedHandles,
+			e.loggedToolName(toolCall.Function.Name), toolCall.ID, toolCall.UnresolvedHandles,
 		)
 	}
 	if orphans := e.modelContext.OrphanResourceHandles(result.Content); len(orphans) > 0 {
@@ -526,11 +526,11 @@ func (e *AgentEngine) callLLMWithRetry(
 		msg := messages[i]
 		if msg.Role == "tool" {
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=tool, name=%s, len=%d",
-				round, i, msg.Name, len(msg.Content))
+				round, i, e.loggedToolName(msg.Name), len(msg.Content))
 		} else if len(msg.ToolCalls) > 0 {
 			tcNames := make([]string, len(msg.ToolCalls))
 			for j, tc := range msg.ToolCalls {
-				tcNames[j] = tc.Function.Name
+				tcNames[j] = e.loggedToolName(tc.Function.Name)
 			}
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, tool_calls=%v",
 				round, i, msg.Role, len(msg.Content), tcNames)
@@ -632,7 +632,7 @@ func (e *AgentEngine) callLLMWithRetry(
 	if len(response.ToolCalls) > 0 {
 		tcNames := make([]string, len(response.ToolCalls))
 		for i, tc := range response.ToolCalls {
-			tcNames[i] = tc.Function.Name
+			tcNames[i] = e.loggedToolName(tc.Function.Name)
 		}
 		logger.Infof(ctx, "[Agent][Round-%d] LLM responded: finish=%s, content=%d chars, tools=%v",
 			round, response.FinishReason, len(response.Content), tcNames)
@@ -651,6 +651,19 @@ func (e *AgentEngine) callLLMWithRetry(
 	}
 
 	return response, nil
+}
+
+// loggedToolName returns name when it is a registered tool and "unknown"
+// otherwise: an unregistered name is model text of any length, so it stays out
+// of the logs (fork patch A24-OBS-10).
+func (e *AgentEngine) loggedToolName(name string) string {
+	if e.toolRegistry == nil {
+		return "unknown"
+	}
+	if _, err := e.toolRegistry.GetTool(name); err != nil {
+		return "unknown"
+	}
+	return name
 }
 
 // reportModelContextLeaks logs any durable identifier that survived encoding.

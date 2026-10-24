@@ -1254,3 +1254,41 @@ func TestRunToolCallLangfuseUnknownToolExportsArguments(t *testing.T) {
 	require.Contains(t, body, "agent.tool.unknown")
 	require.NotContains(t, logs, nameSentinel)
 }
+
+func TestCallLLMWithRetryLogsOmitUnknownToolName(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	toolName := longUnregisteredToolName(nameSentinel)
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{{
+		ResponseType: types.ResponseTypeAnswer,
+		ToolCalls: []types.LLMToolCall{
+			{Type: "function", Function: types.FunctionCall{Name: toolName, Arguments: `{}`}},
+			{Type: "function", Function: types.FunctionCall{Name: "known_tool", Arguments: `{}`}},
+		},
+		Done:         true,
+		FinishReason: "tool_calls",
+	}}}}}
+
+	var logBuf bytes.Buffer
+	logger.SetOutput(&logBuf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	engine := newTestEngine(t, model)
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(newCountingTool("known_tool"))
+	messages := []chat.Message{
+		{Role: "user", Content: "q"},
+		{Role: "assistant", ToolCalls: []chat.ToolCall{
+			{ID: "c1", Type: "function", Function: chat.FunctionCall{Name: toolName, Arguments: `{}`}},
+		}},
+		{Role: "tool", ToolCallID: "c1", Name: toolName, Content: "tool not found"},
+	}
+	_, err := engine.callLLMWithRetry(context.Background(), &messages, nil, &types.AgentState{}, "q", 1, "s")
+	require.NoError(t, err)
+
+	logs := logBuf.String()
+	require.NotContains(t, logs, nameSentinel)
+	require.Contains(t, logs, "role=tool, name=unknown")
+	require.Contains(t, logs, "tool_calls=[unknown]")
+	require.Contains(t, logs, "tools=[unknown known_tool]")
+}
