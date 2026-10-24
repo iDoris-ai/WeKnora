@@ -530,7 +530,13 @@ func exerciseBodyExport(m *Manager) {
 
 func assertNoBodySentinel(t *testing.T, s tracetest.SpanStub) {
 	t.Helper()
+	if strings.Contains(s.Name, bodySentinel) {
+		t.Errorf("span name contains sentinel: %s", s.Name)
+	}
 	for _, kv := range s.Attributes {
+		if strings.Contains(string(kv.Key), bodySentinel) {
+			t.Errorf("span %s attr key contains sentinel: %s", s.Name, kv.Key)
+		}
 		if strings.Contains(kv.Value.Emit(), bodySentinel) {
 			t.Errorf("span %s attr %s contains sentinel: %s", s.Name, kv.Key, kv.Value.Emit())
 		}
@@ -539,7 +545,14 @@ func assertNoBodySentinel(t *testing.T, s tracetest.SpanStub) {
 		t.Errorf("span %s status contains sentinel: %s", s.Name, s.Status.Description)
 	}
 	for _, ev := range s.Events {
+		if strings.Contains(ev.Name, bodySentinel) {
+			t.Errorf("span %s event name contains sentinel: %s", s.Name, ev.Name)
+		}
 		for _, kv := range ev.Attributes {
+			if strings.Contains(string(kv.Key), bodySentinel) {
+				t.Errorf("span %s event %s attr key contains sentinel: %s",
+					s.Name, ev.Name, kv.Key)
+			}
 			if strings.Contains(kv.Value.Emit(), bodySentinel) {
 				t.Errorf("span %s event %s attr %s contains sentinel: %s",
 					s.Name, ev.Name, kv.Key, kv.Value.Emit())

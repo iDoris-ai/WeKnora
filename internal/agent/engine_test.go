@@ -1,22 +1,28 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1154,4 +1160,97 @@ func TestStreamLLMIncompleteFinishIsAStreamError(t *testing.T) {
 
 	require.Error(t, err, "a stream cut before its finish reason is not a completed turn")
 	require.True(t, isTransientError(err))
+}
+
+// exportUnknownToolSpan calls runToolCall with an unregistered name and returns
+// the OTLP request bytes plus the captured logs.
+func exportUnknownToolSpan(t *testing.T, exportBodies bool, toolName, args string) (string, string) {
+	t.Helper()
+	var mu sync.Mutex
+	var raw bytes.Buffer
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		raw.Write(b)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	var logBuf bytes.Buffer
+	logger.SetOutput(&logBuf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	mgr, err := langfuse.Init(langfuse.Config{
+		Enabled:        true,
+		Host:           srv.URL,
+		PublicKey:      "pk",
+		SecretKey:      "sk",
+		FlushAt:        1,
+		FlushInterval:  20 * time.Millisecond,
+		QueueSize:      16,
+		RequestTimeout: 2 * time.Second,
+		SampleRate:     1,
+		ExportBodies:   exportBodies,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = langfuse.Init(langfuse.Config{})
+	})
+
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	call := engine.runToolCall(context.Background(), types.LLMToolCall{
+		ID: "call-unknown",
+		Function: types.FunctionCall{
+			Name:      toolName,
+			Arguments: args,
+		},
+	}, 0, 1, 1, "session", "message")
+	require.Equal(t, toolName, call.Name)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.Shutdown(ctx))
+
+	mu.Lock()
+	defer mu.Unlock()
+	return raw.String(), logBuf.String()
+}
+
+func longUnregisteredToolName(sentinel string) string {
+	// Longer than the 300-rune pipeline value cap, with a space. The sentinel
+	// sits both inside the cap (pipeline logs would keep it) and at the end
+	// (span names are not truncated).
+	return sentinel + " " + strings.Repeat("ab ", 120) + sentinel
+}
+
+func TestRunToolCallLangfuseUnknownToolOmitsName(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	toolName := longUnregisteredToolName(nameSentinel)
+	require.Greater(t, len([]rune(toolName)), 300)
+	require.Contains(t, toolName, " ")
+
+	body, logs := exportUnknownToolSpan(t, false, toolName, `{"q":"plain"}`)
+	require.NotContains(t, body, nameSentinel)
+	require.Contains(t, body, "agent.tool.unknown")
+	require.Contains(t, body, "tool_name_bytes")
+	require.NotContains(t, logs, nameSentinel)
+	require.Contains(t, logs, "Tool unknown")
+	require.Contains(t, logs, `tool="unknown"`)
+}
+
+func TestRunToolCallLangfuseUnknownToolExportsArguments(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	const argSentinel = "S3NT1NEL-ARG"
+	toolName := longUnregisteredToolName(nameSentinel)
+	body, logs := exportUnknownToolSpan(t, true, toolName, `{"q":"`+argSentinel+`"}`)
+	require.Contains(t, body, argSentinel)
+	require.Contains(t, body, "agent.tool.unknown")
+	require.NotContains(t, logs, nameSentinel)
 }

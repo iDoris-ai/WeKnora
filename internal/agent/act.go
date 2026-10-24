@@ -421,8 +421,13 @@ func (e *AgentEngine) runToolCall(
 ) types.ToolCall {
 	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
 	total := "?" // unknown in isolation; callers log the batch size
+	toolLabel := "unknown"
+	_, labelErr := e.toolRegistry.GetTool(tc.Function.Name)
+	if labelErr == nil {
+		toolLabel = tc.Function.Name
+	}
 	toolTag := fmt.Sprintf("[Agent][Round-%d][Tool %s (%d/%s)]",
-		round, tc.Function.Name, i+1, total)
+		round, toolLabel, i+1, total)
 
 	var args map[string]any
 	argsStr := tc.Function.Arguments
@@ -495,8 +500,10 @@ func (e *AgentEngine) runToolCall(
 		target = e.toolRegistry.MCPCallTarget(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 	}
 	executionName, executionArgs := tc.Function.Name, args
+	loggedTool := toolLabel
 	if target != nil {
 		executionName, executionArgs = target.Name, target.Args
+		loggedTool = executionName
 	}
 
 	logger.Debugf(ctx, "%s args_len=%d", toolTag, len(tc.Function.Arguments))
@@ -521,7 +528,7 @@ func (e *AgentEngine) runToolCall(
 	common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         executionName,
+		"tool":         loggedTool,
 		"tool_call_id": tc.ID,
 		"tool_index":   fmt.Sprintf("%d/%s", i+1, total),
 	})
@@ -541,18 +548,26 @@ func (e *AgentEngine) runToolCall(
 		toolSpanInput["mcp_tool"] = target.ToolName
 	}
 	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
+	spanName := "agent.tool." + toolLabel
+	if target != nil {
+		spanName = "agent.tool." + target.Name
+	}
+	toolMeta := map[string]interface{}{
+		"iteration":               iteration,
+		"round":                   round,
+		"tool_index":              i + 1,
+		"tool_call_id":            tc.ID,
+		"session_id":              sessionID,
+		"argument_resolution":     argumentResolution,
+		"unresolved_handle_count": len(tc.UnresolvedHandles),
+	}
+	if labelErr != nil {
+		toolMeta["tool_name_bytes"] = len(tc.Function.Name)
+	}
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
-		Name:  "agent.tool." + executionName,
-		Input: toolSpanInput,
-		Metadata: map[string]interface{}{
-			"iteration":               iteration,
-			"round":                   round,
-			"tool_index":              i + 1,
-			"tool_call_id":            tc.ID,
-			"session_id":              sessionID,
-			"argument_resolution":     argumentResolution,
-			"unresolved_handle_count": len(tc.UnresolvedHandles),
-		},
+		Name:     spanName,
+		Input:    toolSpanInput,
+		Metadata: toolMeta,
 	})
 
 	principal, _ := types.PrincipalFromContext(ctx)
@@ -629,7 +644,7 @@ func (e *AgentEngine) runToolCall(
 	pipelineFields := map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         executionName,
+		"tool":         loggedTool,
 		"tool_call_id": tc.ID,
 		"duration_ms":  duration,
 		"success":      toolSuccess,
