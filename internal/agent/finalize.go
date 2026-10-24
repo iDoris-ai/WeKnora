@@ -25,7 +25,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		len(state.RoundSteps), totalToolCalls)
 	common.PipelineInfo(ctx, "Agent", "final_answer_start", map[string]interface{}{
 		"session_id":   sessionID,
-		"query":        query,
+		"query_len":    len(query),
 		"steps":        len(state.RoundSteps),
 		"tool_results": totalToolCalls,
 	})

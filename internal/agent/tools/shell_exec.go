@@ -468,16 +468,14 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 	if reason := checkShellExecBlacklist(command); reason != "" {
-		logger.Warnf(ctx, "[Tool][ShellExec] rejected by blacklist: %s command=%q",
-			reason, maskCommandAssignments(command))
+		logger.Warnf(ctx, "[Tool][ShellExec] rejected by blacklist: %s command_len=%d", reason, len(command))
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("command rejected by shell_exec safety guard: %s", reason),
 		}, nil
 	}
 	if reason := rejectExecutableStdin(command, input.Stdin); reason != "" {
-		logger.Warnf(ctx, "[Tool][ShellExec] rejected executable stdin: %s command=%q",
-			reason, maskCommandAssignments(command))
+		logger.Warnf(ctx, "[Tool][ShellExec] rejected executable stdin: %s command_len=%d", reason, len(command))
 		return &types.ToolResult{Success: false, Error: reason}, nil
 	}
 	sessionID := resolveSessionID(ctx)
@@ -522,8 +520,8 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		timeout = shellExecMaxTimeout
 	}
 
-	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir=%s timeout=%s command=%q",
-		sessionID, workDir, timeout, maskCommandAssignments(command))
+	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir=%s timeout=%s command_len=%d",
+		sessionID, workDir, timeout, len(command))
 
 	// The caller's config-wide variables apply to every command; a skill's
 	// declared credentials are added only when the model names the skill.

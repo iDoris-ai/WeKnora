@@ -337,7 +337,7 @@ func (e *AgentEngine) Execute(
 	common.PipelineInfo(ctx, "Agent", "execute_start", map[string]interface{}{
 		"session_id":   sessionID,
 		"message_id":   messageID,
-		"query":        query,
+		"query_len":    len(query),
 		"context_msgs": len(llmContext),
 	})
 

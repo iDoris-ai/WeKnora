@@ -43,11 +43,11 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		return next()
 	}
 	pipelineInfo(ctx, "Rerank", "input", map[string]interface{}{
-		"session_id":    chatManage.SessionID,
-		"candidate_cnt": len(chatManage.SearchResult),
-		"rerank_model":  chatManage.RerankModelID,
-		"rerank_thresh": chatManage.RerankThreshold,
-		"rewrite_query": chatManage.RewriteQuery,
+		"session_id":        chatManage.SessionID,
+		"candidate_cnt":     len(chatManage.SearchResult),
+		"rerank_model":      chatManage.RerankModelID,
+		"rerank_thresh":     chatManage.RerankThreshold,
+		"rewrite_query_len": len(chatManage.RewriteQuery),
 	})
 	diag := &types.RerankDiagnostics{
 		ModelID:            chatManage.RerankModelID,
@@ -126,7 +126,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		// Rerank API failed — fall back to the retrieval results so the
 		// pipeline can still return something useful to the caller.
 		pipelineWarn(ctx, "Rerank", "api_error_fallback", map[string]interface{}{
-			"error":         diag.Error,
+			"error_len":     len(diag.Error),
 			"candidate_cnt": diag.CandidateCount,
 		})
 		chatManage.SearchResult = res.Results

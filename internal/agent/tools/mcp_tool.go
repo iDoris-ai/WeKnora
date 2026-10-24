@@ -287,7 +287,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 
 		result, err := client.CallTool(callCtx, t.mcpTool.Name, input)
 		if err != nil && !isStdio {
-			logger.GetLogger(callCtx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
+			logger.GetLogger(callCtx).Warnf("MCP tool call failed, retrying with fresh connection: error_len=%d",
+				len(err.Error()))
 			_ = client.Disconnect()
 
 			client, err = getOrCreateMCPClientWithOAuthRetry(
@@ -303,7 +304,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 
 	result, err := connectAndCall(ctx)
 	if err != nil {
-		logger.GetLogger(ctx).Errorf("MCP tool call failed: %v", err)
+		// The server's error message can quote the call's input or output.
+		logger.GetLogger(ctx).Errorf("MCP tool call failed: %s error_len=%d", t.mcpTool.Name, len(err.Error()))
 		return &types.ToolResult{
 			Success: false,
 			Error:   oauthAwareConnectError(t.service, err),
@@ -344,7 +346,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	}
 
 	if result.IsError {
-		logger.GetLogger(ctx).Warnf("MCP tool returned error: %s", output)
+		logger.GetLogger(ctx).Warnf("MCP tool returned error: %s (output_len=%d)", t.mcpTool.Name, len(output))
 		return &types.ToolResult{Success: false, Error: output, Data: data}, nil
 	}
 

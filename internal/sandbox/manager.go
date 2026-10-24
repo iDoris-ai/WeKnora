@@ -92,7 +92,7 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 	// Perform security validation unless explicitly skipped
 	if effective != nil && !effective.SkipValidation {
 		if err := runScriptValidation(m.validator, effective); err != nil {
-			log.Printf("[sandbox] Security validation failed: %v", err)
+			log.Printf("[sandbox] Security validation failed: error_len=%d error_type=%T", len(err.Error()), err)
 			return &ExecuteResult{
 				ExitCode: -1,
 				Error:    err.Error(),
@@ -129,7 +129,7 @@ func runScriptValidation(validator *ScriptValidator, config *ExecuteConfig) erro
 		result := validator.ValidateScript(scriptContent)
 		if !result.Valid {
 			for _, verr := range result.Errors {
-				log.Printf("[sandbox] Validation error: %s", verr.Error())
+				log.Printf("[sandbox] Validation error: type=%s context_len=%d", verr.Type, len(verr.Context))
 			}
 			if len(result.Errors) > 0 {
 				return result.Errors[0]
@@ -143,7 +143,7 @@ func runScriptValidation(validator *ScriptValidator, config *ExecuteConfig) erro
 		result := validator.ValidateArgs(config.Args)
 		if !result.Valid {
 			for _, verr := range result.Errors {
-				log.Printf("[sandbox] Arg validation error: %s", verr.Error())
+				log.Printf("[sandbox] Arg validation error: type=%s context_len=%d", verr.Type, len(verr.Context))
 			}
 			if len(result.Errors) > 0 {
 				return result.Errors[0]
@@ -157,7 +157,7 @@ func runScriptValidation(validator *ScriptValidator, config *ExecuteConfig) erro
 		result := validator.ValidateStdin(config.Stdin)
 		if !result.Valid {
 			for _, verr := range result.Errors {
-				log.Printf("[sandbox] Stdin validation error: %s", verr.Error())
+				log.Printf("[sandbox] Stdin validation error: type=%s context_len=%d", verr.Type, len(verr.Context))
 			}
 			if len(result.Errors) > 0 {
 				return result.Errors[0]

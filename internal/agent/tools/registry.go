@@ -165,8 +165,8 @@ func (r *ToolRegistry) ExecuteTool(
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
 	common.PipelineInfo(ctx, "AgentTool", "execute_start", map[string]interface{}{
-		"tool": name,
-		"args": args,
+		"tool":     name,
+		"args_len": len(args),
 	})
 	tool, err := r.GetTool(name)
 	if err != nil {
@@ -231,8 +231,8 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 			errMsg += editSandboxMissingFieldHint
 		}
 		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
-			"tool":   name,
-			"errors": errMsg,
+			"tool":       name,
+			"errors_len": len(errMsg),
 		})
 		return &types.ToolResult{
 			Success: false,
@@ -270,17 +270,19 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	}
 
 	fields := map[string]interface{}{
-		"tool": name,
-		"args": args,
+		"tool":     name,
+		"args_len": len(args),
 	}
 	if result != nil {
 		fields["success"] = result.Success
 		if result.Error != "" {
-			fields["error"] = result.Error
+			// Tool errors can quote the call's input; see runToolCall.
+			fields["error_len"] = len(result.Error)
 		}
 	}
 	if execErr != nil {
-		fields["error"] = execErr.Error()
+		fields["error_type"] = fmt.Sprintf("%T", execErr)
+		fields["error_len"] = len(execErr.Error())
 		common.PipelineError(ctx, "AgentTool", "execute_done", fields)
 	} else if result != nil && !result.Success {
 		common.PipelineWarn(ctx, "AgentTool", "execute_done", fields)

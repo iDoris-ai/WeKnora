@@ -212,7 +212,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		"user_content_len":           len(chatManage.UserContent),
 		"faq_priority":               chatManage.FAQPriorityEnabled,
 		"intent":                     chatManage.Intent,
-		"image_description":          chatManage.ImageDescription,
+		"image_description_len":      len(chatManage.ImageDescription),
 		"chat_model_supports_vision": chatManage.ChatModelSupportsVision,
 	})
 

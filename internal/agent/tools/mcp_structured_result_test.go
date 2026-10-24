@@ -119,9 +119,13 @@ func TestMCPStructuredResultThroughCatalog(t *testing.T) {
 			tool := describeTool(ctx, t, registry, service.ID, tt.name)
 			args, err := json.Marshal(map[string]any{"tool_ref": tool.ToolRef, "arguments": map[string]any{}})
 			require.NoError(t, err)
+			logs := captureAgent24DebugLog(t)
 			result, err := registry.ExecuteTool(ctx, ToolCallMCPTool, args)
 			require.NoError(t, err)
 			require.Equal(t, !tt.result.IsError, result.Success)
+			if tt.result.IsError {
+				require.NotContains(t, logs.String(), tt.wantText, "an MCP error's text stays out of the logs")
+			}
 			visible := modelcontext.NewRegistry(true).ModelToolResultForTool(ToolCallMCPTool, result)
 			require.Contains(t, visible, tt.wantText, "the model must receive the result, not just the UI metadata")
 			require.Contains(t, CompactToolOutputForHistory(ToolCallMCPTool, result), tt.wantText,

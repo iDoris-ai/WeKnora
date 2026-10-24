@@ -177,7 +177,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, fmt.Errorf("query parameter is required")
 	}
 
-	logger.Infof(ctx, "[Tool][WebSearch] Searching with query: %s, max_results: %d", query, t.maxResults)
+	logger.Infof(ctx, "[Tool][WebSearch] Searching with query_len=%d, max_results: %d", len(query), t.maxResults)
 
 	// Get tenant ID from context
 	tenantID := uint64(0)
