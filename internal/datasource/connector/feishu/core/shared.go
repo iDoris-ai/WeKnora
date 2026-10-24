@@ -352,8 +352,8 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 	}
 
 	if len(strings.TrimSpace(string(md))) == 0 {
-		logger.Infof(ctx, "[Feishu] doc %s (%s): blocks rendered empty Markdown, falling back to export",
-			in.Title, in.ObjToken)
+		logger.Infof(ctx, "[Feishu] doc title_len=%d (%s): blocks rendered empty Markdown, falling back to export",
+			len(in.Title), in.ObjToken)
 		item, ferr := exportDocxFallback(ctx, client, in)
 		if ferr != nil {
 			return nil, ferr

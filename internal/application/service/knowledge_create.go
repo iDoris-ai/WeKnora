@@ -70,7 +70,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// Early reject before the whole-file hash below. resolveFileImportProcessConfig
 	// gates the same extension set, but this path must keep returning
 	// ErrInvalidFileType rather than the shared gate's localized message.
-	logger.Infof(ctx, "Checking file type: ext=%s", getFileType(fileName))
+	logger.Infof(ctx, "Checking file type: file_name_len=%d", len(fileName))
 	if !isValidFileType(fileName) {
 		logger.Error(ctx, "Invalid file type")
 		return nil, ErrInvalidFileType
@@ -311,7 +311,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
-	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
+	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, secutils.RedactURL(rawURL))
 
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
@@ -343,7 +343,8 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 
 	// SSRF protection: validate URL is safe to fetch (uses centralised entry-point with whitelist support)
 	if err := secutils.ValidateURLForSSRF(url); err != nil {
-		logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", url, err)
+		logger.Errorf(ctx, "URL rejected for SSRF protection: %s, error_len=%d error_type=%T",
+			secutils.RedactURL(url), len(err.Error()), err)
 		return nil, ErrInvalidURL
 	}
 
@@ -361,7 +362,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 	if exists {
-		logger.Infof(ctx, "URL already exists: %s", url)
+		logger.Infof(ctx, "URL already exists: %s", secutils.RedactURL(url))
 		// Update creation time for existing knowledge
 		existingKnowledge.CreatedAt = time.Now()
 		existingKnowledge.UpdatedAt = time.Now()
@@ -524,7 +525,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
-	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
+	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, secutils.RedactURL(fileURL))
 
 	// Get knowledge base configuration
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
@@ -547,7 +548,8 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, ErrInvalidURL
 	}
 	if err := secutils.ValidateURLForSSRF(fileURL); err != nil {
-		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, err: %v", fileURL, err)
+		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, error_len=%d error_type=%T",
+			secutils.RedactURL(fileURL), len(err.Error()), err)
 		return nil, ErrInvalidURL
 	}
 
@@ -598,7 +600,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, err
 	}
 	if exists {
-		logger.Infof(ctx, "File URL already exists: %s", fileURL)
+		logger.Infof(ctx, "File URL already exists: %s", secutils.RedactURL(fileURL))
 		existingKnowledge.CreatedAt = time.Now()
 		existingKnowledge.UpdatedAt = time.Now()
 		if err := s.repo.UpdateKnowledge(ctx, existingKnowledge); err != nil {

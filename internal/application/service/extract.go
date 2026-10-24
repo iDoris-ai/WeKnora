@@ -694,7 +694,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
-		logger.Errorf(ctx, "failed to generate table description: %v", err)
+		logger.Errorf(ctx, "failed to generate table description: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 	logger.Debugf(ctx, "table describe of knowledge %s: table_desc_len=%d",
@@ -703,7 +703,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
-		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)
+		logger.Errorf(ctx, "failed to generate column descriptions: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 	logger.Debugf(ctx, "column describe of knowledge %s: column_desc_len=%d",

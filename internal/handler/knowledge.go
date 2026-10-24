@@ -382,7 +382,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("Invalid metadata format").WithDetails(err.Error()))
 			return
 		}
-		logger.Infof(ctx, "Received file metadata: %s", secutils.SanitizeForLog(fmt.Sprintf("%v", metadata)))
+		logger.Infof(ctx, "Received file metadata: keys=%d", len(metadata))
 	}
 
 	enableMultimodelForm := c.PostForm("enable_multimodel")
@@ -429,7 +429,8 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 	}
 	if err := service.ValidateJSONUploadContent(jsonCheckName, file); err != nil {
-		logger.Errorf(ctx, "Invalid JSON upload content for %s: %v", jsonCheckName, err)
+		logger.Errorf(ctx, "Invalid JSON upload content: file_name_len=%d error_len=%d error_type=%T",
+			len(jsonCheckName), len(err.Error()), err)
 		_ = c.Error(err)
 		return
 	}
@@ -519,7 +520,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 
 	// SSRF validation for user-supplied URL
 	if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
-		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
+		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: error_len=%d error_type=%T", len(err.Error()), err)
 		c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("URL", req.URL, err)))
 		return
 	}
@@ -527,7 +528,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	logger.Infof(ctx,
 		"Creating knowledge from URL, knowledge base ID: %s, URL: %s",
 		secutils.SanitizeForLog(kbID),
-		secutils.SanitizeForLog(req.URL),
+		secutils.RedactURL(req.URL),
 	)
 
 	// Create knowledge entry from the URL

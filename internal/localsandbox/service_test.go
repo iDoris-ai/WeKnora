@@ -480,7 +480,9 @@ func TestServiceRunWorkDirLogsOmitPath(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(project, sentinel), 0o755))
 	svc := serviceFixtureWithProjects(t, &fakeBackend{exit: ExitStatus{Code: 0}}, ModeAuto, fixedProject(project))
 
-	_, err = svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "pwd", WorkDir: "/" + sentinel + "-outside"})
+	_, err = svc.Run(context.Background(), RunRequest{
+		SessionID: "s1", Command: "pwd", WorkDir: "/" + sentinel + "-outside",
+	})
 	require.Error(t, err)
 	_, err = svc.Run(context.Background(), RunRequest{
 		SessionID: "s1", Command: "pwd", WorkDir: filepath.Join(project, sentinel),

@@ -4256,8 +4256,9 @@ func (s *knowledgeService) convert(
 	}
 	sanitizeReadResult(result)
 	if result.Error != "" {
-		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q error_len=%d",
-			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, len(result.Error))
+		logger.Errorf(ctx,
+			"[convert] parser returned error kb=%s knowledge=%s file_name_len=%d type=%s engine=%q error_len=%d",
+			kb.ID, knowledge.ID, len(req.FileName), fileType, parserEngine, len(result.Error))
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
@@ -4309,8 +4310,8 @@ func (s *knowledgeService) callDocReaderWithTimeout(
 		// error via %w so errors.Is(callCtx.Err(), context.DeadlineExceeded)
 		// still works for upstream classification.
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			logger.Errorf(ctx, "[convert] docreader call timed out after %s (limit %s) for %q",
-				elapsed, timeout, req.FileName)
+			logger.Errorf(ctx, "[convert] docreader call timed out after %s (limit %s) file_name_len=%d",
+				elapsed, timeout, len(req.FileName))
 			return nil, fmt.Errorf("docreader call timeout after %s: %w", timeout, err)
 		}
 		return nil, err

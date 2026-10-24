@@ -596,8 +596,8 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		t.markTableLoaded(tableName)
 
 		logger.Infof(ctx,
-			"[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s (sheets=%v)",
-			tableName, t.sessionID, sheetNames,
+			"[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s (sheet_count=%d)",
+			tableName, t.sessionID, len(sheetNames),
 		)
 	}
 
