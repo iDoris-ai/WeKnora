@@ -132,7 +132,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	// Parse JSON response
 	var extractedEntities []*types.Entity
 	if err := common.ParseLLMJsonResponse(resp.Content, &extractedEntities); err != nil {
-		log.WithError(err).Errorf("Failed to parse entity extraction response, rsp content: %s", resp.Content)
+		log.WithError(err).Errorf("Failed to parse entity extraction response, rsp_len=%d", len(resp.Content))
 		return nil, fmt.Errorf("failed to parse entity extraction response: %w", err)
 	}
 	log.Infof("Extracted %d entities from chunk", len(extractedEntities))
@@ -143,7 +143,8 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		if entity == nil {
 			continue
 		}
-		log.Infof("[Entity %d] Title: '%s', Description: '%s'", i+1, entity.Title, entity.Description)
+		log.Infof("[Entity %d] Title: title_len=%d, Description: description_len=%d",
+			i+1, len(entity.Title), len(entity.Description))
 	}
 	log.Info("=========================================")
 
@@ -158,7 +159,8 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			continue
 		}
 		if entity.Title == "" || entity.Description == "" {
-			log.WithField("entity", entity).Warn("Invalid entity with empty title or description")
+			log.Warnf("Invalid entity with empty title or description (title_len=%d, description_len=%d)",
+				len(entity.Title), len(entity.Description))
 			continue
 		}
 		if existEntity, exists := b.entityMapByTitle[entity.Title]; !exists {
@@ -169,7 +171,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			b.entityMapByTitle[entity.Title] = entity
 			b.entityMap[entity.ID] = entity
 			entities = append(entities, entity)
-			log.Debugf("New entity added: %s (ID: %s)", entity.Title, entity.ID)
+			log.Debugf("New entity added: title_len=%d (ID: %s)", len(entity.Title), entity.ID)
 		} else {
 			if existEntity == nil {
 				log.Warnf("existEntity is nil, skip update")
@@ -178,7 +180,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			// Entity already exists, update its ChunkIDs
 			if !slices.Contains(existEntity.ChunkIDs, chunk.ID) {
 				existEntity.ChunkIDs = append(existEntity.ChunkIDs, chunk.ID)
-				log.Debugf("Updated existing entity: %s with chunk: %s", entity.Title, chunk.ID)
+				log.Debugf("Updated existing entity: title_len=%d with chunk: %s", len(entity.Title), chunk.ID)
 			}
 			existEntity.Frequency++
 			entities = append(entities, existEntity)
@@ -254,8 +256,8 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		if rel == nil {
 			continue
 		}
-		log.Infof("[Relation %d] Source: '%s', Target: '%s', Description: '%s', Strength: %d",
-			i+1, rel.Source, rel.Target, rel.Description, rel.Strength)
+		log.Infof("[Relation %d] source_len=%d, target_len=%d, description_len=%d, Strength: %d",
+			i+1, len(rel.Source), len(rel.Target), len(rel.Description), rel.Strength)
 	}
 	log.Info("===========================================")
 
@@ -272,7 +274,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		key := fmt.Sprintf("%s#%s", relationship.Source, relationship.Target)
 		relationChunkIDs := b.findRelationChunkIDs(relationship.Source, relationship.Target, entities)
 		if len(relationChunkIDs) == 0 {
-			log.Debugf("Skipping relationship %s -> %s: no common chunks", relationship.Source, relationship.Target)
+			log.Debugf("Skipping relationship: no common chunks")
 			continue
 		}
 		if existingRel, exists := b.relationshipMap[key]; !exists {
@@ -281,8 +283,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 			relationship.ChunkIDs = relationChunkIDs
 			b.relationshipMap[key] = relationship
 			relationshipsAdded++
-			log.Debugf("New relationship added: %s -> %s (ID: %s)",
-				relationship.Source, relationship.Target, relationship.ID)
+			log.Debugf("New relationship added (ID: %s)", relationship.ID)
 		} else {
 			// This relationship already exists, update its properties
 			if existingRel == nil {
@@ -304,8 +305,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 
 			if chunkIDsAdded > 0 {
 				relationshipsUpdated++
-				log.Debugf("Updated relationship: %s -> %s with %d new chunks",
-					relationship.Source, relationship.Target, chunkIDsAdded)
+				log.Debugf("Updated relationship (ID: %s) with %d new chunks", existingRel.ID, chunkIDsAdded)
 			}
 		}
 	}
@@ -471,8 +471,8 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 
 	// generate knowledge graph visualization diagram
 	mermaidDiagram := b.generateKnowledgeGraphDiagram(ctx)
-	log.Info("Knowledge graph visualization diagram:")
-	log.Info(mermaidDiagram)
+	// The diagram labels nodes with entity titles; log its size only.
+	log.Infof("Knowledge graph visualization diagram: %d bytes", len(mermaidDiagram))
 
 	return nil
 }
@@ -624,7 +624,8 @@ func (b *graphBuilder) buildChunkGraph(ctx context.Context) {
 		targetEntity := b.entityMapByTitle[rel.Target]
 
 		if sourceEntity == nil || targetEntity == nil {
-			log.Warnf("Missing entity for relationship %s -> %s", rel.Source, rel.Target)
+			log.Warnf("Missing entity for relationship %s (source_len=%d, target_len=%d)",
+				rel.ID, len(rel.Source), len(rel.Target))
 			continue
 		}
 

@@ -401,11 +401,11 @@ func (s *sessionService) ListSessions(
 	items, total, err := s.sessionRepo.QueryPaged(ctx, query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": query.TenantID,
-			"user_id":   query.UserID,
-			"keyword":   query.Keyword,
-			"source":    query.Source,
-			"agent_id":  query.AgentID,
+			"tenant_id":   query.TenantID,
+			"user_id":     query.UserID,
+			"keyword_len": len(query.Keyword),
+			"source":      query.Source,
+			"agent_id":    query.AgentID,
 		})
 		return nil, err
 	}
@@ -1009,7 +1009,8 @@ func (s *sessionService) GenerateTitleAsync(
 					"session_id": session.ID,
 				})
 			} else {
-				logger.Infof(bgCtx, "Title update event emitted successfully, session ID: %s, title: %s", session.ID, title)
+				logger.Infof(bgCtx, "Title update event emitted successfully, session ID: %s, title_len=%d",
+					session.ID, len(title))
 			}
 		}
 	}()

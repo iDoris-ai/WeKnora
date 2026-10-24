@@ -2630,7 +2630,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	// 调用模型服务进行文本关系提取
 	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, chatModel)
 	if err != nil {
-		logger.Error(ctx, "文本关系提取失败", err)
+		logger.Errorf(ctx, "文本关系提取失败: error_len=%d", len(err.Error()))
 		c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
 		return
 	}
@@ -2657,7 +2657,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, text)
 	if err != nil {
-		logger.Error(ctx, "文本关系提取失败", err)
+		logger.Errorf(ctx, "文本关系提取失败: error_len=%d", len(err.Error()))
 		return nil, err
 	}
 	extractor.RemoveUnknownRelation(ctx, graph)
