@@ -575,9 +575,11 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 				return nil, fmt.Errorf("inspect Excel worksheets: %w", err)
 			case err != nil:
 				// The preflight is best-effort: keep loading every sheet as before.
+				// The error names the worksheet that failed to open or read.
 				logger.Warnf(ctx,
-					"[Tool][DataAnalysis] Could not inspect worksheets of '%s' (session=%s): %v. Keeping all sheets.",
-					filename, t.sessionID, err,
+					"[Tool][DataAnalysis] Could not inspect worksheets of '%s' (session=%s): "+
+						"error_len=%d error_type=%T. Keeping all sheets.",
+					filename, t.sessionID, len(err.Error()), err,
 				)
 			case len(filtered) == 0:
 				return nil, fmt.Errorf("excel workbook contains no non-empty worksheets")
