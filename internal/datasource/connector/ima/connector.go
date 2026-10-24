@@ -161,7 +161,8 @@ func (c *Connector) ListResources(
 		}
 		batch, err := cli.GetKnowledgeBase(ctx, ids[i:end])
 		if err != nil {
-			logger.Warnf(ctx, "[IMA] get_knowledge_base batch failed (skipping enrichment): %v", err)
+			logger.Warnf(ctx, "[IMA] get_knowledge_base batch failed (skipping enrichment): error_len=%d error_type=%T",
+				len(err.Error()), err)
 			continue
 		}
 		for k, v := range batch {
@@ -513,7 +514,8 @@ func fetchOneMedia(
 ) (types.FetchedItem, fetchOutcome) {
 	info, err := cli.GetMediaInfo(ctx, f.MediaID)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] get_media_info(%s) failed, will retry next sync: %v", f.MediaID, err)
+		logger.Warnf(ctx, "[IMA] get_media_info(%s) failed, will retry next sync: error_len=%d error_type=%T",
+			f.MediaID, len(err.Error()), err)
 		return types.FetchedItem{}, fetchFailed
 	}
 

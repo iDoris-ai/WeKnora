@@ -477,8 +477,9 @@ func (c *Client) listAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 						Node: node,
 						Err:  wrappedErr,
 					})
-					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-						spaceID, node.NodeToken, err)
+					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s "+
+						"error_len=%d error_type=%T",
+						spaceID, node.NodeToken, len(err.Error()), err)
 					continue
 				}
 				walk(children)
@@ -520,8 +521,8 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 	children, err := c.ListWikiNodes(ctx, spaceID, root.NodeToken)
 	if err != nil {
 		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
-		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-			spaceID, root.NodeToken, err)
+		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s error_len=%d error_type=%T",
+			spaceID, root.NodeToken, len(err.Error()), err)
 		return nil, &PartialWikiNodeListError{
 			Failures: []WikiNodeListFailure{{
 				Node: root,
@@ -548,8 +549,9 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 					Node: node,
 					Err:  wrappedErr,
 				})
-				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-					spaceID, node.NodeToken, err)
+				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s "+
+					"error_len=%d error_type=%T",
+					spaceID, node.NodeToken, len(err.Error()), err)
 				continue
 			}
 			walk(grandChildren)
@@ -959,8 +961,8 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 				FolderToken: folderToken,
 				Err:         wrappedErr,
 			})
-			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s err=%v",
-				folderToken, err)
+			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s error_len=%d error_type=%T",
+				folderToken, len(err.Error()), err)
 			return
 		}
 

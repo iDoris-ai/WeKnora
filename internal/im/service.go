@@ -1761,7 +1761,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			Content: hint,
 			IsFinal: true,
 		}); err != nil {
-			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: %v", err)
+			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: error_len=%d error_type=%T",
+				len(err.Error()), err)
 		}
 		return nil
 	}
@@ -1957,7 +1958,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	if err != nil {
 		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
 		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: %v", sendErr)
+			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: error_len=%d error_type=%T",
+				len(sendErr.Error()), sendErr)
 		}
 		return
 	}
@@ -2069,7 +2071,9 @@ func (s *Service) handleMessageFullOutput(
 	if finalizeErr != nil {
 		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
 		if fallbackErr != nil {
-			logger.Errorf(ctx, "[IM] Plain reply fallback after full-output finalize failure failed: %v", fallbackErr)
+			logger.Errorf(ctx,
+				"[IM] Plain reply fallback after full-output finalize failure failed: error_len=%d error_type=%T",
+				len(fallbackErr.Error()), fallbackErr)
 		}
 	}
 
@@ -2917,7 +2921,9 @@ loop:
 	if finalizeErr != nil {
 		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalDisplay, IsFinal: true})
 		if fallbackErr != nil {
-			logger.Errorf(ctx, "[IM] Plain reply fallback after stream finalize failure failed: %v", fallbackErr)
+			logger.Errorf(ctx,
+				"[IM] Plain reply fallback after stream finalize failure failed: error_len=%d error_type=%T",
+				len(fallbackErr.Error()), fallbackErr)
 		}
 	}
 

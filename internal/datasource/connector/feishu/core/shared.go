@@ -396,8 +396,8 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		}
 		data, derr := client.downloadMediaFile(ctx, a.FileToken)
 		if derr != nil {
-			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: %v",
-				in.ObjToken, a.Name, a.FileToken, derr)
+			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: error_len=%d error_type=%T",
+				in.ObjToken, a.Name, a.FileToken, len(derr.Error()), derr)
 			items = append(items, &types.FetchedItem{
 				ExternalID:       childID,
 				Title:            a.Name,
@@ -442,8 +442,8 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		}
 		data, derr := client.downloadMediaFile(ctx, b.Image.Token)
 		if derr != nil {
-			logger.Warnf(ctx, "[Feishu] doc %s: image (token=%s) download failed: %v",
-				in.ObjToken, b.Image.Token, derr)
+			logger.Warnf(ctx, "[Feishu] doc %s: image (token=%s) download failed: error_len=%d error_type=%T",
+				in.ObjToken, b.Image.Token, len(derr.Error()), derr)
 			items = append(items, &types.FetchedItem{
 				ExternalID:       childID,
 				Title:            fmt.Sprintf("%s（内嵌图片）", in.Title),

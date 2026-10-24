@@ -4248,15 +4248,16 @@ func (s *knowledgeService) convert(
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	if err != nil {
 		code, message := docReaderFailure(err)
-		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
+		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: error_len=%d error_type=%T",
+			knowledge.ID, code, len(err.Error()), err)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			code, message, err)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 	}
 	sanitizeReadResult(result)
 	if result.Error != "" {
-		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
-			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
+		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q error_len=%d",
+			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, len(result.Error))
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
