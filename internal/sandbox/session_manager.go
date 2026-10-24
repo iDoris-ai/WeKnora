@@ -291,7 +291,7 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 	}
 	if !cfg.SkipValidation {
 		if err := runScriptValidation(m.validator, cfg); err != nil {
-			log.Printf("[sandbox] security validation failed: error_len=%d error_type=%T", len(err.Error()), err)
+			log.Printf("[sandbox] security validation failed: %v", err)
 			return &ExecuteResult{
 				ExitCode: -1,
 				Error:    err.Error(),

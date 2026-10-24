@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // defaultRunTimeout matches the shell_exec tool default so behaviour does not
@@ -184,8 +186,8 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 	if timeout > maxRunTimeout {
 		timeout = maxRunTimeout
 	}
-	logger.Infof(ctx, "[LocalSandbox] run session=%s cwd=%s timeout=%s command_len=%d",
-		req.SessionID, cwd, timeout, len(req.Command))
+	logger.Infof(ctx, "[LocalSandbox] run session=%s cwd=%s timeout=%s command=%q",
+		req.SessionID, cwd, timeout, previewCommand(req.Command))
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -261,6 +263,17 @@ func watchKill(ctx context.Context, done <-chan struct{}, proc Process) {
 	default:
 		_ = proc.Kill()
 	}
+}
+
+const commandLogLimit = 240
+
+func previewCommand(command string) string {
+	command = strings.Join(strings.Fields(command), " ")
+	command = utils.MaskCommandAssignments(command)
+	if len(command) <= commandLogLimit {
+		return command
+	}
+	return command[:commandLogLimit] + "…"
 }
 
 func drain(proc Process) (string, string) {

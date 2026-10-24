@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -428,21 +427,13 @@ func envMapToSlice(env map[string]string) []string {
 	return out
 }
 
-func TestServiceRunLogOmitsCommandText(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	backend := &fakeBackend{stdout: "ok\n", exit: ExitStatus{Code: 0}}
-	svc := serviceFixture(t, backend, ModeAuto)
-
-	_, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo " + sentinel})
-	require.NoError(t, err)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "command_len=")
+func TestPreviewCommandMasksInlineAssignments(t *testing.T) {
+	got := previewCommand(`export TOKEN="sk-secret"; FOO=bare ./run --model cogview-4`)
+	require.NotContains(t, got, "sk-secret")
+	require.NotContains(t, got, "bare")
+	require.Contains(t, got, "TOKEN=***")
+	require.Contains(t, got, "FOO=***")
+	require.Contains(t, got, "--model cogview-4")
 }
 
 // Two sessions on the same project share one directory. Overlapping Run

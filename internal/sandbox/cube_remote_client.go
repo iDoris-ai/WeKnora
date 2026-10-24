@@ -934,8 +934,8 @@ func (c *CubeRemoteClient) Exec(
 		}
 		normalized := normalizeCubeError("Exec", execErr)
 		logger.Warnf(ctx,
-			"[CubeRemote] data-plane exec failed sandbox=%s kind=%s detail_len=%d",
-			sb.SandboxID, remoteKind(normalized), len(RemoteErrorDiagnostics(normalized)),
+			"[CubeRemote] data-plane exec failed sandbox=%s detail=%s",
+			sb.SandboxID, RemoteErrorDiagnostics(normalized),
 		)
 		return nil, normalized
 	}
@@ -1437,14 +1437,14 @@ func logCubeDataPlaneExec(
 	}
 	logger.Infof(ctx,
 		"[CubeRemote] data-plane exec sandbox=%s envd_host=%s exec_user=%s "+
-			"api_key=%s envd_token=%s traffic_token=%s cmd_len=%d",
+			"api_key=%s envd_token=%s traffic_token=%s cmd=%q",
 		sb.SandboxID,
 		sb.GetHost(CubeEnvdPort),
 		strings.TrimSpace(execUser),
 		cubeCredentialPresence(client.config.CubeAPIKey),
 		cubeCredentialPresence(sb.EnvdAccessToken),
 		cubeCredentialPresence(sb.TrafficAccessToken),
-		len(commandLine),
+		commandLine,
 	)
 }
 
