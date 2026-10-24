@@ -1298,3 +1298,23 @@ func TestCallLLMWithRetryLogsOmitUnknownToolName(t *testing.T) {
 	require.Contains(t, logs, "tool/unknown content")
 	require.Contains(t, logs, "[Agent][Stream] Tool unknown")
 }
+
+func TestBreakdownContextOmitsUnknownToolName(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	toolName := longUnregisteredToolName(nameSentinel)
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(newCountingTool("known_tool"))
+
+	unknown := engine.breakdownContext([]chat.Message{
+		{Role: "user", Content: "q"},
+		{Role: "tool", ToolCallID: "c1", Name: toolName, Content: strings.Repeat("result ", 200)},
+	}, nil)
+	require.NotContains(t, unknown.String(), nameSentinel)
+	require.Contains(t, unknown.String(), "tool:unknown")
+
+	known := engine.breakdownContext([]chat.Message{
+		{Role: "tool", ToolCallID: "c2", Name: "known_tool", Content: strings.Repeat("result ", 200)},
+	}, nil)
+	require.Contains(t, known.String(), "tool:known_tool")
+}
