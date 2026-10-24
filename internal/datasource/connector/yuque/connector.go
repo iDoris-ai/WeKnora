@@ -194,8 +194,9 @@ func (c *Connector) walk(
 		if settings.FolderMode == folderModeTOC {
 			toc, tocErr := cli.ListBookTOC(ctx, bookID)
 			if tocErr != nil {
-				logger.Warnf(ctx, "[Yuque] book %d: fetch TOC failed, falling back to flat file names: %v",
-					bookID, tocErr)
+				logger.Warnf(ctx, "[Yuque] book %d: fetch TOC failed, falling back to flat file names: "+
+					"error_len=%d error_type=%T",
+					bookID, len(tocErr.Error()), tocErr)
 			} else {
 				tocSegs, inTOC = buildTOCPaths(toc)
 				tocOK = true

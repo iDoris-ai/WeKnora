@@ -78,7 +78,7 @@ func (p *OllamaProvider) Search(
 	}
 	results, err := p.doSearch(ctx, req)
 	if err != nil {
-		logger.Warnf(ctx, "[WebSearch][Ollama] failed: %v", err)
+		logger.Warnf(ctx, "[WebSearch][Ollama] failed: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 	logger.Infof(ctx, "[WebSearch][Ollama] returned %d results", len(results))

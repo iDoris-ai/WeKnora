@@ -97,7 +97,8 @@ func (c *LongPollClient) Start(ctx context.Context) error {
 		}
 
 		delay := pollReconnectDelay(attempts)
-		logger.Warnf(ctx, "[WeChat] Poll error (%v), retrying in %v (attempt %d)...", err, delay, attempts)
+		logger.Warnf(ctx, "[WeChat] Poll error (error_len=%d error_type=%T), retrying in %v (attempt %d)...",
+			len(err.Error()), err, delay, attempts)
 
 		select {
 		case <-time.After(delay):

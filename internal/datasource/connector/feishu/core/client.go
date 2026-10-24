@@ -360,7 +360,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 			return nil, fmt.Errorf("list wiki spaces: %w", err)
 		}
 		if resp.Code != 0 {
-			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg=%s", resp.Code, resp.Msg)
+			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg_len=%d", resp.Code, len(resp.Msg))
 			return nil, fmt.Errorf("list wiki spaces error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 

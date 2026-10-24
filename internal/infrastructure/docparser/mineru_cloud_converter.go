@@ -235,7 +235,8 @@ func (c *MinerUCloudReader) pollBatchResult(
 
 		items, err := c.fetchBatchStatus(ctx, batchID, headers)
 		if err != nil {
-			logger.Errorf(context.Background(), "[MinerUCloud] poll #%d failed: %v", pollCount, err)
+			logger.Errorf(context.Background(), "[MinerUCloud] poll #%d failed: error_len=%d error_type=%T",
+				pollCount, len(err.Error()), err)
 			sleepCtx(ctx, c.pollInterval)
 			continue
 		}

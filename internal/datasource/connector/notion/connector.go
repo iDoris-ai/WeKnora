@@ -580,7 +580,8 @@ func (c *Connector) queryDatabaseRecords(
 ) ([]notionPage, string, string, bool, error) {
 	dbInfo, err := getDatabaseOrDataSourceInfo(ctx, client, id)
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to get database/data_source info %s: %v", id, err)
+		logger.Warnf(ctx, "[Notion] failed to get database/data_source info %s: error_len=%d error_type=%T",
+			id, len(err.Error()), err)
 		return nil, "", "", false, err
 	}
 
@@ -591,7 +592,7 @@ func (c *Connector) queryDatabaseRecords(
 	records, err := client.QueryDatabaseAll(ctx, queryID)
 	truncated := errors.Is(err, errQueryResultTruncated)
 	if err != nil && !truncated {
-		logger.Warnf(ctx, "[Notion] failed to query database %s: %v", id, err)
+		logger.Warnf(ctx, "[Notion] failed to query database %s: error_len=%d error_type=%T", id, len(err.Error()), err)
 		return nil, "", "", false, err
 	}
 

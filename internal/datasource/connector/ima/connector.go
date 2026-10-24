@@ -455,8 +455,9 @@ func fetchNote(
 
 	content, err := cli.GetNoteContent(ctx, noteID)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] get_doc_content(note %s, title_len=%d) failed, will retry next sync: %v",
-			noteID, len(f.Title), err)
+		logger.Warnf(ctx, "[IMA] get_doc_content(note %s, title_len=%d) failed, will retry next sync: "+
+			"error_len=%d error_type=%T",
+			noteID, len(f.Title), len(err.Error()), err)
 		return types.FetchedItem{}, fetchFailed
 	}
 	if strings.TrimSpace(content) == "" {

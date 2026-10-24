@@ -87,7 +87,7 @@ func (p *BingProvider) Search(
 	}
 	results, err := p.doSearch(ctx, req)
 	if err != nil {
-		logger.Warnf(ctx, "[WebSearch][Bing] failed: %v", err)
+		logger.Warnf(ctx, "[WebSearch][Bing] failed: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 	logger.Infof(ctx, "[WebSearch][Bing] returned %d results", len(results))

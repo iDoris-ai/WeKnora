@@ -120,6 +120,8 @@ func logResponseStructure(label string, obj interface{}, prefix string) {
 				logger.Infof(context.Background(), "[%s] ... and %d more items in %s", label, len(v)-1, prefix)
 			}
 		}
+	case string:
+		logger.Infof(context.Background(), "[%s] %s = string(%d bytes)", label, prefix, len(v))
 	default:
 		logger.Infof(context.Background(), "[%s] %s = %v (%T)", label, prefix, v, v)
 	}

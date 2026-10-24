@@ -2008,7 +2008,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
-		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
+		logger.Errorf(ctx, "[IM] Send reply failed: error_len=%d error_type=%T", len(err.Error()), err)
 		return
 	}
 

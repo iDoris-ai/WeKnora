@@ -934,8 +934,8 @@ func (c *CubeRemoteClient) Exec(
 		}
 		normalized := normalizeCubeError("Exec", execErr)
 		logger.Warnf(ctx,
-			"[CubeRemote] data-plane exec failed sandbox=%s detail=%s",
-			sb.SandboxID, RemoteErrorDiagnostics(normalized),
+			"[CubeRemote] data-plane exec failed sandbox=%s kind=%s detail_len=%d",
+			sb.SandboxID, remoteKind(normalized), len(RemoteErrorDiagnostics(normalized)),
 		)
 		return nil, normalized
 	}

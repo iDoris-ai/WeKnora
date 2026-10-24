@@ -118,7 +118,9 @@ func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.
 		return nil, fmt.Errorf("http decode read submit response: %w", err)
 	}
 	if strings.TrimSpace(submit.TaskID) == "" {
-		logger.Errorf(context.Background(), "[WeKnoraCloud] submit response missing task_id (status=%q message=%q)", submit.Status, submit.Message)
+		logger.Errorf(context.Background(),
+			"[WeKnoraCloud] submit response missing task_id (status=%q message_len=%d)",
+			submit.Status, len(submit.Message))
 		return nil, fmt.Errorf("weknoracloud docreader submit response missing task_id")
 	}
 	logger.Infof(ctx, "[WeKnoraCloud] task submitted task_id=%s file=%q type=%q", submit.TaskID, req.FileName, req.FileType)
@@ -190,21 +192,25 @@ func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, t
 			}
 			res := fromHTTPReadResponse(taskResp.Result)
 			if res.Error != "" {
-				logger.Errorf(ctx, "[WeKnoraCloud] task_id=%s completed with result.error: %s", taskID, res.Error)
+				logger.Errorf(ctx,
+					"[WeKnoraCloud] task_id=%s completed with result.error error_len=%d", taskID, len(res.Error))
 			} else {
 				logger.Debugf(ctx, "[WeKnoraCloud] task_id=%s completed ok markdownLen=%d", taskID, len(res.MarkdownContent))
 			}
 			return res, nil
 		case "failed":
 			if taskResp.Error != "" {
-				logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s failed: %s", taskID, taskResp.Error)
+				logger.Errorf(context.Background(),
+					"[WeKnoraCloud] task_id=%s failed: error_len=%d", taskID, len(taskResp.Error))
 				return nil, fmt.Errorf("weknoracloud docreader task failed: %s", taskResp.Error)
 			}
-			logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s failed: %s", taskID, taskResp.Message)
+			logger.Errorf(context.Background(),
+				"[WeKnoraCloud] task_id=%s failed: message_len=%d", taskID, len(taskResp.Message))
 			return nil, fmt.Errorf("weknoracloud docreader task failed: %s", taskResp.Message)
 		case "cancelled":
 			if taskResp.Error != "" {
-				logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s cancelled: %s", taskID, taskResp.Error)
+				logger.Errorf(context.Background(),
+					"[WeKnoraCloud] task_id=%s cancelled: error_len=%d", taskID, len(taskResp.Error))
 				return nil, fmt.Errorf("weknoracloud docreader task cancelled: %s", taskResp.Error)
 			}
 			logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s cancelled", taskID)
