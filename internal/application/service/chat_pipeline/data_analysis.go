@@ -95,7 +95,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	// Load data into DuckDB
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get data schema: %v", err)
+		logger.Errorf(ctx, "Failed to get data schema: error_len=%d error_type=%T", len(err.Error()), err)
 		return next()
 	}
 

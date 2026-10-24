@@ -259,7 +259,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	schema, err := t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': %v", input.KnowledgeID, err)
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': error_len=%d error_type=%T",
+			input.KnowledgeID, len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to load knowledge ID '%s': %v", input.KnowledgeID, err),
@@ -523,7 +524,8 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 
 		_, err := t.db.ExecContext(ctx, createTableSQL)
 		if err != nil {
-			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: %v", err)
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: error_len=%d error_type=%T",
+				len(err.Error()), err)
 			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
 		}
 		t.markTableLoaded(tableName)

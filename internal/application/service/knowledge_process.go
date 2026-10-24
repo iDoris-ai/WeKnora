@@ -3821,7 +3821,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.FileURL != "" {
 		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
 		if err := secutils.ValidateURLForSSRF(payload.FileURL); err != nil {
-			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, err: %v", payload.FileURL, err)
+			logger.Errorf(ctx,
+				"File URL rejected for SSRF protection in ProcessDocument: %s, error_len=%d error_type=%T",
+				secutils.RedactURL(payload.FileURL), len(err.Error()), err)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
@@ -3833,7 +3835,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		resolvedFileType := payload.FileType
 		contentBytes, err := downloadFileFromURL(ctx, payload.FileURL, &resolvedFileName, &resolvedFileType)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to download file from URL: %s, error: %v", payload.FileURL, err)
+			// *url.Error quotes the full URL, so the error is logged by length only.
+			logger.Errorf(ctx, "Failed to download file from URL: %s, error_len=%d error_type=%T",
+				secutils.RedactURL(payload.FileURL), len(err.Error()), err)
 			if isLastRetry {
 				knowledge.ParseStatus = "failed"
 				knowledge.ErrorMessage = err.Error()
@@ -4186,7 +4190,8 @@ func (s *knowledgeService) convert(
 
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
-			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", payload.URL, err)
+			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, error_len=%d error_type=%T",
+				secutils.RedactURL(payload.URL), len(err.Error()), err)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()

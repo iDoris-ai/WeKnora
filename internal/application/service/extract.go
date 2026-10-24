@@ -654,7 +654,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 使用knowledge.ID作为表名，根据文件类型自动加载数据
 	tableSchema, err := duckdbTool.LoadFromKnowledge(ctx, resources.knowledge)
 	if err != nil {
-		logger.Errorf(ctx, "failed to load data into DuckDB: %v", err)
+		logger.Errorf(ctx, "failed to load data into DuckDB: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 
