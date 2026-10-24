@@ -139,7 +139,7 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 				c.Next()
 			}, g.apiKeyAuthorizer.Middleware())
 			RegisterAgent24KnowledgeRoutes(v1, nil,
-				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs), g)
+				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs), nil, g)
 
 			body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},` +
@@ -178,6 +178,49 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 			if resp.Completeness != "complete" || !slices.Equal(resp.EffectiveScope.KnowledgeBaseIDs, tc.scopeIDs) ||
 				!slices.Equal(hitKBs, tc.scopeIDs) {
 				t.Fatalf("body %s, want complete with effective_scope and hits in %v", w.Body.String(), tc.scopeIDs)
+			}
+		})
+	}
+}
+
+// The read route resolves E the same way: with a key restricted to kb-a, a document in kb-a reads with
+// effective_scope [kb-a] even when kb-b is asked for too, a document in kb-b is not_found, and kb-b alone is
+// empty_scope.
+func TestAgent24KnowledgeReadRouteKBAllowList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	scope := types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-a"},
+		Capabilities:     types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+	}
+	for _, tc := range []struct {
+		name, kbs, knowledge string
+		status               int
+		want                 string // in the body
+	}{
+		{"allowed document", `"kb-a","kb-b"`, "k-kb-a", http.StatusOK, `"knowledge_base_ids":["kb-a"]`},
+		{"disallowed document", `"kb-a","kb-b"`, "k-kb-b", http.StatusNotFound, `"code":"not_found"`},
+		{"disallowed only", `"kb-b"`, "k-kb-b", http.StatusForbidden, `"reason":"empty_scope"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &rbacGuards{apiKeyAuthorizer: middleware.NewAPIKeyRouteAuthorizer()}
+			engine := gin.New()
+			v1 := engine.Group("/api/v1")
+			v1.Use(func(c *gin.Context) {
+				ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
+				c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(ctx, scope))
+				c.Next()
+			}, g.apiKeyAuthorizer.Middleware())
+			RegisterAgent24KnowledgeRoutes(v1, nil, nil,
+				handler.NewAgent24KnowledgeReadHandler(agent24SearchScopeDB(t), &agent24SearchScopeKBs{}), g)
+
+			body := `{"protocol_version":1,"request_id":"r1","generation":7,` +
+				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},"knowledge_id":"` + tc.knowledge + `"}`
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/read",
+				strings.NewReader(body)))
+			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("status %d body %s, want %d with %s", w.Code, w.Body.String(), tc.status, tc.want)
 			}
 		})
 	}

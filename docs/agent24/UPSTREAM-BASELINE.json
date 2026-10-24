@@ -279,9 +279,38 @@
           ],
           "remove_when": "上游不会提供，长期保留；随 Knowledge 集成存续",
           "added_on": "2026-10-24"
+        },
+        {
+          "id": "A24-KB-15",
+          "issue": "iDoris-ai/WeKnora#38",
+          "summary": "Knowledge 集成 read 端点接线（KB-C1-01c ② 第 4 片，CONTRACT-READONLY-v1 r10 §4、R6.4、R9.3）：处理器、路由、集成允许列表、容器注册；密钥可用时能力声明含 read，否则就绪把 operations.read 报为 disabled/tag_key_missing；read.schema.json 副本",
+          "upstream_commit": null,
+          "paths": [
+            "internal/handler/agent24_knowledge_read_handler.go",
+            "internal/handler/agent24_knowledge_read_handler_test.go",
+            "internal/handler/testdata/agent24_knowledge/read.schema.json",
+            "internal/handler/testdata/agent24_knowledge/README.md",
+            "internal/handler/agent24_knowledge_ready_schema_test.go",
+            "internal/handler/agent24_knowledge_capabilities.go",
+            "internal/handler/agent24_knowledge_capabilities_test.go",
+            "internal/handler/agent24_knowledge_ready.go",
+            "internal/handler/agent24_knowledge_ready_test.go",
+            "internal/handler/agent24_knowledge_search.go",
+            "internal/handler/agent24_knowledge_search_test.go",
+            "internal/router/agent24_knowledge_routes.go",
+            "internal/router/agent24_knowledge_routes_test.go",
+            "internal/router/agent24_integration_gate.go",
+            "internal/router/agent24_integration_gate_test.go",
+            "internal/router/agent24_integration_router_test.go",
+            "internal/router/agent24_knowledge_search_scope_test.go",
+            "internal/router/router.go",
+            "internal/container/container.go"
+          ],
+          "remove_when": "上游不会提供，长期保留；随 Knowledge 集成存续",
+          "added_on": "2026-10-24"
         }
       ],
-      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-24 有十五项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，6 个路径）、A24-KB-02（iDoris-ai/WeKnora#37，11 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）、A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）、A24-KB-06（iDoris-ai/WeKnora#38，5 个路径）、A24-KB-07（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-08（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-09（iDoris-ai/WeKnora#38，9 个路径）、A24-KB-10（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-11（iDoris-ai/WeKnora#63，6 个路径）、A24-KB-12（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-13（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-14（iDoris-ai/WeKnora#38，2 个路径）；各项路径可以重叠（后一项改了前一项登记过的文件时两边都列）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
+      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-10-24 有十六项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，6 个路径）、A24-KB-02（iDoris-ai/WeKnora#37，11 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）、A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）、A24-KB-06（iDoris-ai/WeKnora#38，5 个路径）、A24-KB-07（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-08（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-09（iDoris-ai/WeKnora#38，9 个路径）、A24-KB-10（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-11（iDoris-ai/WeKnora#63，6 个路径）、A24-KB-12（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-13（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-14（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-15（iDoris-ai/WeKnora#38，19 个路径）；各项路径可以重叠（后一项改了前一项登记过的文件时两边都列）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
     },
     "absorbed_upstream_release": {
       "tag": "v0.8.3",

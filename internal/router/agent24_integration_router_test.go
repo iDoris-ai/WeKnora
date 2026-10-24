@@ -132,8 +132,9 @@ func TestAgent24IntegrationCredentialGateNewRouter(t *testing.T) {
 
 				Agent24KnowledgeReadyHandler:  &handler.Agent24KnowledgeReadyHandler{},
 				Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
+				Agent24KnowledgeReadHandler:   &handler.Agent24KnowledgeReadHandler{},
 			})
-			for _, op := range []string{"ready", "search"} {
+			for _, op := range []string{"ready", "search", "read"} {
 				req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/"+op, strings.NewReader("{}"))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("X-API-Key", "sk-test")
@@ -335,8 +336,9 @@ func TestAgent24IntegrationAuthEnvelopeNewRouter(t *testing.T) {
 				TenantMemberService:           tc.members,
 				Agent24KnowledgeReadyHandler:  &handler.Agent24KnowledgeReadyHandler{},
 				Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
+				Agent24KnowledgeReadHandler:   &handler.Agent24KnowledgeReadHandler{},
 			})
-			for _, op := range []string{"ready", "search"} {
+			for _, op := range []string{"ready", "search", "read"} {
 				t.Run(op, func(t *testing.T) {
 					req := httptest.NewRequest(
 						http.MethodPost, "/api/v1/agent24/knowledge/"+op, strings.NewReader("{}"),
@@ -380,6 +382,7 @@ func TestAgent24StandaloneAuthEnvelopeNewRouter(t *testing.T) {
 		UserService:                   agent24FakeUserSvc{},
 		Agent24KnowledgeReadyHandler:  &handler.Agent24KnowledgeReadyHandler{},
 		Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
+		Agent24KnowledgeReadHandler:   &handler.Agent24KnowledgeReadHandler{},
 	})
 
 	t.Run("no credential", func(t *testing.T) {

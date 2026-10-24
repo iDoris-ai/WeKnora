@@ -34,8 +34,8 @@ func ResetAgent24KnowledgeTagKeyForTest() {
 }
 
 // agent24SearchTagKey is the revision identifier key (R5.1); nil when AGENT24_KNOWLEDGE_TAG_KEY is unset or
-// invalid. Without it search is disabled (R6.4): the capability declaration leaves search out, ready reports
-// it and the endpoint refuses, all from the one read of agent24TagKeyOnce. Only standalone can get here:
+// invalid. Without it search and read are disabled (R6.4): the capability declaration leaves them out, ready
+// reports them and the endpoints refuse, all from the one read of agent24TagKeyOnce. Only standalone can get here:
 // integration mode refuses to start without the key.
 func agent24SearchTagKey() []byte {
 	key, err := agent24TagKeyOnce()
@@ -45,8 +45,9 @@ func agent24SearchTagKey() []byte {
 	return key
 }
 
-// agent24SearchDisabledReason is the reason of operations.search when search is disabled.
-const agent24SearchDisabledReason = "tag_key_missing"
+// agent24TagKeyMissingReason is the reason of operations.search and operations.read when they are disabled
+// for want of the revision key.
+const agent24TagKeyMissingReason = "tag_key_missing"
 
 // agent24Searcher is the upstream retrieval (interfaces.KnowledgeBaseService.HybridSearch).
 type agent24Searcher interface {
@@ -95,7 +96,7 @@ type agent24SearchResponse struct {
 	PartialFailures []agent24SearchFailure `json:"partial_failures,omitempty"`
 }
 
-// agent24StorageError classifies a database failure (resolving E, index facts, the hit snapshot): clientGone
+// agent24StorageError classifies a database failure (resolving E, index facts, the search or read snapshot): clientGone
 // when the caller aborted, write nothing (R7.1); timeout once the request deadline has passed; otherwise
 // unavailable/dependency. The raw error is for the log only (R6.3).
 func agent24StorageError(ctx context.Context, err error) (*agent24KnowledgeError, bool) {
@@ -105,7 +106,7 @@ func agent24StorageError(ctx context.Context, err error) (*agent24KnowledgeError
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return agent24Timeout(), false
 	}
-	logger.Warnf(ctx, "agent24 knowledge search: storage: %v", err)
+	logger.Warnf(ctx, "agent24 knowledge: storage: %v", err)
 	return agent24Unavailable("dependency"), false
 }
 

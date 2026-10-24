@@ -617,7 +617,7 @@ func TestAgent24KnowledgeTagKeyReadOnce(t *testing.T) {
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
 			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
 			assert.Equal(t, []bool{tc.enabled, !tc.enabled, tc.enabled},
-				[]bool{slices.Contains(ops, "search"), ready.searchDisabled, search.key != nil})
+				[]bool{slices.Contains(ops, "search"), ready.keyMissing, search.key != nil})
 		})
 	}
 }
@@ -636,7 +636,7 @@ func TestAgent24KnowledgeSearchKeyAgreement(t *testing.T) {
 			agent24SetTagKey(t, tc.env)
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
 			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
-			assert.Equal(t, !tc.enabled, ready.searchDisabled)
+			assert.Equal(t, !tc.enabled, ready.keyMissing)
 			if tc.enabled {
 				assert.Equal(t, agent24TestKey, search.key)
 			} else {

@@ -10,9 +10,9 @@ import (
 )
 
 // RegisterAgent24KnowledgeRoutes registers the Agent24 knowledge integration
-// endpoints (fork patches A24-KB-02, A24-KB-10); a nil handler skips its route.
+// endpoints (fork patches A24-KB-02, A24-KB-10, A24-KB-15); a nil handler skips its route.
 func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24KnowledgeReadyHandler,
-	s *handler.Agent24KnowledgeSearchHandler, g *rbacGuards,
+	s *handler.Agent24KnowledgeSearchHandler, rd *handler.Agent24KnowledgeReadHandler, g *rbacGuards,
 ) {
 	if h != nil {
 		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/ready", apiKeyRetrieve(apiKeyAny()), g.Viewer(), h.Ready)
@@ -20,5 +20,8 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 	if s != nil {
 		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/search", apiKeyRetrieve(apiKeyAny()), g.Viewer(),
 			s.Search)
+	}
+	if rd != nil {
+		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/read", apiKeyRetrieve(apiKeyAny()), g.Viewer(), rd.Read)
 	}
 }

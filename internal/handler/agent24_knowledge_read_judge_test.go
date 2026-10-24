@@ -342,3 +342,39 @@ func TestAgent24JudgeReadPagesToEnd(t *testing.T) {
 		}
 	}
 }
+
+// A document-level cursor whose tag still matches but whose offset is at the end of the text or inside a
+// rune (no cursor this server issues) restarts that chunk instead of slicing out of range (PR #82 review);
+// an empty chunk is a segment of its own and costs no budget.
+func TestAgent24JudgeReadDocumentOddCursorAndEmptyChunk(t *testing.T) {
+	key := agent24ReadTestKey
+	snap := agent24ReadTestSnapshot()
+	source := agent24SourceRevision(key, "doc", snap.Fingerprint)
+	build := agent24IndexBuildID(key, "doc", []string{"c1", "c2", "c3"})
+	tag3 := agent24ContentTag(key, "c3", "三四五")
+	for _, off := range []int{len("三四五"), 1} {
+		cur := &agent24ReadCursor{
+			SourceRevision: source, IndexBuildID: build, Position: 2, Offset: off, ContentTag: tag3,
+		}
+		page, kerr := agent24JudgeRead(key, agent24ReadRequest{
+			KnowledgeID: "doc", Cursor: cur, PageLimit: 100,
+			MaxBytes: 1000,
+		}, snap)
+		require.Nil(t, kerr, off)
+		require.Len(t, page.Segments, 1, off)
+		assert.Equal(t, "三四五", page.Segments[0].Text, off)
+		assert.Nil(t, page.NextCursor, off)
+	}
+
+	snap.Chunks[1].Content = ""
+	build = agent24IndexBuildID(key, "doc", []string{"c1", "c2", "c3"})
+	page, kerr := agent24JudgeRead(key, agent24ReadRequest{KnowledgeID: "doc", PageLimit: 100, MaxBytes: 3}, snap)
+	require.Nil(t, kerr)
+	require.Len(t, page.Segments, 2)
+	assert.Equal(t, []string{"one", ""}, []string{page.Segments[0].Text, page.Segments[1].Text})
+	assert.Equal(t, agent24ContentTag(key, "c2", ""), page.Segments[1].ContentTag)
+	require.NotNil(t, page.NextCursor)
+	c, ok := agent24DecodeReadCursor(key, "doc", "", *page.NextCursor)
+	require.True(t, ok)
+	assert.Equal(t, agent24ReadCursor{SourceRevision: source, IndexBuildID: build, Position: 2}, c)
+}

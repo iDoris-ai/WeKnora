@@ -112,8 +112,8 @@ func TestOverlayLiveDockerSandboxCapabilityPreservesIntegration(t *testing.T) {
 	}
 }
 
-// search is declared exactly when the revision key is usable (R9.3), the same judgement the ready and search
-// handlers make at construction (R6.4), all from the one read of agent24TagKeyOnce; read is not implemented yet.
+// search and read are declared exactly when the revision key is usable (R9.3), the same judgement the ready,
+// search and read handlers make at construction (R6.4), all from the one read of agent24TagKeyOnce.
 func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 	t.Setenv(Agent24KnowledgeModeEnv, "")
 	for _, tc := range []struct {
@@ -123,7 +123,7 @@ func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 		{"unset", "", []string{}},
 		{"not base64", "%%%", []string{}},
 		{"31 bytes", base64.StdEncoding.EncodeToString(make([]byte, 31)), []string{}},
-		{"32 bytes", base64.StdEncoding.EncodeToString(make([]byte, 32)), []string{"search"}},
+		{"32 bytes", base64.StdEncoding.EncodeToString(make([]byte, 32)), []string{"search", "read"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			agent24SetTagKey(t, tc.key)
@@ -131,7 +131,9 @@ func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 			declared := len(tc.want) > 0
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
 			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
-			assert.Equal(t, []bool{!declared, declared}, []bool{ready.searchDisabled, search.key != nil})
+			read := NewAgent24KnowledgeReadHandler(nil, nil)
+			assert.Equal(t, []bool{!declared, declared, declared},
+				[]bool{ready.keyMissing, search.key != nil, read.key != nil})
 		})
 	}
 }
