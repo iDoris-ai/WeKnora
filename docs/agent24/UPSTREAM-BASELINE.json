@@ -312,7 +312,7 @@
         {
           "id": "A24-OBS-01",
           "issue": "iDoris-ai/WeKnora#40",
-          "summary": "服务端默认不记正文与凭据第 1 片（KB-OBS-01）：访问日志默认不记请求/响应正文（AGENT24_LOG_HTTP_BODY 开关），查询串值一律 ***（访问日志与 Langfuse http.query），凭据类路径参数记路由模板、未匹配路由记占位符，gorm 日志不带绑定值（含 Scan 的 Recorder），secret 设置的审计不写值，飞书 token、ima api_key 不记前后缀",
+          "summary": "服务端默认不记正文与凭据第 1 片（KB-OBS-01）：访问日志默认不记请求/响应正文（AGENT24_LOG_HTTP_BODY 开关），查询串值一律 ***（访问日志与 Langfuse http.query），凭据类路径参数记路由模板、未匹配路由记占位符，gorm 日志不带绑定值（含 Scan 的 Recorder），secret 设置的审计不写值，飞书 token 不记前后缀、ima api_key 只记是否已设置",
           "upstream_commit": null,
           "paths": [
             "internal/middleware/logger.go",
