@@ -195,8 +195,9 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			}
 		}
 
-		logger.Errorf(ctx, "[SyncTask] Task failed (exhausted retries) type=%s id=%s elapsed=%v err=%v",
-			task.Type(), taskID, time.Since(start), lastErr)
+		logger.Errorf(ctx,
+			"[SyncTask] Task failed (exhausted retries) type=%s id=%s elapsed=%v error_len=%d error_type=%T",
+			task.Type(), taskID, time.Since(start), len(lastErr.Error()), lastErr)
 		if onFinalFailure != nil {
 			// The attempt's own context may be past its deadline; the
 			// callback only writes status, so give it a fresh bound.

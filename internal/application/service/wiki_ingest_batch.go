@@ -633,7 +633,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					rateLimited = true
 				}
 				mapMu.Unlock()
-				logger.Warnf(mapCtx, "wiki ingest: failed to map knowledge %s: %v", op.KnowledgeID, err)
+				logger.Warnf(mapCtx, "wiki ingest: failed to map knowledge %s: error_len=%d error_type=%T",
+					op.KnowledgeID, len(err.Error()), err)
 				return nil // Don't fail the whole batch
 			}
 
@@ -792,7 +793,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// never landed. Re-queue the contributing documents (same
 				// fail_count budget as a map failure) so a later batch retries
 				// instead of silently dropping the row at trim time.
-				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, reduceErr)
+				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: error_len=%d error_type=%T",
+					slug, len(reduceErr.Error()), reduceErr)
 				collectUnapplied(updates)
 				if isLikelyRateLimitError(reduceErr) {
 					reduceMu.Lock()

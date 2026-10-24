@@ -2485,7 +2485,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 执行FAQ导入（传入已处理的偏移量，用于进度计算）
 	if err := s.executeFAQImport(ctx, payload.TaskID, payload.KBID, faqPayload, payload.TenantID, progress.FailedCount+processedCount, progress); err != nil {
-		logger.Errorf(ctx, "FAQ import task failed: %s, error: %v", payload.TaskID, err)
+		logger.Errorf(ctx, "FAQ import task failed: %s, error_len=%d error_type=%T",
+			payload.TaskID, len(err.Error()), err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {

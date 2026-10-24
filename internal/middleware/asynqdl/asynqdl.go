@@ -82,8 +82,9 @@ func MiddlewareWithCallback(repo interfaces.TaskDeadLetterRepository, cb OnDeadL
 				if dl != nil {
 					if insertErr := repo.Insert(context.Background(), dl); insertErr != nil {
 						logger.Warnf(ctx,
-							"asynq dead-letter: failed to record %s task: %v (original task error: %v)",
-							t.Type(), insertErr, err,
+							"asynq dead-letter: failed to record %s task: %v "+
+								"(original task error_len=%d error_type=%T)",
+							t.Type(), insertErr, len(err.Error()), err,
 						)
 					}
 				}
