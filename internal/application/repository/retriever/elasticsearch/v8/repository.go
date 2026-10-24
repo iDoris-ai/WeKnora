@@ -3,6 +3,7 @@ package v8
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -486,6 +487,16 @@ func (e *elasticsearchRepository) buildVectorScriptScoreQuery(
 	}, nil
 }
 
+// esSearchError keeps only the status and error type of a failed search (fork patch A24-OBS-02): the
+// reason can echo the query ("failed to create query: ..."), and this error reaches logs and tracing.
+func esSearchError(err error) error {
+	var esErr *types.ElasticsearchError
+	if !errors.As(err, &esErr) {
+		return err
+	}
+	return &types.ElasticsearchError{Status: esErr.Status, ErrorCause: types.ErrorCause{Type: esErr.ErrorCause.Type}}
+}
+
 // VectorRetrieve performs vector similarity search using cosine similarity
 // Returns a slice of RetrieveResult containing matching documents
 func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
@@ -513,6 +524,7 @@ func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
 		Source_: sourceFilter,
 	}).Do(ctx)
 	if err != nil {
+		err = esSearchError(err)
 		log.Errorf("[Elasticsearch] Vector search failed: %v", err)
 		return nil, err
 	}
@@ -553,7 +565,10 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	params typesLocal.RetrieveParams,
 ) ([]*typesLocal.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
-	log.Infof("[Elasticsearch] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
+	log.Infof(
+		"[Elasticsearch] Performing keywords retrieval with query_len=%d, topK: %d",
+		len(params.Query), params.TopK,
+	)
 
 	filter := e.getBaseConds(params)
 	// Build must conditions for content matching
@@ -572,6 +587,7 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 		Source_: sourceFilter,
 	}).Do(ctx)
 	if err != nil {
+		err = esSearchError(err)
 		log.Errorf("[Elasticsearch] Keywords search failed: %v", err)
 		return nil, err
 	}
@@ -591,7 +607,7 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	}
 
 	if len(results) == 0 {
-		log.Warnf("[Elasticsearch] No keyword matches found for query: %s", params.Query)
+		log.Warnf("[Elasticsearch] No keyword matches found for query_len=%d", len(params.Query))
 	} else {
 		log.Infof("[Elasticsearch] Keywords retrieval found %d results", len(results))
 		log.Debugf("[Elasticsearch] Top result score: %.4f", results[0].Score)
