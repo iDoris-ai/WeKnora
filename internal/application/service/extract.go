@@ -359,7 +359,8 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		// The model answered in prose (e.g. declined a table-of-contents
 		// chunk). Replaying the same input cannot help, so finish the task
 		// instead of letting asynq retry it (issue #3600).
-		logger.Warnf(ctx, "graph extraction skipped for chunk %s: %v", p.ChunkID, err)
+		// The error quotes the start of the model's answer.
+		logger.Warnf(ctx, "graph extraction skipped for chunk %s: error_len=%d", p.ChunkID, len(err.Error()))
 		graphOut["skipped"] = "model_declined"
 		return nil
 	}

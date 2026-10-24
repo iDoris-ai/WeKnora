@@ -162,7 +162,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Executing query against database...")
 	rows, err := t.db.WithContext(ctx).Raw(securedSQL).Rows()
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DatabaseQuery] Query execution failed: %v", err)
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] Query execution failed: error_len=%d", len(err.Error()))
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Query execution failed: %v", err),

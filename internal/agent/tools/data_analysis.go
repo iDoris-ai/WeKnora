@@ -402,7 +402,8 @@ func (t *DataAnalysisTool) executeSingleQuery(
 
 	rows, err := conn.QueryContext(ctx, sqlQuery)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: %v", err)
+		// Engine errors quote the SQL (a missing column, the failing clause).
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: error_len=%d", len(err.Error()))
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 	defer rows.Close()
