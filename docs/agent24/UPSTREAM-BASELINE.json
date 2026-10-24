@@ -336,7 +336,7 @@
         {
           "id": "A24-OBS-02",
           "issue": "iDoris-ai/WeKnora#40",
-          "summary": "服务端默认不记正文与凭据第 2 片（KB-OBS-01）：检索路径 handler、service、repository 的 query 与命中正文日志改记长度，LLM 请求日志只记字节数，rerank 调试日志与检索路径的 Langfuse 属性只记长度，删除 postgres 一处死代码，ES v7/v8 检索失败的错误只带状态码与错误类型，LLM 与 rerank 日志的 endpoint 去掉 userinfo、查询值打码",
+          "summary": "服务端默认不记正文与凭据第 2 片（KB-OBS-01）：检索路径 handler、service、repository 的 query 与命中正文日志改记长度，LLM 请求日志只记字节数，rerank 调试日志、retrieve span 的 Input 与命中和 rerank 段落预览只记长度（embedding、rerank、chat 模型的 Langfuse wrapper 仍导出正文，归 OBS-4），删除 postgres 一处死代码，ES v7/v8 检索失败的错误只带状态码与错误类型，LLM 与 rerank 日志的 endpoint 去掉 userinfo、查询值打码",
           "upstream_commit": null,
           "paths": [
             "internal/application/repository/retriever/elasticsearch/v7/repository.go",
