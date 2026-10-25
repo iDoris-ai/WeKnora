@@ -149,8 +149,16 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if setter, ok := e.(interface{ SetSupportsDimensionOverride(bool) }); ok {
 		setter.SetSupportsDimensionOverride(config.SupportsDimensionOverride)
 	}
-	// Innermost: gate the real provider round-trips (including the per-sub-batch
-	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
+	// Agent24 A24-KB-17. Innermost decorator, under the concurrency gate so the
+	// pool's sub-batches pass both (a refusal holds a slot only until it
+	// returns, with no provider call). The debug and langfuse decorators above
+	// still see a refusal as a failed call. The destination is
+	// the address the client dials, including a vendor default substituted for
+	// an empty BaseURL.
+	dest, destErr := ProcessingDestinationForConfig(config, ollamaService)
+	e = &policyEmbedder{inner: e, dest: dest, destErr: destErr}
+	// Gate the real provider round-trips (including the per-sub-batch pool
+	// callbacks) before debug/langfuse wrap for logging/tracing. See
 	// concurrencyEmbedder for why this sits below the observability decorators.
 	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency)
 	if logger.LLMDebugEnabled() {

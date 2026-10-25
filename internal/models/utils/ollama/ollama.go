@@ -3,6 +3,7 @@ package ollama
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/ollama/ollama/api"
 )
 
@@ -29,11 +31,7 @@ type OllamaService struct {
 func GetOllamaService() (*OllamaService, error) {
 	// Get Ollama base URL from environment variable, if not set use provided baseURL or default value
 	logger.GetLogger(context.Background()).Infof("Ollama base URL: %s", os.Getenv("OLLAMA_BASE_URL"))
-	baseURL := "http://localhost:11434"
-	envURL := os.Getenv("OLLAMA_BASE_URL")
-	if envURL != "" {
-		baseURL = envURL
-	}
+	baseURL := BaseURLFromEnv()
 
 	// Create URL object
 	parsedURL, err := url.Parse(baseURL)
@@ -51,6 +49,7 @@ func GetOllamaService() (*OllamaService, error) {
 			IdleConnTimeout:     90 * time.Second,
 			MaxIdleConns:        10,
 		},
+		CheckRedirect: guardedRedirect,
 	}
 	client := api.NewClient(parsedURL, ollamaHTTPClient)
 
@@ -134,8 +133,49 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 	return false, nil
 }
 
-// PullModel pulls a model
+// BaseURLFromEnv is the Ollama base URL: OLLAMA_BASE_URL, otherwise http://localhost:11434.
+func BaseURLFromEnv() string {
+	if envURL := os.Getenv("OLLAMA_BASE_URL"); envURL != "" {
+		return envURL
+	}
+	return "http://localhost:11434"
+}
+
+// guardedRedirect (Agent24 A24-KB-17): the processing guard judged the base URL, so a request that carries a
+// guard may not follow a redirect to another origin (Go would replay the POST body there). Without a guard
+// (standalone) the default policy of at most 10 redirects is kept.
+func guardedRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if types.ProcessingGuardFromContext(req.Context()) == nil {
+		return nil
+	}
+	// Same origin as the guard judged it: both sides normalized (default ports filled in, ASCII hosts only, no
+	// IPv6 zone); anything that does not normalize is refused.
+	from, errFrom := types.NormalizeProcessingEndpoint(via[0].URL.String())
+	to, errTo := types.NormalizeProcessingEndpoint(req.URL.String())
+	if errFrom != nil || errTo != nil || from != to {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	return nil
+}
+
+// BaseURL returns the base URL this service sends requests to
+// (OLLAMA_BASE_URL, otherwise the default). A nil service returns "".
+func (s *OllamaService) BaseURL() string {
+	if s == nil {
+		return ""
+	}
+	return s.baseURL
+}
+
+// PullModel pulls a model. A processing guard on ctx is asked before any
+// request, including the availability check that precedes the pull.
 func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
+	if err := s.allowModelDownload(ctx, modelName); err != nil {
+		return err
+	}
 	// First check if the service is available
 	if err := s.StartService(ctx); err != nil {
 		return err
@@ -184,6 +224,23 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 	}
 
 	return nil
+}
+
+// allowModelDownload asks the context guard before a pull. No guard means
+// standalone mode: the pull proceeds. A destination that cannot be normalized
+// is refused. The list-only path of EnsureModelAvailable does not call this.
+func (s *OllamaService) allowModelDownload(ctx context.Context, modelName string) error {
+	guard := types.ProcessingGuardFromContext(ctx)
+	if guard == nil {
+		return nil
+	}
+	endpoint, err := types.NormalizeProcessingEndpoint(s.BaseURL())
+	if err != nil {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	return guard.Allow(ctx, types.ProcessingDestination{
+		Category: types.ProcessingModelDownload, Endpoint: endpoint, Model: modelName,
+	})
 }
 
 // EnsureModelAvailable ensures the model is available, pulls it if not available
