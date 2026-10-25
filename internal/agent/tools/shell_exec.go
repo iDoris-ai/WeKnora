@@ -520,8 +520,9 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		timeout = shellExecMaxTimeout
 	}
 
-	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir=%s timeout=%s command_len=%d",
-		sessionID, workDir, timeout, len(command))
+	// work_dir is a tool argument from the model: logged by length (A24-OBS-12).
+	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir_len=%d timeout=%s command_len=%d",
+		sessionID, len(workDir), timeout, len(command))
 
 	// The caller's config-wide variables apply to every command; a skill's
 	// declared credentials are added only when the model names the skill.
@@ -612,7 +613,8 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	finishOutput()
 	noteSandboxMutation()
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][ShellExec] execution error: session=%s err=%v", sessionID, err)
+		logger.Warnf(ctx, "[Tool][ShellExec] execution error: session=%s error_len=%d error_type=%T",
+			sessionID, len(err.Error()), err)
 		errorText, _ := truncateShellStream(fmt.Sprintf("shell_exec failed: %v", err), maxShellExecErrorBytes)
 		return &types.ToolResult{
 			Success: false,

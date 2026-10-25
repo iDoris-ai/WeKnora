@@ -259,7 +259,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	schema, err := t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': %v", input.KnowledgeID, err)
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': error_len=%d error_type=%T",
+			input.KnowledgeID, len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to load knowledge ID '%s': %v", input.KnowledgeID, err),
@@ -290,8 +291,8 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	if err := validateDataAnalysisSQL(input.SQL, schema); err != nil {
 		// Validation errors quote SQL identifiers; log their length only.
-		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: error_len=%d",
-			t.sessionID, len(err.Error()))
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: error_len=%d error_type=%T",
+			t.sessionID, len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),
@@ -403,7 +404,8 @@ func (t *DataAnalysisTool) executeSingleQuery(
 	rows, err := conn.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		// Engine errors quote the SQL (a missing column, the failing clause).
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: error_len=%d", len(err.Error()))
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 	defer rows.Close()
@@ -522,7 +524,8 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 
 		_, err := t.db.ExecContext(ctx, createTableSQL)
 		if err != nil {
-			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: %v", err)
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: error_len=%d error_type=%T",
+				len(err.Error()), err)
 			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
 		}
 		t.markTableLoaded(tableName)
@@ -561,8 +564,9 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
 		if enumErr != nil {
 			logger.Warnf(ctx,
-				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
-				filename, t.sessionID, enumErr,
+				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): "+
+					"error_len=%d error_type=%T. Falling back to first sheet only.",
+				filename, t.sessionID, len(enumErr.Error()), enumErr,
 			)
 		}
 		if enumErr == nil && len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
@@ -572,9 +576,11 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 				return nil, fmt.Errorf("inspect Excel worksheets: %w", err)
 			case err != nil:
 				// The preflight is best-effort: keep loading every sheet as before.
+				// The error names the worksheet that failed to open or read.
 				logger.Warnf(ctx,
-					"[Tool][DataAnalysis] Could not inspect worksheets of '%s' (session=%s): %v. Keeping all sheets.",
-					filename, t.sessionID, err,
+					"[Tool][DataAnalysis] Could not inspect worksheets of '%s' (session=%s): "+
+						"error_len=%d error_type=%T. Keeping all sheets.",
+					filename, t.sessionID, len(err.Error()), err,
 				)
 			case len(filtered) == 0:
 				return nil, fmt.Errorf("excel workbook contains no non-empty worksheets")
@@ -586,14 +592,17 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
 
 		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
-			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
+			logger.Errorf(ctx,
+				"[Tool][DataAnalysis] Failed to create table from Excel (sheet_count=%d): error_len=%d "+
+					"error_type=%T",
+				len(sheetNames), len(err.Error()), err)
 			return nil, fmt.Errorf("failed to create table from Excel file (sheets=%v): %w", sheetNames, err)
 		}
 		t.markTableLoaded(tableName)
 
 		logger.Infof(ctx,
-			"[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s (sheets=%v)",
-			tableName, t.sessionID, sheetNames,
+			"[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s (sheet_count=%d)",
+			tableName, t.sessionID, len(sheetNames),
 		)
 	}
 

@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -340,5 +342,73 @@ func TestAgent24AccessLogPathCredentialNames(t *testing.T) {
 	logText, _ := agent24RunAccessLog(t, "1", `{"note":"visible-note"}`)
 	if !strings.Contains(logText, "visible-note") {
 		t.Fatalf("AGENT24_LOG_HTTP_BODY=1 did not turn bodies on:\n%s", logText)
+	}
+}
+
+// agent24CaptureAccessLog serves one POST through RequestID and Logger and returns the access log
+// plus the status the handler wrote. bodySwitch is AGENT24_LOG_HTTP_BODY.
+func agent24CaptureAccessLog(t *testing.T, bodySwitch string, handler gin.HandlerFunc) (string, int) {
+	t.Helper()
+	t.Setenv(agent24LogHTTPBodyEnv, bodySwitch)
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(RequestID(), Logger())
+	r.POST("/api/v1/x", handler)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/x", strings.NewReader(`{"note":"ok"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return buf.String(), rec.Code
+}
+
+func TestAccessLogAppErrorOmitsMessage(t *testing.T) {
+	for _, bodySwitch := range []string{"", "1"} {
+		t.Run("body="+bodySwitch, func(t *testing.T) {
+			logText, status := agent24CaptureAccessLog(t, bodySwitch, func(c *gin.Context) {
+				_ = c.Error(apperrors.NewInternalServerError("x: S3NT1NEL"))
+				c.Status(http.StatusInternalServerError)
+			})
+			if status != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", status)
+			}
+			if strings.Contains(logText, "S3NT1NEL") {
+				t.Fatalf("access log contains a sentinel:\n%s", logText)
+			}
+			for _, want := range []string{"error_type", "error_len", "error_code"} {
+				if !strings.Contains(logText, want) {
+					t.Fatalf("access log missing %q:\n%s", want, logText)
+				}
+			}
+		})
+	}
+}
+
+func TestAccessLogPlainErrorOmitsCode(t *testing.T) {
+	for _, bodySwitch := range []string{"", "1"} {
+		t.Run("body="+bodySwitch, func(t *testing.T) {
+			logText, status := agent24CaptureAccessLog(t, bodySwitch, func(c *gin.Context) {
+				_ = c.Error(fmt.Errorf("S3NT1NEL"))
+				c.Status(http.StatusInternalServerError)
+			})
+			if status != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", status)
+			}
+			if strings.Contains(logText, "S3NT1NEL") {
+				t.Fatalf("access log contains a sentinel:\n%s", logText)
+			}
+			if strings.Contains(logText, "error_code") {
+				t.Fatalf("plain error logged error_code:\n%s", logText)
+			}
+			for _, want := range []string{"error_type", "error_len"} {
+				if !strings.Contains(logText, want) {
+					t.Fatalf("access log missing %q:\n%s", want, logText)
+				}
+			}
+		})
 	}
 }

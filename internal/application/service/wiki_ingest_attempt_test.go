@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -112,6 +114,14 @@ func (panickingKnowledgeService) GetKnowledgeByIDOnly(context.Context, string) (
 	panic("unexpected nil row")
 }
 
+type sentinelPanicKnowledgeService struct {
+	interfaces.KnowledgeService
+}
+
+func (sentinelPanicKnowledgeService) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
+	panic("S3NT1NEL")
+}
+
 // errgroup does not recover panics: one escaping a map worker crashed the
 // process before the batch settled its claims, and the op hit the same panic
 // on every claim. As an error it goes through the fail_count budget instead.
@@ -125,4 +135,20 @@ func TestMapOneDocumentRecoveredTurnsPanicIntoError(t *testing.T) {
 	require.ErrorContains(t, err, "panicked")
 	assert.Nil(t, result)
 	assert.Nil(t, updates)
+}
+
+func TestMapOneDocumentRecoveredPanicLogOmitsSentinel(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	svc := &wikiIngestService{knowledgeSvc: sentinelPanicKnowledgeService{}}
+	_, _, err := svc.mapOneDocumentRecovered(context.Background(), nil,
+		WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb-1"},
+		WikiPendingOp{Op: WikiOpIngest, KnowledgeID: "k-1"}, nil)
+	require.Error(t, err)
+	logText := buf.String()
+	require.NotContains(t, logText, "S3NT1NEL")
+	require.Contains(t, logText, "string (len=8)")
 }
