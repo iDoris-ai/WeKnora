@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Config is everything the client needs, already resolved by the api.
@@ -151,6 +152,10 @@ func (c *Client) post(ctx context.Context, body map[string]any, want int) ([][]f
 		return nil, err
 	}
 	if decoded.Error != nil && decoded.Error.Message != "" {
+		// Agent24 A24-KB-21: under a processing guard the vendor message keeps only its length.
+		if types.ProcessingGuardFromContext(ctx) != nil {
+			return nil, fmt.Errorf("gemini embedding error (message_len=%d)", len(decoded.Error.Message))
+		}
 		return nil, fmt.Errorf("gemini embedding error: %s", decoded.Error.Message)
 	}
 	if len(decoded.Embeddings) != want {

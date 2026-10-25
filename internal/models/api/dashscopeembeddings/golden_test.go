@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,4 +88,42 @@ func TestSurfacesAnInBodyError(t *testing.T) {
 	_, err := newClient(server.URL+endpoint, 0).Embed(context.Background(), []string{"a"}, api.EmbedDocument)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "contents exceeds 20")
+}
+
+type allowGuard struct{}
+
+func (allowGuard) Allow(context.Context, types.ProcessingDestination) error { return nil }
+
+// guarded is a context under a processing guard that approved rawURL's endpoint (Agent24 A24-KB-21).
+func guarded(t *testing.T, rawURL string) context.Context {
+	t.Helper()
+	endpoint, err := types.NormalizeProcessingEndpoint(rawURL)
+	require.NoError(t, err)
+	return types.WithProcessingApprovedEndpoint(types.WithProcessingGuard(context.Background(), allowGuard{}), endpoint)
+}
+
+// Under a processing guard the in-body error and an index the vendor sent stay out of the error text;
+// without a guard both are kept.
+func TestReplyTextOmittedUnderGuard(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	reply := `{"code":"S3NT1NEL","message":"S3NT1NEL contents exceeds 20"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(reply))
+	}))
+	defer server.Close()
+	client := newClient(server.URL+endpoint, 0)
+
+	_, err := client.Embed(guarded(t, server.URL), []string{"a"}, api.EmbedDocument)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "S3NT1NEL")
+	assert.Contains(t, err.Error(), "code_len=8 message_len=")
+	_, err = client.Embed(context.Background(), []string{"a"}, api.EmbedDocument)
+	require.ErrorContains(t, err, "S3NT1NEL")
+
+	reply = `{"output":{"embeddings":[{"index":987654321,"embedding":[0.1]}]}}`
+	_, err = client.Embed(guarded(t, server.URL), []string{"a"}, api.EmbedDocument)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "987654321")
+	_, err = client.Embed(context.Background(), []string{"a"}, api.EmbedDocument)
+	require.ErrorContains(t, err, "987654321")
 }
