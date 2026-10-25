@@ -51,6 +51,10 @@ type Config struct {
 	SampleRate float64
 	// Debug enables verbose logging of batch send errors.
 	Debug bool
+	// ExportBodies, when true, exports input, output and the original error
+	// text (fork patch A24-OBS-08). Off by default: they carry queries,
+	// document text, prompts, answers and tool arguments.
+	ExportBodies bool
 
 	// testExporter, when non-nil, replaces the real OTLP exporter. Tests use
 	// it to inject an in-memory span exporter (tracetest.InMemoryExporter) so
@@ -59,6 +63,11 @@ type Config struct {
 	// export on span End) when set. Unexported — production never sets it.
 	testExporter sdktrace.SpanExporter
 }
+
+// agent24LangfuseBodyEnv turns on input, output and error text in Langfuse
+// exports (fork patch A24-OBS-08). Off by default: those fields carry queries,
+// document text, prompts, answers and tool arguments.
+const agent24LangfuseBodyEnv = "AGENT24_LANGFUSE_BODY"
 
 // LoadConfigFromEnv builds a Config by reading the LANGFUSE_* environment
 // variables, mirroring the official Python / JS SDK conventions.
@@ -112,6 +121,9 @@ func LoadConfigFromEnv() Config {
 	}
 	if v := strings.TrimSpace(os.Getenv("LANGFUSE_DEBUG")); v != "" {
 		cfg.Debug = parseBool(v)
+	}
+	if v := strings.TrimSpace(os.Getenv(agent24LangfuseBodyEnv)); v != "" {
+		cfg.ExportBodies = parseBool(v)
 	}
 
 	if cfg.SampleRate == 0 {

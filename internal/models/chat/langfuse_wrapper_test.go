@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -92,7 +93,7 @@ func TestBuildLangfuseChatMetadataIncludesMCPCatalog(t *testing.T) {
 			}},
 			{Function: FunctionDef{Name: "call_mcp_tool", Description: "call"}},
 		},
-	})
+	}, true)
 	if meta["has_tools"] != true || meta["streaming"] != true {
 		t.Fatalf("flags = %#v", meta)
 	}
@@ -103,6 +104,35 @@ func TestBuildLangfuseChatMetadataIncludesMCPCatalog(t *testing.T) {
 	catalog, _ := meta["mcp_catalog"].(string)
 	if !strings.Contains(catalog, `"server_id":"svc"`) {
 		t.Fatalf("mcp_catalog = %q", catalog)
+	}
+}
+
+func TestBuildLangfuseChatMetadataRedactsMCPCatalog(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	desc := "system prompt " + sentinel + " mcp catalog"
+	meta := buildLangfuseChatMetadata("model-1", "agent", "fp", false, &ChatOptions{
+		Tools: []Tool{
+			{Function: FunctionDef{Name: "knowledge_search", Description: "search kb"}},
+			{Function: FunctionDef{
+				Name:        langfuseDiscoverMCPTool,
+				Description: desc,
+			}},
+		},
+	}, false)
+	if _, ok := meta["mcp_catalog"]; ok {
+		t.Fatalf("mcp_catalog = %#v", meta["mcp_catalog"])
+	}
+	if got, ok := meta["mcp_catalog_bytes"].(int); !ok || got != len(desc) {
+		t.Fatalf("mcp_catalog_bytes = %#v, want %d", meta["mcp_catalog_bytes"], len(desc))
+	}
+	names, _ := meta["tool_names"].([]string)
+	if !reflect.DeepEqual(names, []string{"knowledge_search", langfuseDiscoverMCPTool}) {
+		t.Fatalf("tool_names = %#v", names)
+	}
+	for k, v := range meta {
+		if strings.Contains(fmt.Sprint(v), sentinel) {
+			t.Fatalf("meta[%s] contains sentinel: %#v", k, v)
+		}
 	}
 }
 
