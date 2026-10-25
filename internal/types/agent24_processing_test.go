@@ -1,6 +1,11 @@
 package types
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestNormalizeProcessingEndpoint(t *testing.T) {
 	cases := []struct {
@@ -38,5 +43,37 @@ func TestNormalizeProcessingEndpoint(t *testing.T) {
 				t.Fatalf("NormalizeProcessingEndpoint(%q) = %q, want error", tc.raw, got)
 			}
 		})
+	}
+}
+
+type checkAllowGuard struct{}
+
+func (checkAllowGuard) Allow(context.Context, ProcessingDestination) error { return nil }
+
+// The send-time check: no guard passes; a guard needs an approval, and the URL sent must normalize to it.
+func TestCheckProcessingRequestURL(t *testing.T) {
+	const sent = "https://API.example.com/v1/S3NT1NEL?token=S3NT1NEL"
+	if err := CheckProcessingRequestURL(context.Background(), sent); err != nil {
+		t.Fatalf("no guard: %v", err)
+	}
+	guarded := WithProcessingGuard(context.Background(), checkAllowGuard{})
+	if err := CheckProcessingRequestURL(guarded, sent); !errors.Is(err, ErrProcessingDenied) {
+		t.Fatalf("guard without an approval: %v", err)
+	}
+	approved := WithProcessingApprovedEndpoint(guarded, "https://api.example.com:443")
+	if err := CheckProcessingRequestURL(approved, sent); err != nil {
+		t.Fatalf("approved origin: %v", err)
+	}
+	for _, other := range []string{
+		"https://allowed.example@api.example.org/v1", "http://api.example.com/v1", "https://api.example.com:8443/v1",
+		"https://S3NT1NEL.example/v1?token=S3NT1NEL",
+	} {
+		err := CheckProcessingRequestURL(approved, other)
+		if !errors.Is(err, ErrProcessingDenied) {
+			t.Fatalf("%s: %v", other, err)
+		}
+		if strings.Contains(err.Error(), "S3NT1NEL") || strings.Contains(err.Error(), "example") {
+			t.Fatalf("error quotes the URL: %s", err.Error())
+		}
 	}
 }

@@ -1,9 +1,13 @@
+// Agent24 fork product patch A24-KB-17 (CONTRACT-READONLY-v1 r10 R3.11,
+// §6 policy_denied, WeKnora#42): the send-time destination check in Do.
+
 package api
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -133,9 +138,25 @@ func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentT
 
 // Do sends the request and returns the response. Non-2xx responses are
 // turned into an error carrying the body so callers surface vendor messages.
+//
+// Agent24 A24-KB-17: under a processing guard the URL actually sent, and every
+// redirect target, must normalize to the endpoint the guard approved (the URL
+// is built after the decision, from a configured path or a vendor hook). A
+// refusal sends nothing further and is returned bare, without the URL that
+// net/http would quote, and is not a TransportError, so it is not retried.
 func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
-	resp, err := e.httpClient().Do(req)
+	client := e.httpClient()
+	if types.ProcessingGuardFromContext(req.Context()) != nil {
+		if err := types.CheckProcessingRequestURL(req.Context(), req.URL.String()); err != nil {
+			return nil, err
+		}
+		client = guardedProcessingClient(client)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(err, types.ErrProcessingDenied) {
+			return nil, fmt.Errorf("%w", types.ErrProcessingDenied)
+		}
 		return nil, &TransportError{Op: "send request", Err: err}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -144,6 +165,26 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
 	}
 	return resp, nil
+}
+
+// guardedProcessingClient is c with each redirect target checked against the
+// approved endpoint before the redirect policy c already has.
+func guardedProcessingClient(c *http.Client) *http.Client {
+	guarded := *c
+	next := c.CheckRedirect
+	guarded.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := types.CheckProcessingRequestURL(req.Context(), req.URL.String()); err != nil {
+			return err
+		}
+		if next != nil {
+			return next(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &guarded
 }
 
 // PostJSON sends one authenticated JSON request and decodes the reply into

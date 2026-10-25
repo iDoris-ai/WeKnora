@@ -75,7 +75,7 @@ func (s *OllamaService) StartService(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	// Check if service is available
-	err := s.client.Heartbeat(ctx)
+	err := processingSafeErr(s.client.Heartbeat(ctx))
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("ollama service unavailable: %v", err)
 		s.isAvailable = false
@@ -115,7 +115,7 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 	// Get model list
 	listResp, err := s.client.List(ctx)
 	if err != nil {
-		return false, fmt.Errorf("failed to get model list: %w", err)
+		return false, fmt.Errorf("failed to get model list: %w", processingSafeErr(err))
 	}
 
 	// If no version is specified for the model, add ":latest" by default
@@ -159,6 +159,16 @@ func guardedRedirect(req *http.Request, via []*http.Request) error {
 		return fmt.Errorf("%w", types.ErrProcessingDenied)
 	}
 	return nil
+}
+
+// processingSafeErr (Agent24 A24-KB-17): a guarded redirect refusal comes back from net/http as a *url.Error that
+// quotes the full URL, path and query included. Return the bare sentinel so neither the error nor a log line
+// carries it.
+func processingSafeErr(err error) error {
+	if err != nil && errors.Is(err, types.ErrProcessingDenied) {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	return err
 }
 
 // BaseURL returns the base URL this service sends requests to
@@ -220,7 +230,7 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to pull model: %w", err)
+		return fmt.Errorf("failed to pull model: %w", processingSafeErr(err))
 	}
 
 	return nil
@@ -328,7 +338,7 @@ type OllamaModelInfo struct {
 func (s *OllamaService) ListModels(ctx context.Context) ([]string, error) {
 	listResp, err := s.client.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get model list: %w", err)
+		return nil, fmt.Errorf("failed to get model list: %w", processingSafeErr(err))
 	}
 
 	modelNames := make([]string, len(listResp.Models))
@@ -343,7 +353,7 @@ func (s *OllamaService) ListModels(ctx context.Context) ([]string, error) {
 func (s *OllamaService) ListModelsDetailed(ctx context.Context) ([]OllamaModelInfo, error) {
 	listResp, err := s.client.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get model list: %w", err)
+		return nil, fmt.Errorf("failed to get model list: %w", processingSafeErr(err))
 	}
 	jsonData, err := json.Marshal(listResp.Models)
 	if err != nil {
@@ -392,7 +402,7 @@ func (s *OllamaService) Chat(ctx context.Context, req *api.ChatRequest, fn api.C
 	}
 
 	// Use official client Chat method
-	return s.client.Chat(ctx, req, fn)
+	return processingSafeErr(s.client.Chat(ctx, req, fn))
 }
 
 // Embeddings gets text embedding vectors
@@ -402,7 +412,8 @@ func (s *OllamaService) Embeddings(ctx context.Context, req *api.EmbedRequest) (
 		return nil, err
 	}
 	// Use official client Embed method
-	return s.client.Embed(ctx, req)
+	resp, err := s.client.Embed(ctx, req)
+	return resp, processingSafeErr(err)
 }
 
 // Generate generates text (used for Rerank)
@@ -413,7 +424,7 @@ func (s *OllamaService) Generate(ctx context.Context, req *api.GenerateRequest, 
 	}
 
 	// Use official client Generate method
-	return s.client.Generate(ctx, req, fn)
+	return processingSafeErr(s.client.Generate(ctx, req, fn))
 }
 
 // GetClient returns the underlying ollama client for advanced operations

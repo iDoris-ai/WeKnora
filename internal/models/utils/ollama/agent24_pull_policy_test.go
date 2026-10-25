@@ -2,13 +2,16 @@
 package ollama
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -99,7 +102,8 @@ func TestOllamaServiceRefusesCrossOriginRedirectUnderGuard(t *testing.T) {
 	}))
 	t.Cleanup(target.Close)
 	allowed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusTemporaryRedirect)
+		// The target path and query carry a sentinel: a refusal must not quote them (PR #98 B2).
+		http.Redirect(w, r, target.URL+"/S3NT1NEL?token=S3NT1NEL", http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(allowed.Close)
 	t.Setenv("OLLAMA_BASE_URL", allowed.URL)
@@ -109,9 +113,24 @@ func TestOllamaServiceRefusesCrossOriginRedirectUnderGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	other = 0
-	_, err = svc.ListModels(types.WithProcessingGuard(context.Background(), &pullGuard{allow: true}))
+	logger.SetLogLevel(logger.LevelDebug)
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	t.Cleanup(logger.ConfigureFromEnv)
+	guarded := types.WithProcessingGuard(context.Background(), &pullGuard{allow: true})
+	_, err = svc.ListModels(guarded)
 	if !errors.Is(err, types.ErrProcessingDenied) || other != 0 {
 		t.Fatalf("guarded: err = %v, other origin requests = %d", err, other)
+	}
+	if strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("refusal quotes the redirect target: %s", err.Error())
+	}
+	// StartService logs the heartbeat failure at WARN; the refusal must not put the URL there either.
+	if err := svc.StartService(guarded); !errors.Is(err, types.ErrProcessingDenied) {
+		t.Fatalf("heartbeat: err = %v", err)
+	}
+	if !strings.Contains(logs.String(), "ollama service unavailable") || strings.Contains(logs.String(), "S3NT1NEL") {
+		t.Fatalf("heartbeat log: %s", logs.String())
 	}
 	if _, err := svc.ListModels(context.Background()); err != nil || other != 1 {
 		t.Fatalf("standalone: err = %v, other origin requests = %d", err, other)

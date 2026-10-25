@@ -25,26 +25,34 @@ type policyEmbedder struct {
 	destErr error
 }
 
-func (p *policyEmbedder) authorize(ctx context.Context) error {
+// authorize asks the guard and, on a pass, returns ctx with the approved
+// endpoint recorded: api.Endpoint checks every request it sends under the
+// guard (each split request, each retry, each redirect) against it.
+func (p *policyEmbedder) authorize(ctx context.Context) (context.Context, error) {
 	guard := types.ProcessingGuardFromContext(ctx)
 	if guard == nil {
-		return nil
+		return ctx, nil
 	}
 	if p.destErr != nil {
-		return fmt.Errorf("%w", types.ErrProcessingDenied)
+		return ctx, fmt.Errorf("%w", types.ErrProcessingDenied)
 	}
-	return guard.Allow(ctx, p.dest)
+	if err := guard.Allow(ctx, p.dest); err != nil {
+		return ctx, err
+	}
+	return types.WithProcessingApprovedEndpoint(ctx, p.dest.Endpoint), nil
 }
 
 func (p *policyEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	if err := p.authorize(ctx); err != nil {
+	ctx, err := p.authorize(ctx)
+	if err != nil {
 		return nil, err
 	}
 	return p.inner.Embed(ctx, text)
 }
 
 func (p *policyEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
-	if err := p.authorize(ctx); err != nil {
+	ctx, err := p.authorize(ctx)
+	if err != nil {
 		return nil, err
 	}
 	return p.inner.BatchEmbed(ctx, texts)
@@ -68,7 +76,8 @@ func (p *policyEmbedder) AcceptsImages() bool {
 func (p *policyEmbedder) ImageLimits() ImageLimits { return imageLimitsOf(p.inner) }
 
 func (p *policyEmbedder) BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error) {
-	if err := p.authorize(ctx); err != nil {
+	ctx, err := p.authorize(ctx)
+	if err != nil {
 		return nil, err
 	}
 	inner, err := imageSide(p.inner)
@@ -96,6 +105,12 @@ func ProcessingDestinationForConfig(config Config, svc *ollama.OllamaService) (t
 		}
 		resolved, err := modelruntime.Resolve(remoteEmbeddingRef(config))
 		if err != nil {
+			return types.ProcessingDestination{}, errors.New("embedding processing destination is unavailable")
+		}
+		// A configured field named "model" would overwrite the model the guard judged in the request body
+		// (the OpenAI-shape client writes these after "model"; ExtraBody cannot, it only fills absent keys).
+		if s := resolved.Embeddings; s.DimensionsField == "model" || s.InputTypeField == "model" ||
+			s.TruncateField == "model" {
 			return types.ProcessingDestination{}, errors.New("embedding processing destination is unavailable")
 		}
 		raw, model = resolved.EmbeddingDialTarget(config.ExtraConfig)

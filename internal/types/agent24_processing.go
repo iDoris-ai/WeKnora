@@ -10,6 +10,7 @@ package types
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -92,6 +93,48 @@ func WithProcessingGuard(ctx context.Context, g ProcessingGuard) context.Context
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, processingGuardKey{}, g)
+}
+
+type processingApprovedKey struct{}
+
+// WithProcessingApprovedEndpoint records the normalized endpoint a guard has
+// just allowed. The HTTP layer compares each request it sends under a guard
+// with it, so a URL rewritten after the decision (a configured path, a vendor
+// hook, a redirect) cannot reach another origin.
+func WithProcessingApprovedEndpoint(ctx context.Context, endpoint string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, processingApprovedKey{}, endpoint)
+}
+
+// ProcessingApprovedEndpoint returns the endpoint recorded on ctx, if any.
+func ProcessingApprovedEndpoint(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	endpoint, ok := ctx.Value(processingApprovedKey{}).(string)
+	return endpoint, ok && endpoint != ""
+}
+
+// CheckProcessingRequestURL is the send-time check for a request under a
+// guard: without a guard it passes; with one, rawURL must normalize to the
+// approved endpoint on ctx. A guarded request with no approval (it did not go
+// through a guarded caller) is refused. The error wraps ErrProcessingDenied
+// and carries no URL.
+func CheckProcessingRequestURL(ctx context.Context, rawURL string) error {
+	if ProcessingGuardFromContext(ctx) == nil {
+		return nil
+	}
+	approved, ok := ProcessingApprovedEndpoint(ctx)
+	if !ok {
+		return fmt.Errorf("%w", ErrProcessingDenied)
+	}
+	got, err := NormalizeProcessingEndpoint(rawURL)
+	if err != nil || got != approved {
+		return fmt.Errorf("%w", ErrProcessingDenied)
+	}
+	return nil
 }
 
 // ProcessingGuardFromContext returns the guard on ctx, or nil when ctx is nil

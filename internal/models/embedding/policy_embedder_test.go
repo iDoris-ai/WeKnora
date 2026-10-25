@@ -279,3 +279,87 @@ func TestProcessingDestinationForConfigLocalDefaults(t *testing.T) {
 		t.Fatalf("dest = %+v", dest)
 	}
 }
+
+// The URL actually sent is checked against the approved endpoint (PR #98 B1): a configured path that moves the
+// request to another host, and a redirect to another origin, are refused before anything reaches that host,
+// and the error quotes neither the host nor the path and query.
+func TestPolicyEmbedderChecksTheURLActuallySent(t *testing.T) {
+	allowLoopback(t)
+	const sentinel = "S3NT1NEL"
+	other := 0
+	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		other++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[1]}]}`))
+	}))
+	t.Cleanup(denied.Close)
+	deniedHost := strings.TrimPrefix(denied.URL, "http://")
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, denied.URL+"/"+sentinel+"?token="+sentinel, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(redirector.Close)
+	allowed, _ := newWireRecorder(t)
+
+	cfg := func(base, path string) Config {
+		c := Config{Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m", BaseURL: base, APIKey: "k"}
+		if path != "" {
+			c.Spec = &types.ModelSpecOverride{Compat: map[string]any{"path": path}}
+		}
+		return c
+	}
+	cases := []struct {
+		name string
+		cfg  Config
+		// reaches is whether the config reaches the other host without a guard. The shared client already
+		// refuses to replay a POST across origins, so only the configured path does.
+		reaches bool
+	}{
+		{"configured path moves the host", cfg(allowed.URL, "@"+deniedHost+"/"+sentinel), true},
+		{"redirect to another origin", cfg(redirector.URL, ""), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, err := NewEmbedder(tc.cfg, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other = 0
+			_, err = e.Embed(types.WithProcessingGuard(context.Background(), &allowCountGuard{}), "q")
+			if !errors.Is(err, types.ErrProcessingDenied) || other != 0 {
+				t.Fatalf("guarded: err = %v, requests to the other host = %d", err, other)
+			}
+			if msg := err.Error(); strings.Contains(msg, sentinel) || strings.Contains(msg, deniedHost) {
+				t.Fatalf("error quotes the URL: %s", msg)
+			}
+			if !tc.reaches {
+				return
+			}
+			// Control: without a guard the same config does reach the other host.
+			if _, err := e.Embed(context.Background(), "q"); err != nil || other != 1 {
+				t.Fatalf("standalone: err = %v, requests to the other host = %d", err, other)
+			}
+		})
+	}
+}
+
+// A compat field named "model" would overwrite the judged model in the body, so no destination is computed.
+func TestProcessingDestinationForConfigRefusesModelFieldOverride(t *testing.T) {
+	for _, field := range []string{"input_type_field", "dimensions_field", "truncate_field"} {
+		cfg := Config{
+			Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m",
+			BaseURL: "https://api.example.com/v1", APIKey: "k",
+			Spec: &types.ModelSpecOverride{Compat: map[string]any{field: "model"}},
+		}
+		if _, err := ProcessingDestinationForConfig(cfg, nil); err == nil {
+			t.Fatalf("%s=model: destination computed", field)
+		}
+	}
+	ok := Config{
+		Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m",
+		BaseURL: "https://api.example.com/v1", APIKey: "k",
+		Spec: &types.ModelSpecOverride{Compat: map[string]any{"input_type_field": "input_type"}},
+	}
+	if _, err := ProcessingDestinationForConfig(ok, nil); err != nil {
+		t.Fatalf("input_type_field=input_type: %v", err)
+	}
+}
