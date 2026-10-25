@@ -1742,8 +1742,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 
 	logger.Infof(ctx, "[IM] HandleMessage: channel=%s platform=%s user=%s chat=%s msgtype=%s content_len=%d",
 		channelID, msg.Platform, msg.UserID, msg.ChatID, msg.MessageType, len(msg.Content))
-	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey=%s filename=%s",
-		msg.MessageID, msg.Extra["raw_msgtype"], msg.FileKey, msg.FileName)
+	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey=%s filename_len=%d",
+		msg.MessageID, msg.Extra["raw_msgtype"], msg.FileKey, len(msg.FileName))
 
 	// ── File/Image message handling ──
 	// File messages use the normal QA path as well.  A configured knowledge base
@@ -2720,7 +2720,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			streamedAny = true
 		}
 		bufMu.Unlock()
-		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool=%s id=%s", data.ToolName, data.ToolCallID)
+		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool_len=%d id=%s",
+			len(data.ToolName), data.ToolCallID)
 		return nil
 	})
 
@@ -2754,8 +2755,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			streamedAny = true
 		}
 		bufMu.Unlock()
-		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool=%s success=%v duration=%dms",
-			data.ToolName, data.Success, data.Duration)
+		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool_len=%d success=%v duration=%dms",
+			len(data.ToolName), data.Success, data.Duration)
 		return nil
 	})
 
@@ -3456,7 +3457,7 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 	fileName := file.fileName
 	ext := fileExtension(fileName)
 	if !supportedKBFileExts[ext] {
-		logger.Infof(ctx, "[IM] Unsupported file type after download: %s (file=%s)", ext, fileName)
+		logger.Infof(ctx, "[IM] Unsupported file type after download: %s (file_len=%d)", ext, len(fileName))
 		return
 	}
 
@@ -3469,14 +3470,16 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 		errMsg := err.Error()
 		// Check for duplicate file
 		if strings.Contains(errMsg, "duplicate") || strings.Contains(errMsg, "already exists") {
-			logger.Infof(ctx, "[IM] File already exists in knowledge base: %s", fileName)
+			logger.Infof(ctx, "[IM] File already exists in knowledge base: file_len=%d", len(fileName))
 			return
 		}
-		logger.Errorf(ctx, "[IM] Failed to create knowledge from file: %v", err)
+		logger.Errorf(ctx, "[IM] Failed to create knowledge from file: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return
 	}
 
-	logger.Infof(ctx, "[IM] File saved to knowledge base: kb=%s knowledge=%s file=%s", kbID, knowledge.ID, fileName)
+	logger.Infof(ctx, "[IM] File saved to knowledge base: kb=%s knowledge=%s file_len=%d",
+		kbID, knowledge.ID, len(fileName))
 }
 
 // fileExtension extracts the lowercase file extension from a filename.

@@ -661,3 +661,34 @@ func TestListSandboxFilesLogsOmitDir(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(logs, "dir_len="))
 	assert.Equal(t, 1, strings.Count(logs, "error_len="))
 }
+
+// The success listing records dir_len for the resolved directory, including a
+// parent directory that itself contains the sentinel (#99).
+func TestListSandboxFilesSuccessLogsOmitDir(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	dir := "/tmp/" + sentinel + "/sub"
+	source := &fakeSandboxFileSource{
+		entries: []sandbox.RemoteDirEntry{{
+			Name: sentinel + ".txt",
+			Path: dir + "/" + sentinel + ".txt",
+			Type: sandbox.RemoteEntryFile,
+		}},
+	}
+	result, err := NewListSandboxFilesTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"`+dir+`"}`),
+	)
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "[Tool][ListSandboxFiles] session=")
+	assert.Equal(t, 1, strings.Count(logs, "dir_len="))
+	assert.Equal(t, 1, strings.Count(logs, fmt.Sprintf("dir_len=%d ", len(dir))))
+}

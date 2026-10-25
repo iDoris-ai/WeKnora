@@ -1,13 +1,16 @@
 package core
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -175,4 +178,24 @@ func TestResolveSessionWorkspaceIsOwnerPrivate(t *testing.T) {
 	info, err := os.Stat(ws.Root)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
+func TestResolveMissingProjectDirLogsOmitPath(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	dir := filepath.Join(t.TempDir(), sentinel, "sub")
+	_, err := workspaceFixture(t, dir).Resolve(context.Background(), "sess-1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), sentinel)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "[LocalSandbox] resolve project dir session=")
+	require.Equal(t, 1, strings.Count(logs, fmt.Sprintf("dir_len=%d ", len(dir))))
+	require.Contains(t, logs, "error_len=")
+	require.Contains(t, logs, "error_type=")
 }

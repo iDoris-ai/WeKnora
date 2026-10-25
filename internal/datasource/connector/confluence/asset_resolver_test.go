@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 const testBaseURL = "https://confluence.test/wiki"
@@ -608,5 +611,27 @@ func TestFetchStreamInlinesPrivateImageAsDataURI(t *testing.T) {
 	}
 	if api.imageCalls != 1 {
 		t.Fatalf("image download calls = %d, want 1", api.imageCalls)
+	}
+}
+
+func TestLogImageFailureOmitsPath(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	path := "/wiki/" + sentinel + "/sub/" + sentinel + ".png"
+	abs := "https://confluence.test" + path + "?sig=" + sentinel
+	logImageFailure(context.Background(), abs, errors.New("download "+sentinel))
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains the path, query, or error text:\n%s", logs)
+	}
+	want := fmt.Sprintf("path_len=%d ", len(path))
+	if strings.Count(logs, want) != 1 || !strings.Contains(logs, "[Confluence] failed to resolve image") ||
+		!strings.Contains(logs, "host=confluence.test") || !strings.Contains(logs, "reason=download_failed") {
+		t.Fatalf("image failure log missing %s:\n%s", want, logs)
 	}
 }

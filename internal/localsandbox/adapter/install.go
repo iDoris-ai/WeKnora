@@ -118,7 +118,8 @@ func (m *InstallManager) ExecShellCommandWithOptions(
 		Env:       installEnv(dir, opts.Env),
 	})
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] install exec session=%s dir=%s: %v", sessionID, dir, err)
+		logger.Warnf(ctx, "[LocalSandbox] install exec session=%s dir_len=%d error_len=%d error_type=%T",
+			sessionID, len(dir), len(err.Error()), err)
 		return nil, err
 	}
 	return executeResult(ctx, sessionID, res), nil
