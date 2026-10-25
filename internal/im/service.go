@@ -1961,7 +1961,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	var kbIDs []string
 	attachments, imageURLs, downloaded, err := s.prepareIMAttachments(ctx, req.msg, req.adapter)
 	if err != nil {
-		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
+		// A download error quotes the file URL (*url.Error).
+		logger.Warnf(ctx, "[IM] attachment preparation failed: error_len=%d error_type=%T", len(err.Error()), err)
 		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
 			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: error_len=%d error_type=%T",
 				len(sendErr.Error()), sendErr)

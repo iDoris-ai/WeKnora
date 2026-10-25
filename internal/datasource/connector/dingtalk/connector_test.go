@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -675,7 +676,9 @@ func TestSyncSummaryCountsTransientFailuresAndStillRetries(t *testing.T) {
 	}
 	output := logs.String()
 	// The error text may quote document content, so only its length and type are logged (A24-OBS-14).
-	if strings.Contains(output, "S3NT1NEL") || !strings.Contains(output, "failed, will retry next sync: error_len=") {
+	readFailed := regexp.MustCompile(`\[DingTalk\] read document \S+ \(name_len=\d+ extension_len=\d+\) failed, ` +
+		`will retry next sync: error_len=\d+ error_type=`)
+	if strings.Contains(output, "S3NT1NEL") || !readFailed.MatchString(output) {
 		t.Fatalf("transient failure was not logged as retryable, or its text leaked:\n%s", output)
 	}
 	want := "[DingTalk] scope space/root: total=5 synced=1 skipped=3 failed=1"
