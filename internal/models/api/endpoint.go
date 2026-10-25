@@ -1,17 +1,23 @@
+// Agent24 fork product patch A24-KB-17 (CONTRACT-READONLY-v1 r10 R3.11,
+// §6 policy_denied, WeKnora#42): the send-time destination check in Do.
+
 package api
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -114,6 +120,11 @@ func (e Endpoint) NewRequest(ctx context.Context, url string, body any, stream b
 
 // newPost prepares an authenticated POST of an already-encoded body.
 func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentType string) (*http.Request, error) {
+	// Agent24 A24-KB-17: under a processing guard the destination is checked first, so a URL that does not
+	// parse is a refusal too, and no later error quotes it.
+	if err := types.CheckProcessingRequestURL(ctx, url); err != nil {
+		return nil, err
+	}
 	if err := secutils.ValidateURLForSSRF(url); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
@@ -133,17 +144,86 @@ func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentT
 
 // Do sends the request and returns the response. Non-2xx responses are
 // turned into an error carrying the body so callers surface vendor messages.
+//
+// Agent24 A24-KB-17: under a processing guard the URL actually sent, and every
+// redirect target, must normalize to the endpoint the guard approved (the URL
+// is built after the decision, from a configured path or a vendor hook). A
+// refusal sends nothing further and is returned bare, without the URL that
+// net/http would quote, and is not a TransportError, so it is not retried.
 func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
-	resp, err := e.httpClient().Do(req)
+	client := e.httpClient()
+	if types.ProcessingGuardFromContext(req.Context()) != nil {
+		if err := types.CheckProcessingRequestURL(req.Context(), req.URL.String()); err != nil {
+			return nil, err
+		}
+		client = guardedProcessingClient(client)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, &TransportError{Op: "send request", Err: err}
+		if errors.Is(err, types.ErrProcessingDenied) {
+			return nil, fmt.Errorf("%w", types.ErrProcessingDenied)
+		}
+		return nil, &TransportError{Op: "send request", Err: processingRedact(req.Context(), err)}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		_ = resp.Body.Close()
-		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
+		httpErr := &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
+		if types.ProcessingGuardFromContext(req.Context()) != nil {
+			// A vendor body can echo the request path and query; under a guard the text keeps the status only.
+			return nil, &processingRedactedError{
+				msg: fmt.Sprintf("API request failed with status %d (body_len=%d)", resp.StatusCode, len(body)),
+				err: httpErr,
+			}
+		}
+		return nil, httpErr
 	}
 	return resp, nil
+}
+
+// processingRedactedError carries an error raised under a processing guard with a text that quotes nothing from
+// the request or the reply. Unwrap keeps the original, so errors.Is and errors.As (a deadline, an HTTPError's
+// status) still classify it; only the text changes.
+type processingRedactedError struct {
+	msg string
+	err error
+}
+
+func (e *processingRedactedError) Error() string { return e.msg }
+func (e *processingRedactedError) Unwrap() error { return e.err }
+
+// processingRedact hides the text of a transport error under a processing guard: net/http quotes the URL (path
+// and query, also a redirect Location, and again inside the cause when the Location does not parse). The text
+// keeps the operation and the cause's type. Without a guard the error is returned as it was.
+func processingRedact(ctx context.Context, err error) error {
+	if types.ProcessingGuardFromContext(ctx) == nil {
+		return err
+	}
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return &processingRedactedError{msg: fmt.Sprintf("%s: request failed (%T)", ue.Op, ue.Err), err: err}
+	}
+	return &processingRedactedError{msg: fmt.Sprintf("request failed (%T)", err), err: err}
+}
+
+// guardedProcessingClient is c with each redirect target checked against the
+// approved endpoint before the redirect policy c already has.
+func guardedProcessingClient(c *http.Client) *http.Client {
+	guarded := *c
+	next := c.CheckRedirect
+	guarded.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := types.CheckProcessingRequestURL(req.Context(), req.URL.String()); err != nil {
+			return err
+		}
+		if next != nil {
+			return next(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &guarded
 }
 
 // PostJSON sends one authenticated JSON request and decodes the reply into

@@ -19,6 +19,20 @@ import (
 // retryPolicy is the transport-error retry budget; tests shorten it.
 var retryPolicy = api.DefaultRetryPolicy
 
+// remoteEmbeddingRef is the catalog lookup for a remote embedding config; the processing-policy destination
+// (Agent24 A24-KB-17) resolves the same Ref, so both see the same vendor default and remote model name.
+func remoteEmbeddingRef(config Config) modelruntime.Ref {
+	return modelruntime.Ref{
+		Provider:             config.Provider,
+		Model:                config.ModelName,
+		BaseURL:              config.BaseURL,
+		ModelType:            types.ModelTypeEmbedding,
+		Extra:                config.ExtraConfig,
+		Override:             config.Spec,
+		TruncatePromptTokens: config.TruncatePromptTokens,
+	}
+}
+
 // newRemoteEmbedder resolves the catalog and returns the protocol client for
 // the configured model, wrapped in the shared batching layer. It mirrors
 // rerank.newReranker: the vendor's facts decide the protocol, the URL and the
@@ -27,15 +41,7 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 	if strings.TrimSpace(config.ModelName) == "" {
 		return nil, fmt.Errorf("model name is required")
 	}
-	resolved, err := modelruntime.Resolve(modelruntime.Ref{
-		Provider:             config.Provider,
-		Model:                config.ModelName,
-		BaseURL:              config.BaseURL,
-		ModelType:            types.ModelTypeEmbedding,
-		Extra:                config.ExtraConfig,
-		Override:             config.Spec,
-		TruncatePromptTokens: config.TruncatePromptTokens,
-	})
+	resolved, err := modelruntime.Resolve(remoteEmbeddingRef(config))
 	if err != nil {
 		return nil, err
 	}
