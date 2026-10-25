@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
@@ -377,6 +378,11 @@ func newMultipartFileHeader(t *testing.T, filename string, content string) *mult
 // localhost is a restricted host, so ValidateURLForSSRF fails before any fetch
 // and the rejection log (as well as the earlier URL log) is reached.
 func TestCreateKnowledgeFromURLLogOmitsSentinel(t *testing.T) {
+	// The test relies on localhost being refused; a whitelist from the environment would let it through.
+	t.Setenv("SSRF_WHITELIST", "")
+	t.Setenv("SSRF_WHITELIST_EXTRA", "")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
 	logger.SetLogLevel(logger.LevelDebug)
 	var buf bytes.Buffer
 	logger.SetOutput(&buf)
