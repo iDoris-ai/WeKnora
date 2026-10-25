@@ -38,8 +38,8 @@ const (
 	agent24AuditPathSearch = "/api/v1/agent24/knowledge/search"
 	agent24AuditPathRead   = "/api/v1/agent24/knowledge/read"
 
-	// agent24AuditFactsKey is the gin-context key for *agent24AuditFacts. Unexported: handlers in this
-	// package record through agent24NoteAudit, and the middleware is the only reader.
+	// agent24AuditFactsKey is the gin-context key for *agent24AuditFacts, used only by agent24NoteAudit
+	// (handlers record through it) and agent24KnowledgeAuditEntry (the middleware reads the facts back).
 	agent24AuditFactsKey = "agent24KnowledgeAuditFacts"
 )
 
