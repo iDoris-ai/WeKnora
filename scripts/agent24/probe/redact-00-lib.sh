@@ -13,10 +13,11 @@ HDR_PRE='(x-api-key|x-external-user-token|x-auth-token)\\*"?[[:space:]]*[:=][[:s
 HDR_VAL='[^][:space:],}"]{6,}'
 HDR_SUF='\\*"?'
 _sq="'"
-FIELD_KEY_DQ="\"(${FIELD_NAME})\""
-FIELD_KEY_SQ="${_sq}(${FIELD_NAME})${_sq}"
-FIELD_RE="${FIELD_KEY_DQ}[[:space:]]*:[[:space:]]*\"[^\"]{6,}|${FIELD_KEY_SQ}[[:space:]]*:[[:space:]]*${_sq}[^${_sq}]{6,}"
-ARRAY_RE="${FIELD_KEY_DQ}[[:space:]]*:[[:space:]]*\\[[^]]*\\]|${FIELD_KEY_SQ}[[:space:]]*:[[:space:]]*\\[[^]]*\\]"
+# 键和值的引号可以不同。数组、对象本行没有闭合时取到行尾。对象单独扫（OBJ_RE），免得 grep -o 吞掉里面的敏感标量。
+_fkey="(\"(${FIELD_NAME})\"|${_sq}(${FIELD_NAME})${_sq})[[:space:]]*:[[:space:]]*"
+FIELD_RE="${_fkey}(\"[^\"]{6,}|${_sq}[^${_sq}]{6,})"
+OBJ_RE="${_fkey}\\{([^}]*\\}|[^}]*\$)"
+ARRAY_RE="${_fkey}\\[([^]]*\\]|[^]]*\$)"
 FIELD_RULE='敏感字段带值（password/secret/token/credential/refresh/api key/pwd/session_id/hmac/signature/auth/sig/…）'
 KV_RULE='非 JSON 敏感赋值（key=value / key: value）'
 Q_RULE='URL query 敏感参数'
@@ -24,7 +25,6 @@ H_RULE='凭据头带值（X-API-Key / X-External-User-Token / X-Auth-Token）'
 DV_SKIP_RE=
 DV_VALUE_PRE=
 DV_VALUE_SUF=
-
 find "$DIR" -type f -print0 >"$W/files"
 FIND_RC=$?
 cp "$W/files" "$W/text.targets"

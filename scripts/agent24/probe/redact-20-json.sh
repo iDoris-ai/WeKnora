@@ -3,7 +3,8 @@
 # 非 JSON 文件 + 解码视图（带路径映射）+ JSON 原文的规范化副本。
 # 对象键：非普通标识符，或命中 sk-/JWT/probe-<24hex>/≥16 的十六进制或 base64url，打印 <key len=N>。
 # auth/authorization 用路径上最后一个对象键（数组下标不算）；方式词后允许多个空格。
-JQ_PROG='
+# 普通遍历会折叠重复键。能解析的文件再用 jq --stream 看每个值，同一条 JSON 路径不重复报。
+JQ_DEFS='
 def is_ph: test("^(<redacted>|<redacted:[a-z0-9_]+>|[*]+)$");
 def sens:
   ascii_downcase as $n
@@ -34,19 +35,19 @@ def joinpath($path): [$path[] | fmt(.)] | join(".");
 def sens_path($path): any($path[]; .[0] == "k" and (.[1] | sens));
 def last_obj_key($path):
   reduce $path[] as $s (""; if $s[0] == "k" then $s[1] else . end);
+def secret_hit($path):
+  if type == "string" and sens_path($path) then
+    (last_obj_key($path) | ascii_downcase) as $lk
+    | (if ($lk == "auth" or $lk == "authorization") then auth_secret else . end) as $judge
+    | if bad($judge) then "S\t" + joinpath($path) else empty end
+  else empty end;
 def emit($path):
   if type == "object" then
     to_entries[] | .key as $k | .value | emit($path + [["k", $k]])
   elif type == "array" then
     to_entries[] | .key as $i | .value | emit($path + [["i", $i]])
   elif type == "string" then
-    (
-      if sens_path($path) then
-        (last_obj_key($path) | ascii_downcase) as $lk
-        | (if ($lk == "auth" or $lk == "authorization") then auth_secret else . end) as $judge
-        | if bad($judge) then "S\t" + joinpath($path) else empty end
-      else empty end
-    ),
+    secret_hit($path),
     (
       joinpath($path) as $p
       | split("\n")[] | "D\t" + $p + "\t" + .
@@ -58,7 +59,29 @@ def emit($path):
         else empty end
     )
   else empty end;
+'
+JQ_PROG="${JQ_DEFS}"'
 emit([])
+'
+# 流式事件是 [路径, 值]。长度为 1 的是容器结束，跳过。只补敏感命中，不重造解码视图。
+JQ_STREAM="${JQ_DEFS}"'
+def walk_s($path):
+  if type == "object" then
+    to_entries[] | .key as $k | .value | walk_s($path + [["k", $k]])
+  elif type == "array" then
+    to_entries[] | .key as $i | .value | walk_s($path + [["i", $i]])
+  elif type == "string" then
+    secret_hit($path),
+    (
+      (try fromjson catch null) as $j
+      | if $j != null and (($j | type) == "object" or ($j | type) == "array") then
+          $j | walk_s($path + [["j"]])
+        else empty end
+    )
+  else empty end;
+select(type == "array" and length == 2)
+| (.[0] | map(if type == "number" then ["i", .] else ["k", .] end)) as $path
+| .[1] | walk_s($path)
 '
 
 if ! jq -n -e 1 >/dev/null 2>&1; then
@@ -100,6 +123,15 @@ if [ -s "$W/json" ]; then
       echo "FAIL ${FIELD_RULE}（jq 出错 rc=${rc}）"
       printf '  %s\n' "$f"
     else
+      jq -c --stream -r --arg field_core "$FIELD_CORE" "$JQ_STREAM" "$f" >"$W/jq.stream" 2>"$W/jq.err"
+      rc=$?
+      if [ "$rc" -ne 0 ] || [ -s "$W/jq.err" ]; then
+        bad=1
+        echo "FAIL ${FIELD_RULE}（jq 出错 rc=${rc}）"
+        printf '  %s\n' "$f"
+      else
+        cat "$W/jq.stream" >>"$W/jq.out"
+      fi
       : >"$W/dv/$dv_i"
       : >"$W/dv/$dv_i.map"
       printf '%s\n' "$f" >"$W/dv/$dv_i.src"
