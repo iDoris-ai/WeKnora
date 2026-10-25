@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/url"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/api"
@@ -64,22 +65,16 @@ func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24
 	if errors.As(err, &transportErr) {
 		return agent24Unavailable("dependency"), false
 	}
-	// Storage and vector-store drivers return their network errors as is (the
-	// single-group fast path passes the retriever's error through), so a
-	// refused or reset connection, or a failed lookup, there is a dependency
-	// failure too (R3.5). Only these concrete types count: *url.Error is a
-	// net.Error as well, and a URL that does not parse is a configuration
-	// error (internal), not a failure worth retrying.
-	var opErr *net.OpError
-	var dnsErr *net.DNSError
-	switch {
-	case errors.As(err, &opErr):
-		if opErr.Timeout() {
-			return deadlineOr(), false
-		}
-		return agent24Unavailable("dependency"), false
-	case errors.As(err, &dnsErr):
-		if dnsErr.Timeout() {
+	// Storage, vector-store and Ollama clients return their network errors as
+	// is (the single-group fast path passes the retriever's error through), so
+	// a refused or reset connection, a failed lookup or a TLS handshake timeout
+	// there is a dependency failure too (R3.5). The one net.Error that is not:
+	// a *url.Error from parsing (Op "parse"), a URL that will never work.
+	var netErr net.Error
+	var urlErr *url.Error
+	unparsable := errors.As(err, &urlErr) && urlErr.Op == "parse"
+	if errors.As(err, &netErr) && !unparsable {
+		if netErr.Timeout() {
 			return deadlineOr(), false
 		}
 		return agent24Unavailable("dependency"), false

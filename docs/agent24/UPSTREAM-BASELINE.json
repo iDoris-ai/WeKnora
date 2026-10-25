@@ -333,7 +333,7 @@
         {
           "id": "A24-KB-20",
           "issue": "iDoris-ai/WeKnora#56",
-          "summary": "Knowledge 集成端点加固（WeKnora#54、#56）：request_id 按字符计长；protocol_version、generation 按 JSON Schema 接受数学整数；存储侧连接与 DNS 失败归 dependency；外部向量库就绪探测不做（归 #42 P-d）",
+          "summary": "Knowledge 集成端点加固（WeKnora#54、#56）：request_id 按字符计长；protocol_version、generation 按 JSON Schema 接受数学整数；存储侧网络错误归 dependency（URL 解析失败除外）；外部向量库就绪探测不做（归 #42 P-d）",
           "upstream_commit": null,
           "paths": [
             "internal/handler/agent24_knowledge_exec.go",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http/httptest"
 	"net/url"
@@ -190,6 +191,13 @@ func TestAgent24JSONInt64(t *testing.T) {
 	}
 }
 
+// agent24TestTimeoutError is a net.Error that times out, like net/http's TLS handshake timeout.
+type agent24TestTimeoutError struct{}
+
+func (agent24TestTimeoutError) Error() string   { return "handshake timeout" }
+func (agent24TestTimeoutError) Timeout() bool   { return true }
+func (agent24TestTimeoutError) Temporary() bool { return true }
+
 func TestAgent24KnowledgeClassify(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -212,6 +220,10 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		Op: "Get", URL: "http://es.invalid", Err: &net.DNSError{Err: "no such host", Name: "es.invalid"},
 	}
 	// A URL that does not parse is a net.Error too (*url.Error), but a configuration error, not a dependency.
+	// net/http's own transport errors carry no *net.OpError: a TLS handshake that times out, a connection
+	// the server closes before replying.
+	tlsTimeout := &url.Error{Op: "Post", URL: "https://es.invalid", Err: agent24TestTimeoutError{}}
+	closed := fmt.Errorf("ollama: %w", &url.Error{Op: "Post", URL: "http://ollama.invalid", Err: io.EOF})
 	// What url.Parse("http://store.invalid/%zz") returns.
 	parseErr := &url.Error{Op: "parse", URL: "http://store.invalid/%zz", Err: url.EscapeError("%zz")}
 	badURL := fmt.Errorf("embed: %w", parseErr)
@@ -245,6 +257,9 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		{"live store timeout", bg, netTimeout, agent24CodeUnavailable, "dependency"},
 		{"expired store timeout", expired, netTimeout, agent24CodeTimeout, ""},
 		{"store lookup failed", bg, noHost, agent24CodeUnavailable, "dependency"},
+		{"live tls handshake timeout", bg, tlsTimeout, agent24CodeUnavailable, "dependency"},
+		{"expired tls handshake timeout", expired, tlsTimeout, agent24CodeTimeout, ""},
+		{"closed before reply", bg, closed, agent24CodeUnavailable, "dependency"},
 		{"url does not parse", bg, badURL, agent24CodeInternal, ""},
 		{"expired url does not parse", expired, badURL, agent24CodeInternal, ""},
 		{"expired other", expired, errors.New("x"), agent24CodeInternal, ""},
