@@ -524,13 +524,13 @@ func fetchOneMedia(
 	}
 
 	if isSkippableMediaType(info.MediaType) {
-		logger.Infof(ctx, "[IMA] skip media %s (title=%q media_type=%d): unsupported by the IMA OpenAPI",
-			f.MediaID, f.Title, info.MediaType)
+		logger.Infof(ctx, "[IMA] skip media %s (title_len=%d media_type=%d): unsupported by the IMA OpenAPI",
+			f.MediaID, len(f.Title), info.MediaType)
 		return types.FetchedItem{}, fetchSkipped
 	}
 
 	if info.URLInfo.URL == "" {
-		logger.Warnf(ctx, "[IMA] media %s (title=%q) has no url_info.url, skipping", f.MediaID, f.Title)
+		logger.Warnf(ctx, "[IMA] media %s (title_len=%d) has no url_info.url, skipping", f.MediaID, len(f.Title))
 		return types.FetchedItem{}, fetchSkipped
 	}
 
@@ -559,8 +559,9 @@ func fetchOneMedia(
 
 	body, ct, err := cli.DownloadURL(ctx, info.URLInfo)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] download media %s (title=%q) failed, will retry next sync: %v",
-			f.MediaID, f.Title, err)
+		logger.Warnf(ctx,
+			"[IMA] download media %s (title_len=%d) failed, will retry next sync: error_len=%d error_type=%T",
+			f.MediaID, len(f.Title), len(err.Error()), err)
 		return types.FetchedItem{}, fetchFailed
 	}
 

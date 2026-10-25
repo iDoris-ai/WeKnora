@@ -115,7 +115,8 @@ func (a *Adapter) ExecShellCommand(
 		Env:       env,
 	})
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] exec session=%s work_dir=%q: %v", sessionID, workDir, err)
+		logger.Warnf(ctx, "[LocalSandbox] exec session=%s work_dir_len=%d error_len=%d error_type=%T",
+			sessionID, len(workDir), len(err.Error()), err)
 		return nil, err
 	}
 	return executeResult(ctx, sessionID, res), nil
@@ -156,13 +157,15 @@ func (a *Adapter) EnsureSessionDir(ctx context.Context, sessionID, dir string) e
 	target := absoluteIn(ws.Root, dir)
 	if err := guard.MkdirAll(target, 0o755); err != nil {
 		if errors.Is(err, localsandbox.ErrPathDenied) {
-			logger.Warnf(ctx, "[LocalSandbox] mkdir denied session=%s path=%q: %v", sessionID, dir, err)
+			logger.Warnf(ctx, "[LocalSandbox] mkdir denied session=%s path_len=%d error_len=%d error_type=%T",
+				sessionID, len(dir), len(err.Error()), err)
 		} else {
-			logger.Errorf(ctx, "[LocalSandbox] mkdir session=%s path=%s: %v", sessionID, target, err)
+			logger.Errorf(ctx, "[LocalSandbox] mkdir session=%s path_len=%d error_len=%d error_type=%T",
+				sessionID, len(target), len(err.Error()), err)
 		}
 		return err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] mkdir session=%s path=%s", sessionID, target)
+	logger.Debugf(ctx, "[LocalSandbox] mkdir session=%s path_len=%d", sessionID, len(target))
 	return nil
 }
 
@@ -176,10 +179,11 @@ func (a *Adapter) ListSessionFiles(
 	}
 	resolved, err := guard.CheckRead(absoluteIn(ws.Root, dir))
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] list denied session=%s path=%q: %v", sessionID, dir, err)
+		logger.Warnf(ctx, "[LocalSandbox] list denied session=%s path_len=%d error_len=%d error_type=%T",
+			sessionID, len(dir), len(err.Error()), err)
 		return nil, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] list session=%s path=%s", sessionID, resolved)
+	logger.Debugf(ctx, "[LocalSandbox] list session=%s path_len=%d", sessionID, len(resolved))
 
 	var out []sandbox.RemoteDirEntry
 	err = filepath.WalkDir(resolved, func(p string, d os.DirEntry, walkErr error) error {
@@ -206,10 +210,11 @@ func (a *Adapter) ListSessionFiles(
 		return nil
 	})
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] list session=%s path=%s: %v", sessionID, resolved, err)
+		logger.Warnf(ctx, "[LocalSandbox] list session=%s path_len=%d error_len=%d error_type=%T",
+			sessionID, len(resolved), len(err.Error()), err)
 		return nil, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] listed session=%s path=%s entries=%d", sessionID, resolved, len(out))
+	logger.Debugf(ctx, "[LocalSandbox] listed session=%s path_len=%d entries=%d", sessionID, len(resolved), len(out))
 	return out, nil
 }
 
@@ -225,7 +230,8 @@ func (a *Adapter) StatSessionFile(
 	info, err := guard.Lstat(target)
 	if err != nil {
 		if errors.Is(err, localsandbox.ErrPathDenied) {
-			logger.Warnf(ctx, "[LocalSandbox] stat denied session=%s path=%q: %v", sessionID, p, err)
+			logger.Warnf(ctx, "[LocalSandbox] stat denied session=%s path_len=%d error_len=%d error_type=%T",
+				sessionID, len(p), len(err.Error()), err)
 		}
 		return nil, err
 	}
@@ -248,11 +254,12 @@ func (a *Adapter) ReadSessionFile(ctx context.Context, sessionID, p string) ([]b
 	data, err := guard.ReadFile(target)
 	if err != nil {
 		if errors.Is(err, localsandbox.ErrPathDenied) {
-			logger.Warnf(ctx, "[LocalSandbox] read denied session=%s path=%q: %v", sessionID, p, err)
+			logger.Warnf(ctx, "[LocalSandbox] read denied session=%s path_len=%d error_len=%d error_type=%T",
+				sessionID, len(p), len(err.Error()), err)
 		}
 		return nil, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] read session=%s path=%s", sessionID, target)
+	logger.Debugf(ctx, "[LocalSandbox] read session=%s path_len=%d", sessionID, len(target))
 	return data, nil
 }
 
@@ -269,13 +276,15 @@ func (a *Adapter) WriteSessionWorkspaceFile(
 	target := absoluteIn(ws.Root, p)
 	if err := guard.WriteFile(target, content, 0o644); err != nil {
 		if errors.Is(err, localsandbox.ErrPathDenied) {
-			logger.Warnf(ctx, "[LocalSandbox] write denied session=%s path=%q: %v", sessionID, p, err)
+			logger.Warnf(ctx, "[LocalSandbox] write denied session=%s path_len=%d error_len=%d error_type=%T",
+				sessionID, len(p), len(err.Error()), err)
 		} else {
-			logger.Errorf(ctx, "[LocalSandbox] write session=%s path=%s: %v", sessionID, target, err)
+			logger.Errorf(ctx, "[LocalSandbox] write session=%s path_len=%d error_len=%d error_type=%T",
+				sessionID, len(target), len(err.Error()), err)
 		}
 		return err
 	}
-	logger.Infof(ctx, "[LocalSandbox] wrote session=%s path=%s bytes=%d", sessionID, target, len(content))
+	logger.Infof(ctx, "[LocalSandbox] wrote session=%s path_len=%d bytes=%d", sessionID, len(target), len(content))
 	return nil
 }
 

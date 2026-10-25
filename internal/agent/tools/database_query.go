@@ -147,7 +147,8 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Validating and securing SQL...")
 	securedSQL, err := t.validateAndSecureSQL(input.SQL, tenantID)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: error_len=%d", len(err.Error()))
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("SQL validation failed: %v", err),
@@ -162,7 +163,8 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Executing query against database...")
 	rows, err := t.db.WithContext(ctx).Raw(securedSQL).Rows()
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][DatabaseQuery] Query execution failed: error_len=%d", len(err.Error()))
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] Query execution failed: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Query execution failed: %v", err),
