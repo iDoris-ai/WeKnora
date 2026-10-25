@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
@@ -91,6 +92,52 @@ func levelColorFor(level logrus.Level) string {
 	return ""
 }
 
+// logRuneNeedsEscape 报告会打断或伪造日志行的控制字符。
+func logRuneNeedsEscape(r rune) bool {
+	return r <= 0x1F || r == 0x7F || (r >= 0x80 && r <= 0x9F) || r == 0x2028 || r == 0x2029
+}
+
+// escapeLogText 转义 C0/DEL/C1 与 U+2028/U+2029。反斜杠不转义；非法 UTF-8 字节原样保留。
+// 没有命中时原样返回，避免分配。
+func escapeLogText(s string) string {
+	needs := false
+	for _, r := range s {
+		if logRuneNeedsEscape(r) {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for i, r := range s {
+		if r == utf8.RuneError {
+			if _, size := utf8.DecodeRuneInString(s[i:]); size == 1 {
+				b.WriteByte(s[i])
+				continue
+			}
+		}
+		switch r {
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if logRuneNeedsEscape(r) {
+				fmt.Fprintf(&b, "\\u%04x", r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
 func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	timestamp := entry.Time.Format("2006-01-02 15:04:05.000")
 	level := strings.ToUpper(entry.Level.String())
@@ -110,14 +157,15 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	// 自定义模板模式
 	if f.Template != "" {
-		msg := entry.Message
+		msg := escapeLogText(entry.Message)
 		for _, k := range keys {
-			msg += fmt.Sprintf(" %s=%v", k, entry.Data[k])
+			msg += fmt.Sprintf(" %s=%s", k, escapeLogText(fmt.Sprintf("%v", entry.Data[k])))
 		}
 		shortCaller := caller
 		if len(shortCaller) > 50 {
 			shortCaller = shortCaller[len(shortCaller)-50:]
 		}
+		shortCaller = escapeLogText(shortCaller)
 		// 仅在模板引用 %thread 时才取 goroutine ID，避免每条日志都执行 runtime.Stack
 		thread := ""
 		if f.threadNeeded {
@@ -138,7 +186,7 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 			"%level", levelOut,
 			"%thread", thread,
 			"%logger", shortCaller,
-			"%traceId", traceID,
+			"%traceId", escapeLogText(traceID),
 			"%msg", msg,
 		)
 		return []byte(r.Replace(f.Template) + "\n"), nil
@@ -168,18 +216,19 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	// request_id 优先输出
 	if v, ok := entry.Data["request_id"]; ok {
+		req := escapeLogText(fmt.Sprintf("%v", v))
 		if f.ForceColor {
-			fields += fmt.Sprintf("%s%v%s ",
-				colorBlue, v, colorReset)
+			fields += fmt.Sprintf("%s%s%s ",
+				colorBlue, req, colorReset)
 		} else {
-			fields += fmt.Sprintf("%v ", v)
+			fields += fmt.Sprintf("%s ", req)
 		}
 	}
 
 	// 其余字段排序后输出
 	for _, k := range keys {
+		val := escapeLogText(fmt.Sprintf("%v", entry.Data[k]))
 		if f.ForceColor {
-			val := fmt.Sprintf("%v", entry.Data[k])
 			coloredVal := fmt.Sprintf("%s%s%s", colorWhite, val, colorReset)
 			if k == "error" {
 				coloredVal = fmt.Sprintf("%s%s%s", colorRed, val, colorReset)
@@ -187,25 +236,27 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 			fields += fmt.Sprintf("%s%s%s=%s ",
 				colorCyan, k, colorReset, coloredVal)
 		} else {
-			fields += fmt.Sprintf("%s=%v ", k, entry.Data[k])
+			fields += fmt.Sprintf("%s=%s ", k, val)
 		}
 	}
 
 	fields = strings.TrimSpace(fields)
 
 	// 拼接最终输出内容，添加颜色
+	escapedCaller := escapeLogText(caller)
+	escapedMsg := escapeLogText(entry.Message)
 	if f.ForceColor {
 		coloredTimestamp := fmt.Sprintf("%s%s%s", colorGray, timestamp, resetColor)
-		coloredCaller := caller
+		coloredCaller := escapedCaller
 		if caller != "" {
-			coloredCaller = fmt.Sprintf("%s%s%s", colorPurple, caller, resetColor)
+			coloredCaller = fmt.Sprintf("%s%s%s", colorPurple, escapedCaller, resetColor)
 		}
 		return []byte(fmt.Sprintf("%s%-5s%s[%s] [%s] %-20s | %s\n",
-			levelColor, level, resetColor, coloredTimestamp, fields, coloredCaller, entry.Message)), nil
+			levelColor, level, resetColor, coloredTimestamp, fields, coloredCaller, escapedMsg)), nil
 	}
 
 	return []byte(fmt.Sprintf("%-5s[%s] [%s] %-20s | %s\n",
-		level, timestamp, fields, caller, entry.Message)), nil
+		level, timestamp, fields, escapedCaller, escapedMsg)), nil
 }
 
 func getGoroutineID() string {
@@ -546,4 +597,12 @@ func CloneContextWithoutTrace(ctx context.Context) context.Context {
 		}
 	}
 	return newCtx
+}
+
+// PanicValue 格式化 panic 值：它可以是任意 error 或字符串，可能带正文。
+func PanicValue(r any) string {
+	if re, ok := r.(runtime.Error); ok {
+		return re.Error()
+	}
+	return fmt.Sprintf("%T (len=%d)", r, len(fmt.Sprint(r)))
 }

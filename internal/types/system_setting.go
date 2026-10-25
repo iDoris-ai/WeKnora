@@ -35,9 +35,8 @@ type SystemSetting struct {
 	// data-only change.
 	Category    string `gorm:"type:varchar(32);not null"  json:"category"`
 	Description string `gorm:"type:text;not null;default:''" json:"description"`
-	// IsSecret reserves UI affordances for P3 (mask + reveal-with-confirm).
-	// In P1 every row is is_secret=false; service Update accepts the
-	// column but does not yet enforce special handling.
+	// IsSecret keeps the value out of the audit log: Update and Reset
+	// write "***" for old and new when the registry or the stored row marks it.
 	IsSecret bool `gorm:"not null;default:false"  json:"is_secret"`
 	// RequiresRestart reserves UI affordances for P3 (banner "this
 	// change won't take effect until the next restart"). In P1 the

@@ -33,3 +33,21 @@ func TestAgent24GormLoggerHidesBoundValues(t *testing.T) {
 		t.Fatalf("want placeholders in the logged SQL, got:\n%s", out)
 	}
 }
+
+func TestNewGormConfigHidesBoundValues(t *testing.T) {
+	var buf bytes.Buffer
+	db, err := gorm.Open(sqlite.Open(":memory:"), newGormConfig(&buf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sentinel = "S3NT1NEL"
+	var rows []map[string]any
+	_ = db.Raw("SELECT x FROM missing WHERE y = ?", sentinel).Scan(&rows).Error
+	out := buf.String()
+	if !strings.Contains(out, "SELECT x FROM missing") {
+		t.Fatalf("want SQL in the gorm log, got:\n%s", out)
+	}
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("gorm log contains the bound value:\n%s", out)
+	}
+}

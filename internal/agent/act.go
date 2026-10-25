@@ -321,8 +321,8 @@ func (e *AgentEngine) executeToolCallsParallel(
 			// process from a goroutine nothing above can recover.
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf(ctx, "[Agent][Round-%d] Tool call %s panicked: %v\n%s",
-						round, tc.Function.Name, r, debug.Stack())
+					logger.Errorf(ctx, "[Agent][Round-%d] Tool call %s panicked: %s\n%s",
+						round, tc.Function.Name, logger.PanicValue(r), debug.Stack())
 					mu.Lock()
 					results[i] = panickedToolCall(tc, i)
 					mu.Unlock()
