@@ -8,6 +8,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/url"
 
@@ -67,17 +68,30 @@ func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24
 	}
 	// Storage, vector-store and Ollama clients return their network errors as
 	// is (the single-group fast path passes the retriever's error through), so
-	// a refused or reset connection, a failed lookup or a TLS handshake timeout
-	// there is a dependency failure too (R3.5). The one net.Error that is not:
-	// a *url.Error from parsing (Op "parse"), a URL that will never work.
-	var netErr net.Error
-	var urlErr *url.Error
-	unparsable := errors.As(err, &urlErr) && urlErr.Op == "parse"
-	if errors.As(err, &netErr) && !unparsable {
-		if netErr.Timeout() {
+	// a network failure there is a dependency failure too (R3.5).
+	if failed, timedOut := agent24NetworkFailure(err); failed {
+		if timedOut {
 			return deadlineOr(), false
 		}
 		return agent24Unavailable("dependency"), false
 	}
 	return agent24Internal(), false
+}
+
+// agent24NetworkFailure reports whether err is a failure on the network (a
+// refused or reset connection, a failed lookup, a TLS handshake timeout, a
+// connection closed before the reply), and whether it timed out. A *url.Error
+// is judged by its cause: it is a net.Error whatever the cause, including a
+// URL that does not parse or a scheme no transport serves, and those never
+// work on a retry (internal).
+func agent24NetworkFailure(err error) (failed, timedOut bool) {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true, netErr.Timeout()
+	}
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF), false
 }

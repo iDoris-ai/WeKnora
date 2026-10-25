@@ -224,6 +224,10 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 	// the server closes before replying.
 	tlsTimeout := &url.Error{Op: "Post", URL: "https://es.invalid", Err: agent24TestTimeoutError{}}
 	closed := fmt.Errorf("ollama: %w", &url.Error{Op: "Post", URL: "http://ollama.invalid", Err: io.EOF})
+	// What http.Client.Do returns for OLLAMA_BASE_URL "localhost:11434" (scheme "localhost"): nothing is sent.
+	badScheme := fmt.Errorf("ollama: %w", &url.Error{
+		Op: "Head", URL: "localhost:11434", Err: errors.New(`unsupported protocol scheme "localhost"`),
+	})
 	// What url.Parse("http://store.invalid/%zz") returns.
 	parseErr := &url.Error{Op: "parse", URL: "http://store.invalid/%zz", Err: url.EscapeError("%zz")}
 	badURL := fmt.Errorf("embed: %w", parseErr)
@@ -262,6 +266,7 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		{"closed before reply", bg, closed, agent24CodeUnavailable, "dependency"},
 		{"url does not parse", bg, badURL, agent24CodeInternal, ""},
 		{"expired url does not parse", expired, badURL, agent24CodeInternal, ""},
+		{"unsupported scheme", bg, badScheme, agent24CodeInternal, ""},
 		{"expired other", expired, errors.New("x"), agent24CodeInternal, ""},
 		{"secret", bg, errors.New("secret text"), agent24CodeInternal, ""},
 	}
