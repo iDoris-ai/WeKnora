@@ -14,9 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -37,6 +39,16 @@ const (
 	agent24AuditPathReady  = "/api/v1/agent24/knowledge/ready"
 	agent24AuditPathSearch = "/api/v1/agent24/knowledge/search"
 	agent24AuditPathRead   = "/api/v1/agent24/knowledge/read"
+
+	// agent24AuditWriteTimeout bounds the row write. The row is written after the response is flushed, on a
+	// context that ignores the client leaving, so a stalled store would otherwise hold the handler forever.
+	agent24AuditWriteTimeout = 2 * time.Second
+	// Anonymous rows (R10.2) come from requests without a credential, which anyone can send. They share one
+	// process-wide token bucket: a burst of agent24AuditAnonymousBurst, then one row per
+	// agent24AuditAnonymousEvery. The bucket belongs to the middleware, so each server process has its own.
+	// Authenticated rows are not limited.
+	agent24AuditAnonymousBurst = 60
+	agent24AuditAnonymousEvery = time.Second
 
 	// agent24AuditFactsKey is the gin-context key for *agent24AuditFacts, used only by agent24NoteAudit
 	// (handlers record through it) and agent24KnowledgeAuditEntry (the middleware reads the facts back).
@@ -79,6 +91,29 @@ type agent24AuditDetails struct {
 	Outcome        string                 `json:"outcome"`
 	Reason         string                 `json:"reason,omitempty"`
 	Metering       agent24AuditMetering   `json:"metering"`
+	// Suppressed is set on an anonymous row only: how many anonymous rows the token bucket dropped since the
+	// previous anonymous row was written.
+	Suppressed int64 `json:"suppressed,omitempty"`
+}
+
+// agent24AnonymousAuditLimiter is the token bucket for anonymous rows, with the count of rows it dropped.
+type agent24AnonymousAuditLimiter struct {
+	bucket     *rate.Limiter
+	suppressed atomic.Int64
+}
+
+func newAgent24AnonymousAuditLimiter(every time.Duration, burst int) *agent24AnonymousAuditLimiter {
+	return &agent24AnonymousAuditLimiter{bucket: rate.NewLimiter(rate.Every(every), burst)}
+}
+
+// admit reports whether an anonymous row may be written and, when it may, how many were dropped before it.
+// The count is taken when the row is admitted, so a row whose write then fails takes its count with it.
+func (l *agent24AnonymousAuditLimiter) admit() (bool, int64) {
+	if !l.bucket.Allow() {
+		l.suppressed.Add(1)
+		return false, 0
+	}
+	return true, l.suppressed.Swap(0)
 }
 
 // agent24NoteAudit creates the request's facts on first use, then lets f update them.
@@ -160,12 +195,19 @@ func agent24ReadAuditResource(knowledgeID string, rev agent24DocRevision, segs [
 	return resource, revision
 }
 
-// Agent24KnowledgeAudit writes one audit row for the three knowledge endpoints. A nil service, and every
-// other request, is passed through. Mount it outside Auth: Log runs after the handler chain, on a context
-// that ignores client cancellation, and Log's own error is ignored. Mount it outside Recovery too: a panic
-// further down then reaches here as Recovery's 500, recorded as internal. Being outside Recovery, a panic
-// while writing the row is contained here: the row is lost, the response already written is kept.
+// Agent24KnowledgeAudit writes one audit row for the three knowledge endpoints; anonymous rows go through a
+// token bucket (see agent24AuditAnonymousBurst). A nil service, and every other request, is passed through.
+// Mount it outside Auth: the row is built after the handler chain, the response is flushed, and only then is
+// the row written, on a context that ignores client cancellation and ends after agent24AuditWriteTimeout;
+// Log's own error is ignored. Mount it outside Recovery too: a panic further down then reaches here as
+// Recovery's 500, recorded as internal. Being outside Recovery, a panic while writing the row is contained
+// here: the row is lost, the response already written is kept.
 func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
+	return agent24KnowledgeAudit(svc,
+		newAgent24AnonymousAuditLimiter(agent24AuditAnonymousEvery, agent24AuditAnonymousBurst))
+}
+
+func agent24KnowledgeAudit(svc interfaces.AuditLogService, anonymous *agent24AnonymousAuditLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if svc == nil || !agent24KnowledgeAuditPath(c) {
 			c.Next()
@@ -173,18 +215,33 @@ func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
 		}
 		started := time.Now()
 		c.Next()
-		agent24WriteKnowledgeAudit(c, svc, started)
+		agent24WriteKnowledgeAudit(c, svc, anonymous, started)
 	}
 }
 
-func agent24WriteKnowledgeAudit(c *gin.Context, svc interfaces.AuditLogService, started time.Time) {
-	ctx := context.WithoutCancel(c.Request.Context())
+func agent24WriteKnowledgeAudit(
+	c *gin.Context, svc interfaces.AuditLogService, anonymous *agent24AnonymousAuditLimiter, started time.Time,
+) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agent24AuditWriteTimeout)
+	defer cancel()
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Errorf(ctx, "agent24 knowledge audit: panic while writing the row: %s", logger.PanicValue(r))
 		}
 	}()
-	_ = svc.Log(ctx, agent24KnowledgeAuditEntry(c, started))
+	entry := agent24KnowledgeAuditEntry(c, started, anonymous)
+	if entry == nil {
+		return
+	}
+	agent24FlushResponse(c)
+	_ = svc.Log(ctx, entry)
+}
+
+// agent24FlushResponse sends the response before the row is written, so the client does not wait on the
+// audit store. A writer that cannot flush panics in gin; the response then goes out when the handler returns.
+func agent24FlushResponse(c *gin.Context) {
+	defer func() { _ = recover() }()
+	c.Writer.Flush()
 }
 
 func agent24KnowledgeAuditPath(c *gin.Context) bool {
@@ -264,7 +321,11 @@ func agent24AuditAnonymous(outcome, reason string) bool {
 		(reason == "" || reason == "credential_missing" || reason == "credential_invalid")
 }
 
-func agent24KnowledgeAuditEntry(c *gin.Context, started time.Time) *types.AuditLog {
+// agent24KnowledgeAuditEntry builds the row, or returns nil when the row is anonymous and the token bucket
+// drops it.
+func agent24KnowledgeAuditEntry(
+	c *gin.Context, started time.Time, limiter *agent24AnonymousAuditLimiter,
+) *types.AuditLog {
 	var facts *agent24AuditFacts
 	if v, ok := c.Get(agent24AuditFactsKey); ok {
 		facts, _ = v.(*agent24AuditFacts)
@@ -282,7 +343,16 @@ func agent24KnowledgeAuditEntry(c *gin.Context, started time.Time) *types.AuditL
 		path = c.Request.URL.Path
 	}
 	anonymous := agent24AuditAnonymous(outcome, reason)
-	raw, err := json.Marshal(agent24AuditDetail(c, facts, outcome, reason, started, anonymous))
+	var suppressed int64
+	if anonymous && limiter != nil {
+		var ok bool
+		if ok, suppressed = limiter.admit(); !ok {
+			return nil
+		}
+	}
+	details := agent24AuditDetail(c, facts, outcome, reason, started, anonymous)
+	details.Suppressed = suppressed
+	raw, err := json.Marshal(details)
 	if err != nil {
 		raw = []byte("{}")
 	}

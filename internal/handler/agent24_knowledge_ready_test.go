@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -829,4 +830,151 @@ func TestAgent24KnowledgeAuditNilService(t *testing.T) {
 		})
 		require.Equal(t, http.StatusNoContent, w.Code)
 	})
+}
+
+// agent24AuditCtxProbe records, when Log is called, the row and what its context and the response looked like.
+type agent24AuditCtxProbe struct {
+	interfaces.AuditLogService
+	w           *httptest.ResponseRecorder
+	entry       *types.AuditLog
+	err         error
+	hasDeadline bool
+	remaining   time.Duration
+	flushed     bool
+}
+
+func (p *agent24AuditCtxProbe) Log(ctx context.Context, entry *types.AuditLog) error {
+	p.entry, p.err = entry, ctx.Err()
+	var deadline time.Time
+	deadline, p.hasDeadline = ctx.Deadline()
+	p.remaining = time.Until(deadline)
+	p.flushed = p.w.Flushed
+	return nil
+}
+
+// PR #96 blocker 2: the response is flushed before the row is written, and the write runs on a context that
+// survives the client leaving but ends after agent24AuditWriteTimeout.
+func TestAgent24KnowledgeAuditFlushesThenWritesOnBoundedContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	probe := &agent24AuditCtxProbe{w: w}
+	reqCtx, leave := context.WithCancel(context.Background())
+	defer leave()
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(probe))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		leave() // the client goes away once the rejection is written
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", nil).WithContext(reqCtx)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.NotNil(t, probe.entry)
+	require.NoError(t, probe.err, "the row's context must not end with the request")
+	require.True(t, probe.hasDeadline, "the row's context must have a deadline")
+	require.Greater(t, probe.remaining, time.Duration(0))
+	require.LessOrEqual(t, probe.remaining, agent24AuditWriteTimeout)
+	require.True(t, probe.flushed, "the response must be flushed before the row is written")
+}
+
+// agent24StalledAudit blocks Log until its context ends.
+type agent24StalledAudit struct {
+	interfaces.AuditLogService
+	done chan error
+}
+
+func (s *agent24StalledAudit) Log(ctx context.Context, _ *types.AuditLog) error {
+	<-ctx.Done()
+	s.done <- ctx.Err()
+	return ctx.Err()
+}
+
+// The reviewer's probe on a real server: with the audit store stalled, the 401 still reaches the client, and
+// the write gives up after agent24AuditWriteTimeout.
+func TestAgent24KnowledgeAuditStalledStoreDoesNotHoldResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stalled := &agent24StalledAudit{done: make(chan error, 1)}
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(stalled))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	started := time.Now()
+	client := &http.Client{Timeout: agent24AuditWriteTimeout / 2}
+	resp, err := client.Post(srv.URL+"/api/v1/agent24/knowledge/search", "application/json", nil)
+	require.NoError(t, err, "the response must arrive while the audit store is stalled")
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Less(t, time.Since(started), agent24AuditWriteTimeout)
+
+	select {
+	case err := <-stalled.done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(2 * agent24AuditWriteTimeout):
+		t.Fatal("the stalled write did not end")
+	}
+}
+
+func agent24AuditAnonymousRequest(t *testing.T, r *gin.Engine) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", nil))
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// PR #96 blocker 1, rate half: anonymous rows go through the token bucket and the next written one carries how
+// many were dropped; authenticated rows are not limited.
+func TestAgent24KnowledgeAuditRateLimitsAnonymousRows(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24AuditStub{}
+	limiter := newAgent24AnonymousAuditLimiter(time.Hour, 2)
+	r := gin.New()
+	r.Use(agent24KnowledgeAudit(stub, limiter))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	authed := r.Group("/api/v1/agent24/knowledge", agent24AuditIdentity)
+	authed.POST("/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+
+	for range 5 {
+		agent24AuditAnonymousRequest(t, r)
+	}
+	require.Len(t, stub.entries, 2, "the bucket holds two anonymous rows")
+	for range 3 {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	require.Len(t, stub.entries, 5, "authenticated rows are not limited")
+
+	limiter.bucket.SetLimit(rate.Inf)
+	agent24AuditAnonymousRequest(t, r)
+	require.Len(t, stub.entries, 6)
+	require.Contains(t, string(stub.entries[5].Details), `"suppressed":3`)
+	agent24AuditAnonymousRequest(t, r)
+	for i, e := range stub.entries {
+		if i != 5 {
+			require.NotContains(t, string(e.Details), `"suppressed"`, "row %d", i)
+		}
+	}
+}
+
+// The exported middleware carries the bucket: a burst of anonymous requests writes agent24AuditAnonymousBurst
+// rows.
+func TestAgent24KnowledgeAuditDefaultAnonymousBurst(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24AuditStub{}
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(stub))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	for range agent24AuditAnonymousBurst + 5 {
+		agent24AuditAnonymousRequest(t, r)
+	}
+	require.Len(t, stub.entries, agent24AuditAnonymousBurst)
 }
