@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-03 (CONTRACT-READONLY-v1 R6.1).
+// Agent24 fork product patch A24-KB-03, A24-KB-20 (CONTRACT-READONLY-v1 R6.1, WeKnora#56).
 //
 // Common request fields of the Agent24 knowledge integration endpoints.
 
@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,7 +28,8 @@ func agent24ReadBody(c *gin.Context) ([]byte, bool) {
 	return body, err == nil
 }
 
-const agent24RequestIDMaxBytes = 128
+// agent24RequestIDMaxRunes is maxLength of request_id (common.schema.json), in characters.
+const agent24RequestIDMaxRunes = 128
 
 // agent24JSONInt64 reports whether raw is a JSON integer that fits in int64.
 func agent24JSONInt64(raw json.RawMessage) (int64, bool) {
@@ -63,7 +65,7 @@ func parseAgent24KnowledgeCommon(
 
 	if raw, ok := fields["request_id"]; ok {
 		var s string
-		if json.Unmarshal(raw, &s) == nil && len(s) >= 1 && len(s) <= agent24RequestIDMaxBytes {
+		if json.Unmarshal(raw, &s) == nil && s != "" && utf8.RuneCountInString(s) <= agent24RequestIDMaxRunes {
 			echo.RequestID = &s
 		}
 	}

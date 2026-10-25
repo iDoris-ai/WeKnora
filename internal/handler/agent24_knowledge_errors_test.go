@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -90,6 +94,7 @@ func TestAgent24KnowledgeErrorEnvelope(t *testing.T) {
 
 func TestAgent24KnowledgeParseCommon(t *testing.T) {
 	long := strings.Repeat("a", 129)
+	rid128, wide128, wide129 := strings.Repeat("a", 128), strings.Repeat("中", 128), strings.Repeat("中", 129)
 	cases := []struct {
 		name, body string
 		ok         bool
@@ -107,6 +112,21 @@ func TestAgent24KnowledgeParseCommon(t *testing.T) {
 			false, "unsupported_protocol_version", "r", int64(3),
 		},
 		{"rid long", `{"protocol_version":1,"request_id":"` + long + `","generation":1}`, false, "", nil, int64(1)},
+		{
+			"rid 128", `{"protocol_version":1,"request_id":"` + rid128 + `","generation":1,"query":"q"}`,
+			true, "", rid128, int64(1),
+		},
+		// maxLength counts characters: 128 three-byte characters fit, 129 do not.
+		{
+			"rid 128 wide", `{"protocol_version":1,"request_id":"` + wide128 + `","generation":1,"query":"q"}`,
+			true, "", wide128, int64(1),
+		},
+		{
+			"rid 129 wide", `{"protocol_version":1,"request_id":"` + wide129 + `","generation":1}`,
+			false, "", nil, int64(1),
+		},
+		// protocol_version is checked first (R6.4): unsupported even with nothing to echo.
+		{"pv 2 alone", `{"protocol_version":2}`, false, "unsupported_protocol_version", nil, nil},
 		{"rid empty", `{"protocol_version":1,"request_id":"","generation":1}`, false, "", nil, int64(1)},
 		{"rid number", `{"protocol_version":1,"request_id":5,"generation":1}`, false, "", nil, int64(1)},
 		{"gen negative", `{"protocol_version":1,"request_id":"r","generation":-1}`, false, "", "r", nil},
@@ -140,14 +160,6 @@ func TestAgent24KnowledgeParseCommon(t *testing.T) {
 	}
 }
 
-func TestAgent24KnowledgeDeadline(t *testing.T) {
-	for in, want := range map[int64]int{0: 30000, -5: 30000, 99999: 30000, 1500: 1500} {
-		d, ms := agent24KnowledgeDeadline(in)
-		require.Equal(t, want, ms)
-		require.Equal(t, time.Duration(want)*time.Millisecond, d)
-	}
-}
-
 func TestAgent24KnowledgeClassify(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -161,6 +173,11 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 	vendor := func(code int) error { return &api.HTTPError{StatusCode: code, Body: "vendor secret"} }
 	transport := &api.TransportError{Op: "send request", Err: errors.New("dial")}
 	timedOut := &api.TransportError{Op: "send request", Err: context.DeadlineExceeded}
+	// A storage driver's own network errors, as the single-group fast path returns them.
+	refused := fmt.Errorf("retrieve: %w", &net.OpError{
+		Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED},
+	})
+	netTimeout := fmt.Errorf("retrieve: %w", &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded})
 	cases := []struct {
 		name   string
 		ctx    context.Context
@@ -179,12 +196,17 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		{"not found", bg, apperrors.NewNotFoundError("s"), agent24CodeInternal, ""},
 		{"nil apperr", bg, (*apperrors.AppError)(nil), agent24CodeInternal, ""},
 		{"http 429", bg, vendor(429), agent24CodeUnavailable, "overloaded"},
+		{"http 500", bg, vendor(500), agent24CodeUnavailable, "dependency"},
 		{"http 503", bg, vendor(503), agent24CodeUnavailable, "dependency"},
 		{"http 400", bg, vendor(400), agent24CodeInternal, ""},
 		{"live transport", bg, transport, agent24CodeUnavailable, "dependency"},
 		{"expired transport", expired, transport, agent24CodeUnavailable, "dependency"},
 		{"expired transport deadline", expired, timedOut, agent24CodeTimeout, ""},
 		{"live transport deadline", bg, timedOut, agent24CodeUnavailable, "dependency"},
+		{"store refused", bg, refused, agent24CodeUnavailable, "dependency"},
+		{"expired store refused", expired, refused, agent24CodeUnavailable, "dependency"},
+		{"live store timeout", bg, netTimeout, agent24CodeUnavailable, "dependency"},
+		{"expired store timeout", expired, netTimeout, agent24CodeTimeout, ""},
 		{"expired other", expired, errors.New("x"), agent24CodeInternal, ""},
 		{"secret", bg, errors.New("secret text"), agent24CodeInternal, ""},
 	}

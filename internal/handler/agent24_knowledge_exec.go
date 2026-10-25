@@ -1,28 +1,18 @@
-// Agent24 fork product patch A24-KB-03 (CONTRACT-READONLY-v1 R3.3, R7.1–R7.2).
+// Agent24 fork product patch A24-KB-03, A24-KB-20 (CONTRACT-READONLY-v1 R3.4–R3.5, R7.1–R7.2, WeKnora#56).
 //
-// Deadline clamping and execution error classification of the Agent24
-// knowledge integration endpoints. Raw error text never leaves this file.
+// Execution error classification of the Agent24 knowledge integration
+// endpoints. Raw error text never leaves this file.
 
 package handler
 
 import (
 	"context"
 	"errors"
-	"time"
+	"net"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/api"
 )
-
-// agent24KnowledgeDeadline returns the applied deadline: requestedMS <= 0
-// means the server maximum; larger values are clamped without error (R3.3).
-func agent24KnowledgeDeadline(requestedMS int64) (time.Duration, int) {
-	ms := int64(agent24KnowledgeMaxDeadlineMS)
-	if requestedMS > 0 && requestedMS < ms {
-		ms = requestedMS
-	}
-	return time.Duration(ms) * time.Millisecond, int(ms)
-}
 
 // classifyAgent24KnowledgeExecError: clientGone means the caller aborted, write
 // nothing (R7.1). Explicit non-deadline causes win over an expired ctx; timeout
@@ -72,6 +62,16 @@ func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24
 	// Any other transport failure (refused, reset) is a dependency failure.
 	var transportErr *api.TransportError
 	if errors.As(err, &transportErr) {
+		return agent24Unavailable("dependency"), false
+	}
+	// Storage and vector-store drivers return their network errors as is (the
+	// single-group fast path passes the retriever's error through), so a
+	// refused or reset connection there is a dependency failure too (R3.5).
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return deadlineOr(), false
+		}
 		return agent24Unavailable("dependency"), false
 	}
 	return agent24Internal(), false

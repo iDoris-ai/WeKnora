@@ -124,6 +124,7 @@ func TestAgent24ParseReadRequest(t *testing.T) {
 		"max_bytes fraction":   {scope, kid, `"max_bytes":1.5`},
 		"max_bytes null":       {scope, kid, `"max_bytes":null`},
 		"deadline_ms negative": {scope, kid, `"deadline_ms":-1`},
+		"deadline_ms zero":     {scope, kid, `"deadline_ms":0`},
 	} {
 		_, gotEcho, kerr := parse(fields...)
 		assert.Equal(t, agent24InvalidRequest(), kerr, name)
