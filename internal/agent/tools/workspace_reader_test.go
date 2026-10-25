@@ -22,6 +22,7 @@ type fakeSandboxFileSource struct {
 	data        []byte
 	readErr     error
 	entries     []sandbox.RemoteDirEntry
+	listErr     error
 	statCalls   int
 	readCalls   int
 	listedDir   string
@@ -33,6 +34,9 @@ type fakeSandboxFileSource struct {
 
 func (f *fakeSandboxFileSource) ListSessionFiles(_ context.Context, _, dir string) ([]sandbox.RemoteDirEntry, error) {
 	f.listedDir = dir
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.entries, nil
 }
 
@@ -631,4 +635,29 @@ func TestReadFileOutsideWorkspaceStillRequiresSession(t *testing.T) {
 	assert.Contains(t, result.Error, "no session ID")
 	assert.Zero(t, source.statCalls)
 	assert.Zero(t, source.readCalls)
+}
+
+// The directory is a tool argument, and a list error can quote it. The failure log records lengths only
+// (A24-OBS-12, #97 review G1).
+func TestListSandboxFilesLogsOmitDir(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	dir := "/tmp/" + sentinel
+	source := &fakeSandboxFileSource{listErr: fmt.Errorf("list %q denied", dir)}
+	result, err := NewListSandboxFilesTool(source).Execute(
+		sandboxFileTestContext(),
+		json.RawMessage(`{"path":"`+dir+`"}`),
+	)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "list failed: session=")
+	assert.Equal(t, 1, strings.Count(logs, "dir_len="))
+	assert.Equal(t, 1, strings.Count(logs, "error_len="))
 }
