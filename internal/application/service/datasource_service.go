@@ -418,7 +418,7 @@ func (s *DataSourceService) ListAvailableResources(
 	// List resources
 	resources, err := connector.ListResources(ctx, config, parentID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to list resources: %v", err)
+		logger.Errorf(ctx, "failed to list resources: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 
@@ -451,7 +451,8 @@ func (s *DataSourceService) ResolveResourceAncestors(
 
 	ancestors, err := connector.ResolveResourceAncestors(ctx, config, resourceIDs)
 	if err != nil {
-		logger.Errorf(ctx, "failed to resolve resource ancestors: %v", err)
+		logger.Errorf(ctx, "failed to resolve resource ancestors: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 
@@ -725,7 +726,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 				}
 			}
 		}
-		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
+		logger.Errorf(ctx, "fetch operation failed: error_len=%d error_type=%T", len(fetchErr.Error()), fetchErr)
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
@@ -772,7 +773,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	resultJSON, _ := result.ToJSON()
 	if err := allFetchedItemsFailedError(result); err != nil {
-		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
+		logger.Errorf(ctx, "data source sync failed while processing fetched items: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
 		return err
 	}
@@ -880,7 +882,7 @@ func (s *DataSourceService) applyFetchedItem(
 			return
 		}
 		if item.ExternalID == "" {
-			logger.Warnf(ctx, "skipping deletion for item %q: empty external_id", item.Title)
+			logger.Warnf(ctx, "skipping deletion for item title_len=%d: empty external_id", len(item.Title))
 			result.Skipped++
 			return
 		}
@@ -942,11 +944,13 @@ func (s *DataSourceService) applyFetchedItem(
 	if len(item.Content) == 0 && item.URL == "" {
 		// Check if this is an error item from the connector (failed to fetch content)
 		if errMsg, hasErr := item.Metadata["error"]; hasErr {
-			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", item.Title, item.ExternalID, errMsg)
+			logger.Warnf(ctx, "item title_len=%d (external_id=%s) fetch failed: error_len=%d",
+				len(item.Title), item.ExternalID, len(errMsg))
 			result.Failed++
 			recordSyncError(result, fetchFailureSyncError(item, errMsg))
 		} else {
-			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", item.Title, item.ExternalID)
+			logger.Infof(ctx, "skipping item title_len=%d (external_id=%s): no content or URL",
+				len(item.Title), item.ExternalID)
 			result.Skipped++
 		}
 		return
@@ -958,7 +962,8 @@ func (s *DataSourceService) applyFetchedItem(
 		switch {
 		case errors.As(err, &dupErr):
 			// Duplicate file/URL is not a failure — count as skipped.
-			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
+			logger.Infof(ctx, "item title_len=%d (external_id=%s) already exists, skipping",
+				len(item.Title), item.ExternalID)
 			result.Skipped++
 		case item.Metadata["embedded_image"] == "true":
 			// An image extracted from a document for OCR is a best-effort
@@ -967,11 +972,13 @@ func (s *DataSourceService) applyFetchedItem(
 			// skip it rather than failing the whole sync: the doc body already
 			// synced, and the image stays in SubtreeKeep for a later retry once the
 			// KB is configured.
-			logger.Infof(ctx, "skipping embedded image %q (external_id=%s), not ingested: %v",
-				item.Title, item.ExternalID, err)
+			logger.Infof(ctx,
+				"skipping embedded image title_len=%d (external_id=%s), not ingested: error_len=%d error_type=%T",
+				len(item.Title), item.ExternalID, len(err.Error()), err)
 			result.Skipped++
 		default:
-			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
+			logger.Warnf(ctx, "failed to ingest item title_len=%d (external_id=%s): error_len=%d error_type=%T",
+				len(item.Title), item.ExternalID, len(err.Error()), err)
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
@@ -1124,7 +1131,7 @@ func (s *DataSourceService) processSyncStreaming(
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.
-		logger.Errorf(ctx, "streaming fetch failed: %v", fetchErr)
+		logger.Errorf(ctx, "streaming fetch failed: error_len=%d error_type=%T", len(fetchErr.Error()), fetchErr)
 		resultJSON, _ := result.ToJSON()
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
 			types.SyncLogStatusFailed, fmt.Sprintf("Fetch failed: %v", fetchErr), wasPaused)
@@ -1133,7 +1140,8 @@ func (s *DataSourceService) processSyncStreaming(
 
 	resultJSON, _ := result.ToJSON()
 	if err := allFetchedItemsFailedError(result); err != nil {
-		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
+		logger.Errorf(ctx, "streaming sync failed while processing fetched items: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
 		return err
 	}

@@ -170,8 +170,9 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 		// it is checked against the same guard the file tools use.
 		resolved, err := NewPathGuard(policy).CheckDir(req.WorkDir)
 		if err != nil {
-			logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir=%q: %v",
-				req.SessionID, req.WorkDir, err)
+			// The guard error quotes work_dir, a tool argument; only lengths are logged.
+			logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir_len=%d error_len=%d error_type=%T",
+				req.SessionID, len(req.WorkDir), len(err.Error()), err)
 			return nil, err
 		}
 		cwd = resolved
@@ -184,8 +185,8 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 	if timeout > maxRunTimeout {
 		timeout = maxRunTimeout
 	}
-	logger.Infof(ctx, "[LocalSandbox] run session=%s cwd=%s timeout=%s command_len=%d",
-		req.SessionID, cwd, timeout, len(req.Command))
+	logger.Infof(ctx, "[LocalSandbox] run session=%s cwd_len=%d timeout=%s command_len=%d",
+		req.SessionID, len(cwd), timeout, len(req.Command))
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -207,7 +208,7 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 		Cwd:  cwd,
 	})
 	if err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] spawn session=%s cwd=%s: %v", req.SessionID, cwd, err)
+		logger.Errorf(ctx, "[LocalSandbox] spawn session=%s cwd_len=%d: %v", req.SessionID, len(cwd), err)
 		return nil, fmt.Errorf("spawn sandboxed command: %w", err)
 	}
 

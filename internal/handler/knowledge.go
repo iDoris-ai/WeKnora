@@ -228,7 +228,8 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 ) bool {
 	if dupErr, ok := err.(*types.DuplicateKnowledgeError); ok {
 		ctx := c.Request.Context()
-		logger.Warnf(ctx, "Detected duplicate %s: %s", duplicateType, secutils.SanitizeForLog(dupErr.Error()))
+		// The message quotes the existing URL or file name.
+		logger.Warnf(ctx, "Detected duplicate %s: message_len=%d", duplicateType, len(dupErr.Error()))
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"message": dupErr.Error(),
@@ -365,11 +366,13 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	displayFileName = secutils.SanitizeForLog(displayFileName)
 	if customFileName != "" {
 		displayFileName = customFileName
-		logger.Infof(ctx, "Using custom filename: %s (original: %s)", customFileName, displayFileName)
+		logger.Infof(ctx, "Using custom filename: file_name_len=%d (original_len=%d)",
+			len(customFileName), len(file.Filename))
 	}
 
-	logger.Infof(ctx, "File upload successful, filename: %s, size: %.2f KB", displayFileName, float64(file.Size)/1024)
-	logger.Infof(ctx, "Creating knowledge, knowledge base ID: %s, filename: %s", kbID, displayFileName)
+	logger.Infof(ctx, "File upload successful, file_name_len=%d, size: %.2f KB",
+		len(displayFileName), float64(file.Size)/1024)
+	logger.Infof(ctx, "Creating knowledge, knowledge base ID: %s, file_name_len=%d", kbID, len(displayFileName))
 
 	// Parse metadata if provided
 	var metadata map[string]string
@@ -380,7 +383,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("Invalid metadata format").WithDetails(err.Error()))
 			return
 		}
-		logger.Infof(ctx, "Received file metadata: %s", secutils.SanitizeForLog(fmt.Sprintf("%v", metadata)))
+		logger.Infof(ctx, "Received file metadata: keys=%d", len(metadata))
 	}
 
 	enableMultimodelForm := c.PostForm("enable_multimodel")
@@ -427,7 +430,8 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 	}
 	if err := service.ValidateJSONUploadContent(jsonCheckName, file); err != nil {
-		logger.Errorf(ctx, "Invalid JSON upload content for %s: %v", jsonCheckName, err)
+		logger.Errorf(ctx, "Invalid JSON upload content: file_name_len=%d error_len=%d error_type=%T",
+			len(jsonCheckName), len(err.Error()), err)
 		_ = c.Error(err)
 		return
 	}
@@ -509,15 +513,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Received URL request: %s, file_name: %s, file_type: %s",
-		secutils.SanitizeForLog(req.URL),
-		secutils.SanitizeForLog(req.FileName),
+	logger.Infof(ctx, "Received URL request: %s, file_name_len=%d, file_type: %s",
+		secutils.RedactURL(req.URL),
+		len(req.FileName),
 		secutils.SanitizeForLog(req.FileType),
 	)
 
 	// SSRF validation for user-supplied URL
 	if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
-		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
+		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: error_len=%d error_type=%T", len(err.Error()), err)
 		c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("URL", req.URL, err)))
 		return
 	}
@@ -525,7 +529,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	logger.Infof(ctx,
 		"Creating knowledge from URL, knowledge base ID: %s, URL: %s",
 		secutils.SanitizeForLog(kbID),
-		secutils.SanitizeForLog(req.URL),
+		secutils.RedactURL(req.URL),
 	)
 
 	// Create knowledge entry from the URL
