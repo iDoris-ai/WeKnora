@@ -62,6 +62,30 @@ func TestLoadConfigFromEnv_FlushIntervalAcceptsSecondsAndDuration(t *testing.T) 
 	}
 }
 
+func TestLoadConfigFromEnv_LangfuseBody(t *testing.T) {
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "")
+	t.Setenv("LANGFUSE_SECRET_KEY", "")
+	t.Setenv("LANGFUSE_ENABLED", "")
+	t.Setenv(agent24LangfuseBodyEnv, "")
+
+	cfg := LoadConfigFromEnv()
+	if cfg.ExportBodies {
+		t.Fatal("expected ExportBodies=false when AGENT24_LANGFUSE_BODY is unset")
+	}
+
+	t.Setenv(agent24LangfuseBodyEnv, "1")
+	cfg = LoadConfigFromEnv()
+	if !cfg.ExportBodies {
+		t.Fatal("expected ExportBodies=true when AGENT24_LANGFUSE_BODY=1")
+	}
+
+	t.Setenv(agent24LangfuseBodyEnv, "true")
+	cfg = LoadConfigFromEnv()
+	if !cfg.ExportBodies {
+		t.Fatal("expected ExportBodies=true when AGENT24_LANGFUSE_BODY=true")
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	cases := []struct {
 		name    string

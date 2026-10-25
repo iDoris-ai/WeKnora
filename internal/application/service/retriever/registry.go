@@ -251,8 +251,8 @@ func (r *RetrieveEngineRegistry) GetOrLoadByStoreID(
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				logger.GetLogger(ctx).Errorf(
-					"[retriever.registry] engine build panicked for store %s: %v\n%s",
-					storeID, recovered, debug.Stack())
+					"[retriever.registry] engine build panicked for store %s: %s\n%s",
+					storeID, logger.PanicValue(recovered), debug.Stack())
 				res, err = nil, ErrVectorStoreUnavailable
 			}
 		}()

@@ -21,15 +21,15 @@ func Recovery() gin.HandlerFunc {
 				// Print stacktrace
 				stacktrace := debug.Stack()
 				// Log error with structured logger
-				logger.ErrorWithFields(ctx, fmt.Errorf("panic: %v", err), logrus.Fields{
+				logger.ErrorWithFields(ctx, fmt.Errorf("panic: %s", logger.PanicValue(err)), logrus.Fields{
 					"request_id": requestID,
 					"stacktrace": string(stacktrace),
 				})
 
-				// 返回500错误
+				// 返回500错误。panic 值可能带内部信息或正文，不返回给客户端（A24-OBS-07）
 				c.AbortWithStatusJSON(500, gin.H{
 					"error":   "Internal Server Error",
-					"message": fmt.Sprintf("%v", err),
+					"message": "Internal Server Error",
 				})
 			}
 		}()

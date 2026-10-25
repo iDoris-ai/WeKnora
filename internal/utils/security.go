@@ -506,6 +506,7 @@ func RedactURL(raw string) string {
 // SanitizeForLog 清理日志输入,防止日志注入攻击
 // 日志注入攻击是指攻击者通过在输入中插入换行符和其他控制字符,
 // 伪造日志条目,可能导致日志分析工具误判或隐藏恶意活动
+// 同时删除 DEL（U+007F）、C1（U+0080–U+009F）、U+2028、U+2029。
 func SanitizeForLog(input string) string {
 	if input == "" {
 		return ""
@@ -518,9 +519,12 @@ func SanitizeForLog(input string) string {
 	// 替换制表符为空格
 	sanitized = strings.ReplaceAll(sanitized, "\t", " ")
 
-	// 移除其他控制字符(ASCII 0-31,除了空格已处理的)
+	// 移除其他 C0 控制字符，以及 DEL、C1（U+0080–U+009F）、U+2028、U+2029
 	var builder strings.Builder
 	for _, r := range sanitized {
+		if r == 0x7F || (r >= 0x80 && r <= 0x9F) || r == '\u2028' || r == '\u2029' {
+			continue
+		}
 		// 保留可打印字符和常用Unicode字符
 		if r >= 32 || r == ' ' {
 			builder.WriteRune(r)

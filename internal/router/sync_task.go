@@ -195,8 +195,9 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			}
 		}
 
-		logger.Errorf(ctx, "[SyncTask] Task failed (exhausted retries) type=%s id=%s elapsed=%v err=%v",
-			task.Type(), taskID, time.Since(start), lastErr)
+		logger.Errorf(ctx,
+			"[SyncTask] Task failed (exhausted retries) type=%s id=%s elapsed=%v error_len=%d error_type=%T",
+			task.Type(), taskID, time.Since(start), len(lastErr.Error()), lastErr)
 		if onFinalFailure != nil {
 			// The attempt's own context may be past its deadline; the
 			// callback only writes status, so give it a fresh bound.
@@ -205,8 +206,8 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						logger.Errorf(ctx, "[SyncTask] final-failure hook panicked for type=%s id=%s: %v",
-							task.Type(), taskID, r)
+						logger.Errorf(ctx, "[SyncTask] final-failure hook panicked for type=%s id=%s: %s",
+							task.Type(), taskID, logger.PanicValue(r))
 					}
 				}()
 				onFinalFailure(cbCtx, task, lastErr)

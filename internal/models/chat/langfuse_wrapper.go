@@ -33,7 +33,9 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata:        buildLangfuseChatMetadata(l.inner.GetModelID(), purpose, prefixFingerprint, false, opts),
+		Metadata: buildLangfuseChatMetadata(
+			l.inner.GetModelID(), purpose, prefixFingerprint, false, opts, mgr.ExportBodies(),
+		),
 	})
 
 	resp, err := l.inner.Chat(genCtx, messages, opts)
@@ -62,7 +64,9 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		Model:           l.inner.GetModelName(),
 		Input:           buildLangfuseMessages(messages),
 		ModelParameters: buildLangfuseModelParams(opts),
-		Metadata:        buildLangfuseChatMetadata(l.inner.GetModelID(), purpose, prefixFingerprint, true, opts),
+		Metadata: buildLangfuseChatMetadata(
+			l.inner.GetModelID(), purpose, prefixFingerprint, true, opts, mgr.ExportBodies(),
+		),
 	})
 
 	ch, err := l.inner.ChatStream(genCtx, messages, opts)
@@ -137,6 +141,7 @@ func buildLangfuseChatMetadata(
 	modelID, purpose, prefixFingerprint string,
 	streaming bool,
 	opts *ChatOptions,
+	exportBodies bool,
 ) map[string]interface{} {
 	meta := map[string]interface{}{
 		"model_id":                  modelID,
@@ -152,7 +157,12 @@ func buildLangfuseChatMetadata(
 	for _, tool := range opts.Tools {
 		names = append(names, tool.Function.Name)
 		if tool.Function.Name == langfuseDiscoverMCPTool && tool.Function.Description != "" {
-			meta["mcp_catalog"] = truncateLangfuseText(tool.Function.Description, langfuseMCPCatalogRunes)
+			// The catalog is the discover_mcp_tools prompt (fork patch A24-OBS-08).
+			if exportBodies {
+				meta["mcp_catalog"] = truncateLangfuseText(tool.Function.Description, langfuseMCPCatalogRunes)
+			} else {
+				meta["mcp_catalog_bytes"] = len(tool.Function.Description)
+			}
 		}
 	}
 	meta["tool_names"] = names
