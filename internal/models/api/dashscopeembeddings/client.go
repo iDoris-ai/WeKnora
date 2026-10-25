@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Config is everything the client needs, already resolved by the api.
@@ -111,9 +112,16 @@ func (c *Client) post(ctx context.Context, body map[string]any, want int) ([][]f
 	}
 	// DashScope reports some failures in the body with a 200.
 	if decoded.Code != "" {
+		// Agent24 A24-KB-21: under a processing guard the vendor's code and message keep only their lengths.
+		if types.ProcessingGuardFromContext(ctx) != nil {
+			return nil, fmt.Errorf("DashScope embedding error (code_len=%d message_len=%d)",
+				len(decoded.Code), len(decoded.Message))
+		}
 		return nil, fmt.Errorf("DashScope embedding error %s: %s", decoded.Code, decoded.Message)
 	}
-	return api.PlaceEmbeddings(want, len(decoded.Output.Embeddings), func(i int) (int, []float32) {
+	vectors, err := api.PlaceEmbeddings(want, len(decoded.Output.Embeddings), func(i int) (int, []float32) {
 		return decoded.Output.Embeddings[i].Index, decoded.Output.Embeddings[i].Embedding
 	})
+	// Agent24 A24-KB-21: the placement error quotes the index the vendor sent.
+	return vectors, api.RedactReplyError(ctx, "embedding", err)
 }

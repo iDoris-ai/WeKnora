@@ -213,7 +213,9 @@ func guardedProcessingClient(c *http.Client) *http.Client {
 	guarded := *c
 	next := c.CheckRedirect
 	guarded.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if err := types.CheckProcessingRequestURL(req.Context(), req.URL.String()); err != nil {
+		// Agent24 A24-KB-21: the context is taken before next runs, so a next that swaps it cannot drop the guard.
+		ctx := req.Context()
+		if err := types.CheckProcessingRequestURL(ctx, req.URL.String()); err != nil {
 			return err
 		}
 		if next != nil {
@@ -221,7 +223,7 @@ func guardedProcessingClient(c *http.Client) *http.Client {
 				return err
 			}
 			// Agent24 A24-KB-21: next may have rewritten req.URL after the check above.
-			return types.CheckProcessingRequestURL(req.Context(), req.URL.String())
+			return types.CheckProcessingRequestURL(ctx, req.URL.String())
 		}
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
@@ -269,9 +271,23 @@ func (e Endpoint) roundTrip(req *http.Request, out any) error {
 		return nil
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
+		// Agent24 A24-KB-21: a decode error quotes number literals from the reply.
+		if types.ProcessingGuardFromContext(req.Context()) != nil {
+			return RedactReplyError(req.Context(), "decode response", err)
+		}
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
+}
+
+// RedactReplyError (Agent24 A24-KB-21): under a processing guard, an error built from what a vendor replied
+// (a decode error, an embedding index) keeps only the operation and the error's type. Unwrap keeps the
+// original. Without a guard, or for a nil error, err is returned as it was.
+func RedactReplyError(ctx context.Context, op string, err error) error {
+	if err == nil || types.ProcessingGuardFromContext(ctx) == nil {
+		return err
+	}
+	return &processingRedactedError{msg: fmt.Sprintf("%s: invalid reply (%T)", op, err), err: err}
 }
 
 // TransportError is a request that never got a whole answer: DNS, connect,

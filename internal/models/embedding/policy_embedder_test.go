@@ -530,3 +530,34 @@ func TestPolicyEmbedderErrorEnvelopeOmitsMessageUnderGuard(t *testing.T) {
 		t.Fatalf("standalone keeps the error as it was: %v", err)
 	}
 }
+
+// A reply that decodes badly or places a vector at an index the vendor made up: the decode error and the
+// placement error both quote numbers from the reply. Under a guard they keep only the operation and type.
+func TestPolicyEmbedderReplyNumbersOmittedUnderGuard(t *testing.T) {
+	allowLoopback(t)
+	for name, reply := range map[string]string{
+		"decode":    `{"data":[{"index":987654321098765432109876543210,"embedding":[1]}]}`,
+		"placement": `{"data":[{"index":987654321,"embedding":[1]}]}`,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(reply))
+		}))
+		cfg := Config{
+			Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m", BaseURL: srv.URL, APIKey: "k",
+		}
+		e, err := NewEmbedder(cfg, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = e.Embed(types.WithProcessingGuard(context.Background(), &allowCountGuard{}), "q")
+		if err == nil || strings.Contains(err.Error(), "987654321") || !strings.Contains(err.Error(), "invalid reply") {
+			t.Fatalf("%s guarded: err = %v", name, err)
+		}
+		_, err = e.Embed(context.Background(), "q")
+		if err == nil || !strings.Contains(err.Error(), "987654321") {
+			t.Fatalf("%s standalone keeps the error as it was: %v", name, err)
+		}
+		srv.Close()
+	}
+}

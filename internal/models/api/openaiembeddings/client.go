@@ -221,10 +221,12 @@ func (c *Client) post(ctx context.Context, body map[string]any, want int) ([][]f
 		}
 		return nil, fmt.Errorf("embedding API error: %s", decoded.Error.Message)
 	}
-	return api.PlaceEmbeddings(want, len(decoded.Data), func(i int) (int, []float32) {
+	vectors, err := api.PlaceEmbeddings(want, len(decoded.Data), func(i int) (int, []float32) {
 		if decoded.Data[i].Index == nil {
 			return i, decoded.Data[i].Embedding
 		}
 		return *decoded.Data[i].Index, decoded.Data[i].Embedding
 	})
+	// Agent24 A24-KB-21: the placement error quotes the index the vendor sent.
+	return vectors, api.RedactReplyError(ctx, "embedding", err)
 }

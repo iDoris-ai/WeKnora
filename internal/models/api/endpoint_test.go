@@ -107,4 +107,18 @@ func TestGuardedProcessingClientRechecksURLAfterCheckRedirect(t *testing.T) {
 	}
 	require.NoError(t, err)
 	require.Equal(t, 1, bHits)
+
+	// A CheckRedirect that also swaps the request's context for one without the guard is checked against
+	// the context the redirect arrived with.
+	swap := &http.Client{CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+		*req = *req.WithContext(context.Background())
+		req.URL.Host = bURL.Host
+		return nil
+	}}
+	resp, err = do(guardedProcessingClient(swap))
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	require.ErrorIs(t, err, types.ErrProcessingDenied)
+	require.Equal(t, 1, bHits)
 }
