@@ -366,7 +366,8 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 
 		logger.Infof(ctx, "[Feishu] ListWikiSpaces: got %d spaces, has_more=%v", len(resp.Data.Items), resp.Data.HasMore)
 		for i, s := range resp.Data.Items {
-			logger.Infof(ctx, "[Feishu]   space[%d]: id=%s name=%q visibility=%s", i, s.SpaceID, s.Name, s.Visibility)
+			logger.Infof(ctx, "[Feishu]   space[%d]: id=%s name_len=%d visibility=%s",
+				i, s.SpaceID, len(s.Name), s.Visibility)
 		}
 
 		allSpaces = append(allSpaces, resp.Data.Items...)

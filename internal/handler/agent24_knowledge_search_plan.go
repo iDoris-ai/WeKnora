@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-07 (CONTRACT-READONLY-v1 r10 §3 R3.2–R3.6, §6 R6.4).
+// Agent24 fork product patch A24-KB-07, A24-KB-20 (CONTRACT-READONLY-v1 r10 §3 R3.2–R3.6, §6 R6.4, WeKnora#56).
 //
 // Search request parsing, budget clamping, branch planning over E and the R3.4 outcome. Pure
 // functions; the endpoint wiring lands in a later slice (WeKnora#38).
@@ -6,7 +6,6 @@
 package handler
 
 import (
-	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -89,36 +88,11 @@ func parseAgent24SearchRequest(body []byte) (agent24SearchRequest, agent24Knowle
 }
 
 // agent24JSONPositiveInt reads a JSON number that is exactly an integer >= 1 and clamps it to limit (R3.3).
-// As in JSON Schema 2020-12, 8e3 and 8000.0 are integers; any magnitude is clamped, not rejected. The
-// literal is read digit by digit, in time linear in its length, with no rounding.
+// As in JSON Schema 2020-12, 8e3 and 8000.0 are integers; any magnitude is clamped, not rejected.
 func agent24JSONPositiveInt(raw json.RawMessage, limit int) (int, bool) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var v any
-	if dec.Decode(&v) != nil {
-		return 0, false
-	}
-	n, ok := v.(json.Number)
-	if !ok || strings.HasPrefix(string(n), "-") {
-		return 0, false
-	}
-	mant, expPart, _ := strings.Cut(strings.ToLower(string(n)), "e")
-	intPart, frac, _ := strings.Cut(mant, ".")
-	var exp int64
-	if expPart != "" {
-		var err error
-		if exp, err = strconv.ParseInt(expPart, 10, 32); err != nil { // beyond int32: only the sign matters
-			exp = 1 << 31
-			if strings.HasPrefix(expPart, "-") {
-				exp = -exp
-			}
-		}
-	}
-	digits := strings.TrimLeft(intPart+frac, "0")
-	trimmed := strings.TrimRight(digits, "0")
-	exp += int64(len(digits)-len(trimmed)) - int64(len(frac)) // value = trimmed × 10^exp
-	if trimmed == "" || exp < 0 {
-		return 0, false // zero, or a fractional part
+	neg, trimmed, exp, ok := agent24JSONDecimal(raw)
+	if !ok || neg || trimmed == "" || exp < 0 {
+		return 0, false // not a number, negative, zero, or a fractional part
 	}
 	if int64(len(trimmed))+exp > int64(len(strconv.Itoa(limit))) {
 		return limit, true

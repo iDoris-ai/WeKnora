@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -90,6 +96,7 @@ func TestAgent24KnowledgeErrorEnvelope(t *testing.T) {
 
 func TestAgent24KnowledgeParseCommon(t *testing.T) {
 	long := strings.Repeat("a", 129)
+	rid128, wide128, wide129 := strings.Repeat("a", 128), strings.Repeat("中", 128), strings.Repeat("中", 129)
 	cases := []struct {
 		name, body string
 		ok         bool
@@ -107,9 +114,34 @@ func TestAgent24KnowledgeParseCommon(t *testing.T) {
 			false, "unsupported_protocol_version", "r", int64(3),
 		},
 		{"rid long", `{"protocol_version":1,"request_id":"` + long + `","generation":1}`, false, "", nil, int64(1)},
+		{
+			"rid 128", `{"protocol_version":1,"request_id":"` + rid128 + `","generation":1,"query":"q"}`,
+			true, "", rid128, int64(1),
+		},
+		// maxLength counts characters: 128 three-byte characters fit, 129 do not.
+		{
+			"rid 128 wide", `{"protocol_version":1,"request_id":"` + wide128 + `","generation":1,"query":"q"}`,
+			true, "", wide128, int64(1),
+		},
+		{
+			"rid 129 wide", `{"protocol_version":1,"request_id":"` + wide129 + `","generation":1}`,
+			false, "", nil, int64(1),
+		},
+		// protocol_version is checked first (R6.4): unsupported even with nothing to echo.
+		{"pv 2 alone", `{"protocol_version":2}`, false, "unsupported_protocol_version", nil, nil},
 		{"rid empty", `{"protocol_version":1,"request_id":"","generation":1}`, false, "", nil, int64(1)},
 		{"rid number", `{"protocol_version":1,"request_id":5,"generation":1}`, false, "", nil, int64(1)},
 		{"gen negative", `{"protocol_version":1,"request_id":"r","generation":-1}`, false, "", "r", nil},
+		// As in JSON Schema, 1.0 and 1e0 are the integer 1 (WeKnora#56); generation echoes canonically.
+		{"pv 1.0", `{"protocol_version":1.0,"request_id":"r","generation":7.0,"query":"q"}`, true, "", "r", int64(7)},
+		{"pv 1e0", `{"protocol_version":1e0,"request_id":"r","generation":5E1,"query":"q"}`, true, "", "r", int64(50)},
+		{
+			"pv 2.0", `{"protocol_version":2.0,"request_id":"r","generation":3}`,
+			false, "unsupported_protocol_version", "r", int64(3),
+		},
+		{"gen -0.0", `{"protocol_version":1,"request_id":"r","generation":-0.0,"query":"q"}`, true, "", "r", int64(0)},
+		{"gen 1e30", `{"protocol_version":1,"request_id":"r","generation":1e30}`, false, "", "r", nil},
+		{"pv huge", `{"protocol_version":1e1000000000,"request_id":"r","generation":1}`, false, "", "r", int64(1)},
 		{"gen fraction", `{"protocol_version":1,"request_id":"r","generation":1.5}`, false, "", "r", nil},
 		{"gen string", `{"protocol_version":1,"request_id":"r","generation":"3"}`, false, "", "r", nil},
 		{"valid", `{"protocol_version":1,"request_id":"r","generation":0,"query":"q"}`, true, "", "r", int64(0)},
@@ -140,13 +172,31 @@ func TestAgent24KnowledgeParseCommon(t *testing.T) {
 	}
 }
 
-func TestAgent24KnowledgeDeadline(t *testing.T) {
-	for in, want := range map[int64]int{0: 30000, -5: 30000, 99999: 30000, 1500: 1500} {
-		d, ms := agent24KnowledgeDeadline(in)
-		require.Equal(t, want, ms)
-		require.Equal(t, time.Duration(want)*time.Millisecond, d)
+func TestAgent24JSONInt64(t *testing.T) {
+	for raw, want := range map[string]int64{
+		"0": 0, "-0": 0, "0.000": 0, "0e99999999999": 0, "7": 7, "7.0": 7, "70e-1": 7, "0.7e1": 7, "1E2": 100,
+		"-12.0": -12, "9223372036854775807": 1<<63 - 1, "-9223372036854775808": -1 << 63,
+		"922337203685477580.7e1": 1<<63 - 1,
+	} {
+		got, ok := agent24JSONInt64(json.RawMessage(raw))
+		require.True(t, ok, raw)
+		require.Equal(t, want, got, raw)
+	}
+	for _, raw := range []string{
+		"1.5", "7e-1", "9223372036854775808", "-9223372036854775809", "1e19", "1e99999999999", "1e-99999999999",
+		`"1"`, "true", "null", "[1]", "{",
+	} {
+		_, ok := agent24JSONInt64(json.RawMessage(raw))
+		require.False(t, ok, raw)
 	}
 }
+
+// agent24TestTimeoutError is a net.Error that times out, like net/http's TLS handshake timeout.
+type agent24TestTimeoutError struct{}
+
+func (agent24TestTimeoutError) Error() string   { return "handshake timeout" }
+func (agent24TestTimeoutError) Timeout() bool   { return true }
+func (agent24TestTimeoutError) Temporary() bool { return true }
 
 func TestAgent24KnowledgeClassify(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
@@ -161,6 +211,26 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 	vendor := func(code int) error { return &api.HTTPError{StatusCode: code, Body: "vendor secret"} }
 	transport := &api.TransportError{Op: "send request", Err: errors.New("dial")}
 	timedOut := &api.TransportError{Op: "send request", Err: context.DeadlineExceeded}
+	// A storage driver's own network errors, as the single-group fast path returns them.
+	refused := fmt.Errorf("retrieve: %w", &net.OpError{
+		Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED},
+	})
+	netTimeout := fmt.Errorf("retrieve: %w", &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded})
+	noHost := &url.Error{
+		Op: "Get", URL: "http://es.invalid", Err: &net.DNSError{Err: "no such host", Name: "es.invalid"},
+	}
+	// A URL that does not parse is a net.Error too (*url.Error), but a configuration error, not a dependency.
+	// net/http's own transport errors carry no *net.OpError: a TLS handshake that times out, a connection
+	// the server closes before replying.
+	tlsTimeout := &url.Error{Op: "Post", URL: "https://es.invalid", Err: agent24TestTimeoutError{}}
+	closed := fmt.Errorf("ollama: %w", &url.Error{Op: "Post", URL: "http://ollama.invalid", Err: io.EOF})
+	// What http.Client.Do returns for OLLAMA_BASE_URL "localhost:11434" (scheme "localhost"): nothing is sent.
+	badScheme := fmt.Errorf("ollama: %w", &url.Error{
+		Op: "Head", URL: "localhost:11434", Err: errors.New(`unsupported protocol scheme "localhost"`),
+	})
+	// What url.Parse("http://store.invalid/%zz") returns.
+	parseErr := &url.Error{Op: "parse", URL: "http://store.invalid/%zz", Err: url.EscapeError("%zz")}
+	badURL := fmt.Errorf("embed: %w", parseErr)
 	cases := []struct {
 		name   string
 		ctx    context.Context
@@ -179,12 +249,24 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		{"not found", bg, apperrors.NewNotFoundError("s"), agent24CodeInternal, ""},
 		{"nil apperr", bg, (*apperrors.AppError)(nil), agent24CodeInternal, ""},
 		{"http 429", bg, vendor(429), agent24CodeUnavailable, "overloaded"},
+		{"http 500", bg, vendor(500), agent24CodeUnavailable, "dependency"},
 		{"http 503", bg, vendor(503), agent24CodeUnavailable, "dependency"},
 		{"http 400", bg, vendor(400), agent24CodeInternal, ""},
 		{"live transport", bg, transport, agent24CodeUnavailable, "dependency"},
 		{"expired transport", expired, transport, agent24CodeUnavailable, "dependency"},
 		{"expired transport deadline", expired, timedOut, agent24CodeTimeout, ""},
 		{"live transport deadline", bg, timedOut, agent24CodeUnavailable, "dependency"},
+		{"store refused", bg, refused, agent24CodeUnavailable, "dependency"},
+		{"expired store refused", expired, refused, agent24CodeUnavailable, "dependency"},
+		{"live store timeout", bg, netTimeout, agent24CodeUnavailable, "dependency"},
+		{"expired store timeout", expired, netTimeout, agent24CodeTimeout, ""},
+		{"store lookup failed", bg, noHost, agent24CodeUnavailable, "dependency"},
+		{"live tls handshake timeout", bg, tlsTimeout, agent24CodeUnavailable, "dependency"},
+		{"expired tls handshake timeout", expired, tlsTimeout, agent24CodeTimeout, ""},
+		{"closed before reply", bg, closed, agent24CodeUnavailable, "dependency"},
+		{"url does not parse", bg, badURL, agent24CodeInternal, ""},
+		{"expired url does not parse", expired, badURL, agent24CodeInternal, ""},
+		{"unsupported scheme", bg, badScheme, agent24CodeInternal, ""},
 		{"expired other", expired, errors.New("x"), agent24CodeInternal, ""},
 		{"secret", bg, errors.New("secret text"), agent24CodeInternal, ""},
 	}

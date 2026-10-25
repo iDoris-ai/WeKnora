@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -622,11 +623,11 @@ func TestSyncLogsEverySkippedNodeWithItsReason(t *testing.T) {
 
 	output := logs.String()
 	for _, want := range []string{
-		`[DingTalk] skip node video-1 (name="Lesson.mp4" type=FILE category=VIDEO extension=mp4): ` +
+		`[DingTalk] skip node video-1 (name_len=10 type=FILE category=VIDEO extension_len=3): ` +
 			"video/media files are deliberately not downloaded by this connector",
-		`[DingTalk] skip node table-1 (name="Roadmap.able" type=FILE category=ALIDOC extension=able): ` +
+		`[DingTalk] skip node table-1 (name_len=12 type=FILE category=ALIDOC extension_len=4): ` +
 			"DingTalk multi-dimensional table has no ingest path in this connector yet",
-		`[DingTalk] skip node mind-1 (name="Plan.amind" type=FILE category=ALIDOC extension=amind): ` +
+		`[DingTalk] skip node mind-1 (name_len=10 type=FILE category=ALIDOC extension_len=5): ` +
 			"DingTalk mind map has no ingest path in this connector yet",
 	} {
 		if !strings.Contains(output, want) {
@@ -660,7 +661,7 @@ func TestSyncLogsPerScopeSummary(t *testing.T) {
 // retryable, and still leaves the document out of the cursor.
 func TestSyncSummaryCountsTransientFailuresAndStillRetries(t *testing.T) {
 	api := skippedNodesFixture()
-	api.blockErrors = map[string]error{"doc-2": errors.New("storage temporarily unavailable")}
+	api.blockErrors = map[string]error{"doc-2": errors.New("storage S3NT1NEL temporarily unavailable")}
 	logs := captureLogs(t)
 
 	items, err := testConnector(api).FetchAll(
@@ -674,9 +675,11 @@ func TestSyncSummaryCountsTransientFailuresAndStillRetries(t *testing.T) {
 		t.Fatalf("FetchAll() items = %#v, want 1 document and 1 failure", items)
 	}
 	output := logs.String()
-	if !strings.Contains(output, "storage temporarily unavailable") ||
-		!strings.Contains(output, "failed, will retry next sync") {
-		t.Fatalf("transient failure was not logged as retryable:\n%s", output)
+	// The error text may quote document content, so only its length and type are logged (A24-OBS-14).
+	readFailed := regexp.MustCompile(`\[DingTalk\] read document \S+ \(name_len=\d+ extension_len=\d+\) failed, ` +
+		`will retry next sync: error_len=\d+ error_type=`)
+	if strings.Contains(output, "S3NT1NEL") || !readFailed.MatchString(output) {
+		t.Fatalf("transient failure was not logged as retryable, or its text leaked:\n%s", output)
 	}
 	want := "[DingTalk] scope space/root: total=5 synced=1 skipped=3 failed=1"
 	if !strings.Contains(output, want) {

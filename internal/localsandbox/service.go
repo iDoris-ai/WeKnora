@@ -82,7 +82,9 @@ func (s *Service) workspaceFor(
 ) (Workspace, Policy, error) {
 	ws, err := s.resolver.Resolve(ctx, sessionID)
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] resolve workspace session=%s: %v", sessionID, err)
+		// The resolve error can quote the project directory (an *fs.PathError): length and type only.
+		logger.Warnf(ctx, "[LocalSandbox] resolve workspace session=%s: error_len=%d error_type=%T",
+			sessionID, len(err.Error()), err)
 		return Workspace{}, Policy{}, err
 	}
 	mode := ModeAuto
@@ -100,12 +102,13 @@ func (s *Service) workspaceFor(
 	}
 	policy, err := s.builder.Build(mode, ws)
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] build policy session=%s mode=%s root=%s: %v",
-			sessionID, mode, ws.Root, err)
+		logger.Warnf(ctx, "[LocalSandbox] build policy session=%s mode=%s root_len=%d: error_len=%d error_type=%T",
+			sessionID, mode, len(ws.Root), len(err.Error()), err)
 		return Workspace{}, Policy{}, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] workspace session=%s kind=%d root=%s mode=%s writable=%d",
-		sessionID, ws.Kind, ws.Root, mode, len(policy.WritableRoots))
+	// In project mode Root is the host directory the user chose for the session; it is logged by length only.
+	logger.Debugf(ctx, "[LocalSandbox] workspace session=%s kind=%d root_len=%d mode=%s writable=%d",
+		sessionID, ws.Kind, len(ws.Root), mode, len(policy.WritableRoots))
 	return ws, policy, nil
 }
 
@@ -119,7 +122,7 @@ func (s *Service) GuardForSession(
 	if err != nil {
 		return nil, Workspace{}, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root=%s", sessionID, ws.Root)
+	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root_len=%d", sessionID, len(ws.Root))
 	return NewPathGuard(policy), ws, nil
 }
 
@@ -192,7 +195,8 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 
 	prep, err := s.backend.Prepare(runCtx, policy)
 	if err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] prepare session=%s: %v", req.SessionID, err)
+		logger.Errorf(ctx, "[LocalSandbox] prepare session=%s: error_len=%d error_type=%T",
+			req.SessionID, len(err.Error()), err)
 		return nil, fmt.Errorf("prepare sandbox: %w", err)
 	}
 	defer func() { _ = prep.Close() }()

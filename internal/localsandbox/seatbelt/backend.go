@@ -71,12 +71,14 @@ func (b *seatbeltBackend) Prepare(ctx context.Context, p core.Policy) (core.Prep
 	}
 	resolved, err := resolvePolicyPaths(p)
 	if err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] seatbelt resolve policy paths: %v", err)
+		logger.Errorf(ctx, "[LocalSandbox] seatbelt resolve policy paths: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 	program, err := compileSeatbelt(resolved)
 	if err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] seatbelt compile: %v", err)
+		logger.Errorf(ctx, "[LocalSandbox] seatbelt compile: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 	logger.Debugf(ctx, "[LocalSandbox] seatbelt prepared fingerprint=%s params=%d",

@@ -173,7 +173,7 @@ func (c *LongPollClient) poll(ctx context.Context) error {
 		// Handle in a detached goroutine so we don't block polling
 		go func(m *im.IncomingMessage) {
 			if err := c.handler(ctx, m); err != nil {
-				logger.Errorf(ctx, "[WeChat] Handle message error: %v", err)
+				logger.Errorf(ctx, "[WeChat] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
 			}
 		}(incoming)
 	}

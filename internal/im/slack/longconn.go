@@ -147,6 +147,6 @@ func (c *LongConnClient) processMessage(ctx context.Context, user, channel, text
 	incoming := parseIncomingMessage(user, channel, text, ts, chatType, files)
 
 	if err := c.handler(ctx, incoming); err != nil {
-		logger.Errorf(ctx, "[Slack] Handle message error: %v", err)
+		logger.Errorf(ctx, "[Slack] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
 	}
 }

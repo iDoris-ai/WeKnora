@@ -1,22 +1,28 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1154,4 +1160,161 @@ func TestStreamLLMIncompleteFinishIsAStreamError(t *testing.T) {
 
 	require.Error(t, err, "a stream cut before its finish reason is not a completed turn")
 	require.True(t, isTransientError(err))
+}
+
+// exportUnknownToolSpan calls runToolCall with an unregistered name and returns
+// the OTLP request bytes plus the captured logs.
+func exportUnknownToolSpan(t *testing.T, exportBodies bool, toolName, args string) (string, string) {
+	t.Helper()
+	var mu sync.Mutex
+	var raw bytes.Buffer
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		raw.Write(b)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	var logBuf bytes.Buffer
+	logger.SetOutput(&logBuf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	mgr, err := langfuse.Init(langfuse.Config{
+		Enabled:        true,
+		Host:           srv.URL,
+		PublicKey:      "pk",
+		SecretKey:      "sk",
+		FlushAt:        1,
+		FlushInterval:  20 * time.Millisecond,
+		QueueSize:      16,
+		RequestTimeout: 2 * time.Second,
+		SampleRate:     1,
+		ExportBodies:   exportBodies,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = langfuse.Init(langfuse.Config{})
+	})
+
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	call := engine.runToolCall(context.Background(), types.LLMToolCall{
+		ID: "call-unknown",
+		Function: types.FunctionCall{
+			Name:      toolName,
+			Arguments: args,
+		},
+	}, 0, 1, 1, "session", "message")
+	require.Equal(t, toolName, call.Name)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.Shutdown(ctx))
+
+	mu.Lock()
+	defer mu.Unlock()
+	return raw.String(), logBuf.String()
+}
+
+func longUnregisteredToolName(sentinel string) string {
+	// Longer than the 300-rune pipeline value cap, with a space. The sentinel
+	// sits both inside the cap (pipeline logs would keep it) and at the end
+	// (span names are not truncated).
+	return sentinel + " " + strings.Repeat("ab ", 120) + sentinel
+}
+
+func TestRunToolCallLangfuseUnknownToolOmitsName(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	toolName := longUnregisteredToolName(nameSentinel)
+	require.Greater(t, len([]rune(toolName)), 300)
+	require.Contains(t, toolName, " ")
+
+	body, logs := exportUnknownToolSpan(t, false, toolName, `{"q":"plain"}`)
+	require.NotContains(t, body, nameSentinel)
+	require.Contains(t, body, "agent.tool.unknown")
+	require.Contains(t, body, "tool_name_bytes")
+	require.NotContains(t, logs, nameSentinel)
+	require.Contains(t, logs, "Tool unknown")
+	require.Contains(t, logs, `tool="unknown"`)
+}
+
+func TestRunToolCallLangfuseUnknownToolExportsArguments(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	const argSentinel = "S3NT1NEL-ARG"
+	toolName := longUnregisteredToolName(nameSentinel)
+	body, logs := exportUnknownToolSpan(t, true, toolName, `{"q":"`+argSentinel+`"}`)
+	require.Contains(t, body, argSentinel)
+	require.Contains(t, body, "agent.tool.unknown")
+	require.NotContains(t, logs, nameSentinel)
+}
+
+func TestCallLLMWithRetryLogsOmitUnknownToolName(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	const leakID = "550e8400-e29b-41d4-a716-446655440000"
+	toolName := longUnregisteredToolName(nameSentinel)
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{{
+		ResponseType: types.ResponseTypeAnswer,
+		ToolCalls: []types.LLMToolCall{
+			{Type: "function", Function: types.FunctionCall{Name: toolName, Arguments: `{"slug":"res://0099"}`}},
+			{Type: "function", Function: types.FunctionCall{Name: "known_tool", Arguments: `{}`}},
+		},
+		Done:         true,
+		FinishReason: "tool_calls",
+	}}}}}
+
+	var logBuf bytes.Buffer
+	logger.SetOutput(&logBuf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	engine := newTestEngine(t, model)
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(newCountingTool("known_tool"))
+	messages := []chat.Message{
+		{Role: "user", Content: "q"},
+		{Role: "assistant", ToolCalls: []chat.ToolCall{
+			{ID: "c1", Type: "function", Function: chat.FunctionCall{
+				Name: toolName, Arguments: `{"q":"` + leakID + `"}`,
+			}},
+		}},
+		{Role: "tool", ToolCallID: "c1", Name: toolName, Content: "tool not found: " + leakID},
+	}
+	_, err := engine.callLLMWithRetry(context.Background(), &messages, nil, &types.AgentState{}, "q", 1, "s")
+	require.NoError(t, err)
+
+	logs := logBuf.String()
+	require.NotContains(t, logs, nameSentinel)
+	require.Contains(t, logs, "role=tool, name=unknown")
+	require.Contains(t, logs, "tool_calls=[unknown]")
+	require.Contains(t, logs, "tools=[unknown known_tool]")
+	require.Contains(t, logs, "assistant/unknown tool_call_arguments")
+	require.Contains(t, logs, "tool/unknown content")
+	require.Contains(t, logs, "[Agent][Stream] Tool unknown")
+}
+
+func TestBreakdownContextOmitsUnknownToolName(t *testing.T) {
+	const nameSentinel = "S3NT1NEL"
+	toolName := longUnregisteredToolName(nameSentinel)
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(newCountingTool("known_tool"))
+
+	unknown := engine.breakdownContext([]chat.Message{
+		{Role: "user", Content: "q"},
+		{Role: "tool", ToolCallID: "c1", Name: toolName, Content: strings.Repeat("result ", 200)},
+	}, nil)
+	require.NotContains(t, unknown.String(), nameSentinel)
+	require.Contains(t, unknown.String(), "tool:unknown")
+
+	known := engine.breakdownContext([]chat.Message{
+		{Role: "tool", ToolCallID: "c2", Name: "known_tool", Content: strings.Repeat("result ", 200)},
+	}, nil)
+	require.Contains(t, known.String(), "tool:known_tool")
 }

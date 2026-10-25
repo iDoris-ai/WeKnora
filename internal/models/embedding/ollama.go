@@ -34,6 +34,9 @@ type OllamaEmbedResponse struct {
 }
 
 // NewOllamaEmbedder creates a new Ollama embedder
+// defaultOllamaEmbeddingModel is used when the config names no model.
+const defaultOllamaEmbeddingModel = "nomic-embed-text"
+
 func NewOllamaEmbedder(baseURL,
 	modelName string,
 	truncatePromptTokens int,
@@ -43,7 +46,7 @@ func NewOllamaEmbedder(baseURL,
 	ollamaService *ollama.OllamaService,
 ) (*OllamaEmbedder, error) {
 	if modelName == "" {
-		modelName = "nomic-embed-text"
+		modelName = defaultOllamaEmbeddingModel
 	}
 
 	if truncatePromptTokens == 0 {

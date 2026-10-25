@@ -264,7 +264,8 @@ func (c *LongConnClient) handleMessages(ctx context.Context) {
 			return
 		case msg := <-c.messages:
 			if err := c.handler(ctx, msg); err != nil {
-				logger.Errorf(ctx, "[Yunzhijia] Handle WebSocket message failed: %v", err)
+				logger.Errorf(ctx, "[Yunzhijia] Handle WebSocket message failed: error_len=%d error_type=%T",
+					len(err.Error()), err)
 			}
 		}
 	}

@@ -93,11 +93,14 @@ func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Work
 		if ok && dir != "" {
 			root, err := filepath.EvalSymlinks(filepath.Clean(dir))
 			if err != nil {
-				logger.Warnf(ctx, "[LocalSandbox] resolve project dir session=%s dir=%q: %v",
-					sessionID, dir, err)
+				logger.Warnf(ctx,
+					"[LocalSandbox] resolve project dir session=%s dir_len=%d error_len=%d error_type=%T",
+					sessionID, len(dir), len(err.Error()), err)
 				return Workspace{}, fmt.Errorf("localsandbox: resolve project dir: %w", err)
 			}
-			logger.Infof(ctx, "[LocalSandbox] workspace session=%s kind=project root=%s", sessionID, root)
+			// The project root is the host directory the user picked for the session (session roots below
+			// are server-generated and stay).
+			logger.Infof(ctx, "[LocalSandbox] workspace session=%s kind=project root_len=%d", sessionID, len(root))
 			return Workspace{
 				Kind:       WorkspaceProject,
 				Root:       root,

@@ -1742,8 +1742,9 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 
 	logger.Infof(ctx, "[IM] HandleMessage: channel=%s platform=%s user=%s chat=%s msgtype=%s content_len=%d",
 		channelID, msg.Platform, msg.UserID, msg.ChatID, msg.MessageType, len(msg.Content))
-	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey=%s filename=%s",
-		msg.MessageID, msg.Extra["raw_msgtype"], msg.FileKey, msg.FileName)
+	// Some adapters put a download URL (WeChat, WeCom) or the data itself (Yunzhijia) in FileKey.
+	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey_len=%d filename_len=%d",
+		msg.MessageID, msg.Extra["raw_msgtype"], len(msg.FileKey), len(msg.FileName))
 
 	// ── File/Image message handling ──
 	// File messages use the normal QA path as well.  A configured knowledge base
@@ -1960,7 +1961,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	var kbIDs []string
 	attachments, imageURLs, downloaded, err := s.prepareIMAttachments(ctx, req.msg, req.adapter)
 	if err != nil {
-		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
+		// A download error quotes the file URL (*url.Error).
+		logger.Warnf(ctx, "[IM] attachment preparation failed: error_len=%d error_type=%T", len(err.Error()), err)
 		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
 			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: error_len=%d error_type=%T",
 				len(sendErr.Error()), sendErr)
@@ -2004,7 +2006,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// Non-streaming fallback: collect full answer then send.
 	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
+		logger.Errorf(ctx, "[IM] QA failed: error_len=%d error_type=%T, sending fallback reply",
+			len(err.Error()), err)
 		answer = imQAFailureReply(err)
 	}
 
@@ -2053,7 +2056,8 @@ func (s *Service) handleMessageFullOutput(
 		ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote,
 	)
 	if qaErr != nil {
-		logger.Errorf(ctx, "[IM] Full-output QA failed: %v, sending fallback reply", qaErr)
+		logger.Errorf(ctx, "[IM] Full-output QA failed: error_len=%d error_type=%T, sending fallback reply",
+			len(qaErr.Error()), qaErr)
 		answer = imQAFailureReply(qaErr)
 	}
 
@@ -2122,7 +2126,7 @@ func (s *Service) handleCommand(
 
 	result, err := cmd.Execute(ctx, cmdCtx, args)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] Command /%s error: %v", cmd.Name(), err)
+		logger.Errorf(ctx, "[IM] Command /%s error: error_len=%d error_type=%T", cmd.Name(), len(err.Error()), err)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 			Content: "抱歉，执行指令时出现了异常，请稍后再试。",
 			IsFinal: true,
@@ -2623,7 +2627,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		if !ok {
 			return nil
 		}
-		logger.Errorf(ctx, "[IM] QA stream error: %s", data.Error)
+		logger.Errorf(ctx, "[IM] QA stream error: error_len=%d stage=%s error_code=%s",
+			len(data.Error), data.Stage, data.ErrorCode)
 		bufMu.Lock()
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		bufMu.Unlock()
@@ -2720,7 +2725,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			streamedAny = true
 		}
 		bufMu.Unlock()
-		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool=%s id=%s", data.ToolName, data.ToolCallID)
+		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool_len=%d id=%s",
+			len(data.ToolName), data.ToolCallID)
 		return nil
 	})
 
@@ -2754,8 +2760,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			streamedAny = true
 		}
 		bufMu.Unlock()
-		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool=%s success=%v duration=%dms",
-			data.ToolName, data.Success, data.Duration)
+		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool_len=%d success=%v duration=%dms",
+			len(data.ToolName), data.Success, data.Duration)
 		return nil
 	})
 
@@ -2826,7 +2832,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			err = s.sessionService.KnowledgeQA(qaCtx, req, eventBus)
 		}
 		if err != nil {
-			logger.Errorf(ctx, "[IM] QA stream execution error: %v", err)
+			logger.Errorf(ctx, "[IM] QA stream execution error: error_len=%d error_type=%T",
+				len(err.Error()), err)
 			bufMu.Lock()
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			bufMu.Unlock()
@@ -2957,7 +2964,7 @@ loop:
 func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
 	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
+		logger.Errorf(ctx, "[IM] QA fallback failed: error_len=%d error_type=%T", len(err.Error()), err)
 		answer = imQAFailureReply(err)
 	}
 
@@ -3009,7 +3016,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		if !ok {
 			return nil
 		}
-		logger.Errorf(ctx, "[IM] QA error: %s", data.Error)
+		logger.Errorf(ctx, "[IM] QA error: error_len=%d stage=%s error_code=%s",
+			len(data.Error), data.Stage, data.ErrorCode)
 		answerMu.Lock()
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		answerMu.Unlock()
@@ -3112,7 +3120,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 			err = s.sessionService.KnowledgeQA(ctx, req, eventBus)
 		}
 		if err != nil {
-			logger.Errorf(ctx, "[IM] QA execution error: %v", err)
+			logger.Errorf(ctx, "[IM] QA execution error: error_len=%d error_type=%T", len(err.Error()), err)
 			answerMu.Lock()
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			answerMu.Unlock()
@@ -3456,7 +3464,8 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 	fileName := file.fileName
 	ext := fileExtension(fileName)
 	if !supportedKBFileExts[ext] {
-		logger.Infof(ctx, "[IM] Unsupported file type after download: %s (file=%s)", ext, fileName)
+		// ext is whatever follows the last dot of the user's file name; only unsupported ones reach here.
+		logger.Infof(ctx, "[IM] Unsupported file type after download: ext_len=%d file_len=%d", len(ext), len(fileName))
 		return
 	}
 
@@ -3469,14 +3478,16 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 		errMsg := err.Error()
 		// Check for duplicate file
 		if strings.Contains(errMsg, "duplicate") || strings.Contains(errMsg, "already exists") {
-			logger.Infof(ctx, "[IM] File already exists in knowledge base: %s", fileName)
+			logger.Infof(ctx, "[IM] File already exists in knowledge base: file_len=%d", len(fileName))
 			return
 		}
-		logger.Errorf(ctx, "[IM] Failed to create knowledge from file: %v", err)
+		logger.Errorf(ctx, "[IM] Failed to create knowledge from file: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return
 	}
 
-	logger.Infof(ctx, "[IM] File saved to knowledge base: kb=%s knowledge=%s file=%s", kbID, knowledge.ID, fileName)
+	logger.Infof(ctx, "[IM] File saved to knowledge base: kb=%s knowledge=%s file_len=%d",
+		kbID, knowledge.ID, len(fileName))
 }
 
 // fileExtension extracts the lowercase file extension from a filename.

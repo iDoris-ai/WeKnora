@@ -1160,7 +1160,13 @@ func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, conten
 		}
 		imgKey, err := a.imageKeyForURL(ctx, accessToken, rawURL)
 		if err != nil || imgKey == "" {
-			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url=%s err=%v", a.region.Label, rawURL, err)
+			// rawURL comes from the reply text (may be a signed URL); err may be nil when no key came back.
+			errLen := 0
+			if err != nil {
+				errLen = len(err.Error())
+			}
+			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url_len=%d error_len=%d error_type=%T",
+				a.region.Label, len(rawURL), errLen, err)
 			return fallback(alt, rawURL)
 		}
 		return fmt.Sprintf("![%s](%s)", alt, imgKey)

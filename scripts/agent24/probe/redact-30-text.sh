@@ -152,38 +152,43 @@ array_has_secret() {
   done
   [ "$got" -eq 0 ]
 }
+# 从引号键的命中里取出键名。SK_REST 留在键的结束引号之后。
+split_key() {
+  local rest
+  SK_Q=${1:0:1}
+  [ "$SK_Q" = '"' ] || [ "$SK_Q" = "'" ] || return 1
+  rest=${1#?}
+  SK_NAME=${rest%%"${SK_Q}"*}
+  SK_REST=${rest#*"${SK_Q}"}
+}
 field_match_bad() {
-  local match=$1 q name val rest lname
-  q=${match:0:1}
-  [ "$q" = '"' ] || [ "$q" = "'" ] || return 1
-  rest=${match#?}
-  name=${rest%%"${q}"*}
-  rest=${rest#*"${q}"}
-  rest=${rest#*:}
-  rest=$(trim_lead "$rest")
-  [ "${rest:0:1}" = "$q" ] || return 1
-  val=${rest:1}
-  lname=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
-  case $lname in
-    auth|authorization)
-      auth_value_bad "$val"
-      return $?
-      ;;
-  esac
-  [ "${#val}" -ge 6 ] || return 1
-  is_placeholder "$val" && return 1
-  return 0
+  local rest lname body
+  split_key "$1" || return 1
+  rest=$(trim_lead "${SK_REST#*:}")
+  # 敏感键接着 {：空对象看不到值，不报；非空就报，内层键不必在名单里。本行没有 }（对象在下一行或被截断）也报。
+  if [ "${rest:0:1}" = "{" ]; then
+    [ -z "${IN_JSON:-}" ] || return 1
+    case $rest in *'}') ;; *) return 0 ;; esac
+    body=$(trim_lead "${rest#"{"}"); body=${body%"}"}; body=${body%"${body##*[![:space:]]}"}
+    [ -n "$body" ]; return
+  fi
+  # 值引号可以和键不同。正则在同种结束引号处停下，剩下的整段才是值。
+  [ "${rest:0:1}" = '"' ] || [ "${rest:0:1}" = "'" ] || return 1
+  rest=${rest:1}
+  lname=$(printf '%s' "$SK_NAME" | tr '[:upper:]' '[:lower:]')
+  case $lname in auth|authorization) auth_value_bad "$rest"; return $? ;; esac
+  [ "${#rest}" -ge 6 ] && ! is_placeholder "$rest"
 }
 array_match_bad() {
-  local match=$1 q name rest body
-  q=${match:0:1}
-  [ "$q" = '"' ] || [ "$q" = "'" ] || return 1
-  rest=${match#?}
-  name=${rest%%"${q}"*}
-  rest=${rest#*"${q}"}
-  rest=${rest#*[}
-  body=${rest%]}
-  array_has_secret "$body" "$name"
+  local rest trimmed
+  split_key "$1" || return 1
+  rest=${SK_REST#*[}
+  # 本行没有 ]：[ 后为空就报（值可能在下一行）；有内容则只看抽出的元素。
+  case $1 in *']') ;; *)
+    [ -z "${IN_JSON:-}" ] || return 1
+    trimmed=$(trim_lead "$rest"); trimmed=${trimmed%"${trimmed##*[![:space:]]}"}
+    [ -n "$trimmed" ] || return 0 ;; esac
+  array_has_secret "${rest%]}" "$SK_NAME"
 }
 consume_matches() {
   local kind=$1 line loc match
@@ -191,12 +196,11 @@ consume_matches() {
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     loc=$(printf '%s\n' "$line" | cut -d: -f1,2)
+    # jq 能解析的 JSON 的副本：对象和未闭合的数组由 jq 按叶子判过，正则不再看（格式化输出天然跨行）。
+    case $loc in "$W/jf/"*|"$W/norm/j"*) IN_JSON=1 ;; *) IN_JSON= ;; esac
     match=$(printf '%s\n' "$line" | sed 's/^[^:]*:[0-9]*://')
-    if [ "$kind" = scalar ]; then
-      field_match_bad "$match" || continue
-    else
-      array_match_bad "$match" || continue
-    fi
+    if [ "$kind" = scalar ]; then field_match_bad "$match" || continue
+    else array_match_bad "$match" || continue; fi
     remap_loc "$loc" >>"$W/field.locs"
   done <"$W/raw"
 }
@@ -208,13 +212,9 @@ build_passes() {
   [ -s "$TEXT_TARGETS" ] || return 0
   while IFS= read -r -d '' f; do
     printf '%s\0' "$f" >>"$W/pass.a"
-    base=$W/norm/$i
+    base=$W/norm/$i; case $f in "$W/jf/"*) base=$W/norm/j$i ;; esac
     normalize_to "$f" "$base"
-    if [ -f "$f.src" ]; then
-      cp "$f.src" "$base.src"
-    else
-      printf '%s\n' "$f" >"$base.src"
-    fi
+    if [ -f "$f.src" ]; then cp "$f.src" "$base.src"; else printf '%s\n' "$f" >"$base.src"; fi
     [ -f "$f.map" ] && cp "$f.map" "$base.map"
     printf '%s\0' "$base" >>"$W/pass.b"
     i=$((i + 1))
@@ -274,11 +274,11 @@ append_value_hits() {
     done <"$W/raw"
   done <"$list"
 }
-
 build_passes
 : >"$W/field.locs"
 for _p in "$W/pass.a" "$W/pass.b"; do
   grep_list "$FIELD_RULE" "$_p" -oiE "$FIELD_RE" && consume_matches scalar
+  grep_list "$FIELD_RULE" "$_p" -oiE "$OBJ_RE" && consume_matches scalar
   grep_list "$FIELD_RULE" "$_p" -oiE "$ARRAY_RE" && consume_matches array
 done
 report "$FIELD_RULE" "$(sort -u "$W/field.locs")"

@@ -61,7 +61,7 @@ func (c *LongConnClient) onChatBotMessage(ctx context.Context, data *chatbot.Bot
 	incoming := streamToIncoming(data, c.clientID)
 
 	if err := c.handler(ctx, incoming); err != nil {
-		logger.Errorf(ctx, "[DingTalk] Handle message error: %v", err)
+		logger.Errorf(ctx, "[DingTalk] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
 	}
 
 	return nil, nil
