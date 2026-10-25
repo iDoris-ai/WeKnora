@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -365,6 +367,44 @@ func TestReadFileWorkspaceReturnsSmallTextOnlyInOutput(t *testing.T) {
 	assert.Contains(t, result.Output, string(content))
 	_, duplicated := result.Data["content"]
 	assert.False(t, duplicated)
+}
+
+// The path comes from the model, and so does any backend error that echoes it,
+// so the read logs carry their lengths only.
+func TestReadFileWorkspaceLogsOmitPath(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	path := "/workspace/output/" + sentinel + ".txt"
+	args := json.RawMessage(`{"path":"` + path + `"}`)
+	content := []byte("hello\n")
+	source := &fakeSandboxFileSource{statErr: fmt.Errorf("stat %q failed", path)}
+	result, err := NewReadFileTool(source).Execute(sandboxFileTestContext(), args)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+
+	source.statErr = nil
+	source.stat = &sandbox.RemoteStatEntry{Path: path, Type: sandbox.RemoteEntryFile, Size: int64(len(content))}
+	source.readErr = fmt.Errorf("read %q failed", path)
+	result, err = NewReadFileTool(source).Execute(sandboxFileTestContext(), args)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+
+	source.readErr = nil
+	source.data = content
+	result, err = NewReadFileTool(source).Execute(sandboxFileTestContext(), args)
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "stat failed: session=")
+	assert.Contains(t, logs, "read failed: session=")
+	assert.Equal(t, 2, strings.Count(logs, "error_len="))
+	assert.Equal(t, 3, strings.Count(logs, "path_len="))
 }
 
 // The output-directory guard is a string prefix test, so a symlink planted
