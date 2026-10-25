@@ -388,8 +388,8 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		keep = append(keep, childID) // present in the doc → never sweep as stale
 		ext := strings.ToLower(filepath.Ext(a.Name))
 		if ext == "" {
-			logger.Warnf(ctx, "[Feishu] doc %s: skipping attachment with no usable filename (token=%s name=%q)",
-				in.ObjToken, a.FileToken, a.Name)
+			logger.Warnf(ctx, "[Feishu] doc %s: skipping attachment with no usable filename (token=%s name_len=%d)",
+				in.ObjToken, a.FileToken, len(a.Name))
 			continue
 		}
 		if !parseableAttachmentExts[ext] {
@@ -397,8 +397,9 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		}
 		data, derr := client.downloadMediaFile(ctx, a.FileToken)
 		if derr != nil {
-			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: error_len=%d error_type=%T",
-				in.ObjToken, a.Name, a.FileToken, len(derr.Error()), derr)
+			logger.Warnf(ctx,
+				"[Feishu] doc %s: attachment (token=%s) download failed: name_len=%d error_len=%d error_type=%T",
+				in.ObjToken, a.FileToken, len(a.Name), len(derr.Error()), derr)
 			items = append(items, &types.FetchedItem{
 				ExternalID:       childID,
 				Title:            a.Name,
@@ -408,8 +409,9 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			continue
 		}
 		if len(data) < MinAttachmentBytes {
-			logger.Infof(ctx, "[Feishu] doc %s: skipping tiny attachment %q (token=%s, %d bytes < %d)",
-				in.ObjToken, a.Name, a.FileToken, len(data), MinAttachmentBytes)
+			logger.Infof(ctx,
+				"[Feishu] doc %s: skipping tiny attachment (token=%s) name_len=%d (%d bytes < %d)",
+				in.ObjToken, a.FileToken, len(a.Name), len(data), MinAttachmentBytes)
 			continue
 		}
 		items = append(items, &types.FetchedItem{

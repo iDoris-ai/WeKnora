@@ -804,3 +804,24 @@ func TestListAvailableResourcesLogOmitsSentinel(t *testing.T) {
 	assert.Contains(t, logs, "error_len=")
 	assert.Contains(t, logs, "error_type=")
 }
+
+func TestApplyFetchedItemLogOmitsTitleSentinel(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	svc := &DataSourceService{}
+	result := &types.SyncResult{}
+	svc.applyFetchedItem(context.Background(), &types.DataSource{ID: "ds-1"}, &types.FetchedItem{
+		ExternalID: "file:empty",
+		Title:      "doc-" + sentinel,
+	}, nil, result)
+
+	assert.Equal(t, 1, result.Skipped)
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "title_len=")
+	assert.Contains(t, logs, "no content or URL")
+}
