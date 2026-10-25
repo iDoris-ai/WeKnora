@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -119,6 +120,11 @@ func (e Endpoint) NewRequest(ctx context.Context, url string, body any, stream b
 
 // newPost prepares an authenticated POST of an already-encoded body.
 func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentType string) (*http.Request, error) {
+	// Agent24 A24-KB-17: under a processing guard the destination is checked first, so a URL that does not
+	// parse is a refusal too, and no later error quotes it.
+	if err := types.CheckProcessingRequestURL(ctx, url); err != nil {
+		return nil, err
+	}
 	if err := secutils.ValidateURLForSSRF(url); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
@@ -157,7 +163,7 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 		if errors.Is(err, types.ErrProcessingDenied) {
 			return nil, fmt.Errorf("%w", types.ErrProcessingDenied)
 		}
-		return nil, &TransportError{Op: "send request", Err: err}
+		return nil, &TransportError{Op: "send request", Err: processingStripURL(req.Context(), err)}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -165,6 +171,17 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
 	}
 	return resp, nil
+}
+
+// processingStripURL drops the URL net/http quotes in a *url.Error (path and query included, also for a
+// redirect Location) when the request ran under a processing guard; the operation and the cause are kept.
+// Without a guard the error is returned as it was.
+func processingStripURL(ctx context.Context, err error) error {
+	var ue *url.Error
+	if types.ProcessingGuardFromContext(ctx) == nil || !errors.As(err, &ue) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", ue.Op, ue.Err)
 }
 
 // guardedProcessingClient is c with each redirect target checked against the

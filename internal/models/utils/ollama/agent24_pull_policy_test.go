@@ -156,3 +156,28 @@ func TestGuardedRedirectNormalizesOrigin(t *testing.T) {
 		t.Fatalf("zone redirect: err = %v", err)
 	}
 }
+
+// Under a guard an error that is not a refusal keeps its cause but not the URL net/http quotes: a same-origin
+// redirect loop stops at the hop limit with the Location in a *url.Error (PR #98 review increment C1).
+func TestOllamaServiceErrorsOmitURLUnderGuard(t *testing.T) {
+	loop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/S3NT1NEL?token=S3NT1NEL", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(loop.Close)
+	t.Setenv("OLLAMA_BASE_URL", loop.URL)
+	t.Setenv("OLLAMA_OPTIONAL", "")
+	svc, err := GetOllamaService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.ListModels(types.WithProcessingGuard(context.Background(), &pullGuard{allow: true}))
+	if err == nil || strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("guarded: err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "redirects") {
+		t.Fatalf("guarded: the cause is lost: %v", err)
+	}
+	if _, err := svc.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("standalone keeps the error as it was: %v", err)
+	}
+}

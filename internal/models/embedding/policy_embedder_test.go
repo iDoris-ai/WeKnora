@@ -1,6 +1,7 @@
 package embedding
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -361,5 +364,59 @@ func TestProcessingDestinationForConfigRefusesModelFieldOverride(t *testing.T) {
 	}
 	if _, err := ProcessingDestinationForConfig(ok, nil); err != nil {
 		t.Fatalf("input_type_field=input_type: %v", err)
+	}
+}
+
+// Under a guard no error or log line quotes the URL (PR #98 review, increment C1/C2): a same-origin redirect loop
+// stops at the hop limit with net/http quoting the Location, retried once so withRetry logs it; a configured
+// path that does not parse fails before Do and is a refusal, with nothing sent.
+func TestPolicyEmbedderErrorsOmitURLUnderGuard(t *testing.T) {
+	allowLoopback(t)
+	saved := retryPolicy
+	retryPolicy = func() api.RetryPolicy { return api.RetryPolicy{MaxRetries: 1} }
+	t.Cleanup(func() { retryPolicy = saved })
+	logger.SetLogLevel(logger.LevelDebug)
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	hits := 0
+	loop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Redirect(w, r, "/"+sentinel+"?token="+sentinel, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(loop.Close)
+	guarded := func() context.Context {
+		return types.WithProcessingGuard(context.Background(), &allowCountGuard{})
+	}
+	cfg := Config{Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m", BaseURL: loop.URL, APIKey: "k"}
+
+	e, err := NewEmbedder(cfg, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Embed(guarded(), "q"); err == nil || hits == 0 {
+		t.Fatalf("redirect loop: err = %v, hits = %d", err, hits)
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("redirect loop error quotes the Location: %s", err.Error())
+	}
+
+	hits = 0
+	badPath := "@other.invalid/" + sentinel + "%zz?token=" + sentinel
+	cfg.Spec = &types.ModelSpecOverride{Compat: map[string]any{"path": badPath}}
+	if e, err = NewEmbedder(cfg, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Embed(guarded(), "q")
+	if !errors.Is(err, types.ErrProcessingDenied) || hits != 0 {
+		t.Fatalf("unparseable path: err = %v, hits = %d", err, hits)
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("unparseable path error quotes the URL: %s", err.Error())
+	}
+	if !strings.Contains(logs.String(), "retrying") || strings.Contains(logs.String(), sentinel) {
+		t.Fatalf("logs: %s", logs.String())
 	}
 }
