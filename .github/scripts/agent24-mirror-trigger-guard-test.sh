@@ -116,7 +116,8 @@ done
 if ruby "$G" 0000000000000000000000000000000000000000 "$M" >/dev/null 2>&1; then echo "FAIL 提交不存在"; fail=1; else echo "PASS 提交不存在"; fi
 
 # 镜像推进的失败路径：非快进时停止、不强推。从工作流里取出推进镜像那一步的脚本，在临时裸仓库上原样运行；
-# gh 用桩代替，上游地址经 url.insteadOf 指向本地仓库，其他 github.com 地址一律改写到不存在的目录。不访问网络，不碰真实镜像分支。
+# gh 用桩代替，上游地址经 url.insteadOf 指向本地仓库，其他 https://github.com/ 地址和 https 推送改写到不存在的目录；
+# GIT_ALLOW_PROTOCOL=file 让 git 只用本地协议，git@github.com:、ssh:// 之类的地址直接被拒。不访问网络，不碰真实镜像分支。
 F="$T/ff"; mkdir -p "$F/bin"
 ruby -ryaml -e 'puts YAML.load_file(ARGV[0])["jobs"]["sync"]["steps"].find { |s| s["name"] == "Fast-forward mirrors and propose release integration" }["run"]' \
   "$(dirname "$G")/../workflows/agent24-upstream-sync.yml" > "$F/step.sh" 2>&1 || { echo "FAIL 取出推进镜像的步骤"; fail=1; }
@@ -158,11 +159,18 @@ ff_run() { # 期望退出 用例名 上游main 上游正式版 [noverify|pr-main
   local m=${!3} r=${!4}; g -C "$F/up" update-ref refs/heads/main "$m" && g -C "$F/up" tag -f v1.0.0 "$r" >/dev/null || { echo "FAIL $2（准备仓库）"; fail=1; return; }
   g clone -q -b a24/develop "$F/origin.git" "$F/work" && mkdir -p "$F/work/.github/scripts" && cp "$G" "$F/work/.github/scripts/" \
     || { echo "FAIL $2（准备仓库）"; fail=1; return; }
-  if [ "$mode" = noverify ]; then grep -v 'git merge-base --is-ancestor origin/upstream-' "$F/step.sh"; else cat "$F/step.sh"; fi > "$F/run.sh"
+  # 步骤写的 /tmp/upstream-sync-issue.md 换成指向 $F 下的变量（被测步骤退化、走到建 issue 时也不写测试目录之外）；
+  # 用变量而不是把 $F 拼进替换串，临时目录里有空格或 sed 的特殊字符也不出错。其他 /tmp 路径先在原步骤里查。
+  if sed 's#/tmp/upstream-sync-issue\.md##g' "$F/step.sh" | grep -q '/tmp/'; then
+    echo "FAIL $2（步骤里有未改写的 /tmp 路径）"; fail=1; return
+  fi
+  if [ "$mode" = noverify ]; then grep -v 'git merge-base --is-ancestor origin/upstream-' "$F/step.sh"; else cat "$F/step.sh"; fi \
+    | sed 's#/tmp/upstream-sync-issue\.md#"$AGENT24_TEST_ISSUE_FILE"#g' > "$F/run.sh"
   (cd "$F/work" && env PATH="$F/bin:$PATH" GH_LOG="$F/gh.log" PR_HEAD="upstream-${mode#pr-}" GITHUB_REPOSITORY=example/sandbox GITHUB_STEP_SUMMARY="$F/summary" \
     GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0="url.$F/up.insteadOf" GIT_CONFIG_VALUE_0=https://github.com/Tencent/WeKnora.git \
     GIT_CONFIG_KEY_1="url.$F/blocked/.insteadOf" GIT_CONFIG_VALUE_1=https://github.com/ \
-    GIT_CONFIG_KEY_2="url.$F/blocked/.pushInsteadOf" GIT_CONFIG_VALUE_2=https:// GIT_TERMINAL_PROMPT=0 \
+    GIT_CONFIG_KEY_2="url.$F/blocked/.pushInsteadOf" GIT_CONFIG_VALUE_2=https:// GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL=file \
+    AGENT24_TEST_ISSUE_FILE="$F/upstream-sync-issue.md" \
     LC_ALL=C GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash --noprofile --norc -eo pipefail "$F/run.sh") > "$F/out" 2>&1; local rc=$?
   local om or; om=$(g --git-dir="$F/origin.git" rev-parse upstream-main); or=$(g --git-dir="$F/origin.git" rev-parse upstream-release)
   local em=$m er=$r; [ "$mode" = pr-main ] && em=$A; [ "$mode" = pr-release ] && er=$SR

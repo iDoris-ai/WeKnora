@@ -1,14 +1,17 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -653,4 +656,49 @@ func TestHostInstallShellExecToolIsScopedToVersionDir(t *testing.T) {
 	require.Equal(t, dir, tool.effectiveDefaultWorkDir())
 	require.NotContains(t, tool.Description(), "as root")
 	require.Contains(t, tool.Description(), dir)
+}
+
+// work_dir is a tool argument from the model, so the shell log records its length only
+// (A24-OBS-12, #97 review G1).
+func TestShellExecLogsOmitWorkDir(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	workDir := "/tmp/" + sentinel
+	args, err := json.Marshal(map[string]string{"command": "pwd", "work_dir": workDir})
+	require.NoError(t, err)
+
+	result, err := NewShellExecTool(&fakeShellExecutor{}, nil).Execute(shellExecTestContext(), args)
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "[Tool][ShellExec] session=")
+	assert.Equal(t, 1, strings.Count(logs, "work_dir_len="))
+}
+
+// A backend failure can quote the command or work_dir. The execution-error log records its length only.
+func TestShellExecLogsOmitExecutionError(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	executor := &fakeShellExecutor{err: fmt.Errorf("exec %q failed", "/tmp/"+sentinel)}
+	result, err := NewShellExecTool(executor, nil).Execute(
+		shellExecTestContext(),
+		json.RawMessage(`{"command":"pwd"}`),
+	)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "execution error: session=")
+	assert.Equal(t, 1, strings.Count(logs, "error_len="))
 }

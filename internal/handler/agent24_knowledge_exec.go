@@ -1,28 +1,20 @@
-// Agent24 fork product patch A24-KB-03 (CONTRACT-READONLY-v1 R3.3, R7.1–R7.2).
+// Agent24 fork product patch A24-KB-03, A24-KB-20 (CONTRACT-READONLY-v1 R3.4–R3.5, R7.1–R7.2, WeKnora#56).
 //
-// Deadline clamping and execution error classification of the Agent24
-// knowledge integration endpoints. Raw error text never leaves this file.
+// Execution error classification of the Agent24 knowledge integration
+// endpoints. Raw error text never leaves this file.
 
 package handler
 
 import (
 	"context"
 	"errors"
-	"time"
+	"io"
+	"net"
+	"net/url"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/api"
 )
-
-// agent24KnowledgeDeadline returns the applied deadline: requestedMS <= 0
-// means the server maximum; larger values are clamped without error (R3.3).
-func agent24KnowledgeDeadline(requestedMS int64) (time.Duration, int) {
-	ms := int64(agent24KnowledgeMaxDeadlineMS)
-	if requestedMS > 0 && requestedMS < ms {
-		ms = requestedMS
-	}
-	return time.Duration(ms) * time.Millisecond, int(ms)
-}
 
 // classifyAgent24KnowledgeExecError: clientGone means the caller aborted, write
 // nothing (R7.1). Explicit non-deadline causes win over an expired ctx; timeout
@@ -74,5 +66,32 @@ func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24
 	if errors.As(err, &transportErr) {
 		return agent24Unavailable("dependency"), false
 	}
+	// Storage, vector-store and Ollama clients return their network errors as
+	// is (the single-group fast path passes the retriever's error through), so
+	// a network failure there is a dependency failure too (R3.5).
+	if failed, timedOut := agent24NetworkFailure(err); failed {
+		if timedOut {
+			return deadlineOr(), false
+		}
+		return agent24Unavailable("dependency"), false
+	}
 	return agent24Internal(), false
+}
+
+// agent24NetworkFailure reports whether err is a failure on the network (a
+// refused or reset connection, a failed lookup, a TLS handshake timeout, a
+// connection closed before the reply), and whether it timed out. A *url.Error
+// is judged by its cause: it is a net.Error whatever the cause, including a
+// URL that does not parse or a scheme no transport serves, and those never
+// work on a retry (internal).
+func agent24NetworkFailure(err error) (failed, timedOut bool) {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true, netErr.Timeout()
+	}
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF), false
 }
