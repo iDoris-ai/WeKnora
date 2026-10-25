@@ -43,7 +43,7 @@ func RecoverGoroutine(ctx context.Context, label string, onPanic func()) {
 	if label != "" {
 		where += " " + label
 	}
-	logger.Errorf(ctx, "%s panicked: %v\n%s", where, r, debug.Stack())
+	logger.Errorf(ctx, "%s panicked: %s\n%s", where, logger.PanicValue(r), debug.Stack())
 	if onPanic != nil {
 		onPanic()
 	}

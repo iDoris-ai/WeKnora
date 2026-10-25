@@ -901,7 +901,7 @@ func (h *Handler) kickNextRunFromSteerBacklog(
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Errorf(ctx, "steer follow-up run panicked: %v", r)
+				logger.Errorf(ctx, "steer follow-up run panicked: %s", logger.PanicValue(r))
 			}
 		}()
 		h.executeQA(followUp, qaModeAgent, false)
