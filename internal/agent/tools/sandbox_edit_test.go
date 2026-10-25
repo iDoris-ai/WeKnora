@@ -400,7 +400,7 @@ func TestEditSandboxFileLogsOmitPath(t *testing.T) {
 	t.Cleanup(logger.ConfigureFromEnv)
 
 	const sentinel = "S3NT1NEL"
-	path := "/workspace/output/" + sentinel + ".txt"
+	path := "/workspace/output/" + sentinel + "/sub/" + sentinel + ".txt"
 	editor := &fakeSandboxFileEditor{
 		files:    map[string][]byte{path: []byte("old\n")},
 		writeErr: fmt.Errorf("write %q denied", path),
@@ -421,4 +421,5 @@ func TestEditSandboxFileLogsOmitPath(t *testing.T) {
 	assert.Contains(t, logs, "write failed: session=")
 	assert.Equal(t, 1, strings.Count(logs, "error_len="))
 	assert.Equal(t, 2, strings.Count(logs, "path_len="))
+	assert.Equal(t, 2, strings.Count(logs, fmt.Sprintf("path_len=%d ", len(path))))
 }

@@ -1,6 +1,7 @@
 package seafile
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -986,4 +988,31 @@ func compactRecorder() *recorder {
 		h.checkpoints = []map[string]any{cp}
 	}
 	return h
+}
+
+func TestSyncFetchFailureLogsOmitPath(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	f, c, cfg := syncFixture(t, "/docs")
+	p := "/docs/" + sentinel + "/sub/" + sentinel + ".pdf"
+	f.addFile(testRepoID, p, []byte("body"), 1)
+	f.fail("file:"+p, 403, -1)
+	_, h := mustRun(t, c, cfg, nil, false)
+	if len(h.errorItems()) != 1 {
+		t.Fatalf("error items = %+v", h.items)
+	}
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) || strings.Contains(logs, "HTTP 403") {
+		t.Fatalf("log contains the path or error text:\n%s", logs)
+	}
+	want := fmt.Sprintf("path_len=%d ", len(p))
+	if strings.Count(logs, want) != 1 || !strings.Contains(logs, "[Seafile] fetch failed:") ||
+		!strings.Contains(logs, "error_len=") || !strings.Contains(logs, "error_type=") {
+		t.Fatalf("fetch failure log missing %s:\n%s", want, logs)
+	}
 }

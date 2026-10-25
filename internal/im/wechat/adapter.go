@@ -196,7 +196,8 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", fmt.Errorf("parse aes key: %w", err)
 	}
 
-	logger.Debugf(ctx, "[WeChat] Decrypting file: name=%s encrypted_size=%d", fileName, len(encryptedData))
+	// fileName falls back to FileKey, the download URL, when the message has no name.
+	logger.Debugf(ctx, "[WeChat] Decrypting file: name_len=%d encrypted_size=%d", len(fileName), len(encryptedData))
 
 	decrypted, err := decryptAES128ECB(encryptedData, aesKey)
 	if err != nil {

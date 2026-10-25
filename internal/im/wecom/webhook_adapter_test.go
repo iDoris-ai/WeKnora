@@ -2,15 +2,19 @@ package wecom
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/binary"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -103,7 +107,7 @@ func TestParseCallbackDebugLogOmitsMessageContent(t *testing.T) {
 	const sentinel = "S3NT1NEL"
 	inner := "<xml><MsgType>text</MsgType><Content>" + sentinel +
 		"</Content><FromUserName>user</FromUserName><MsgId>1</MsgId>" +
-		"<PicUrl>https://example.com/p.png</PicUrl><MediaId>media-1</MediaId></xml>"
+		"<PicUrl>https://example.com/p.png?sig=" + sentinel + "</PicUrl><MediaId>" + sentinel + "</MediaId></xml>"
 	encrypted, _ := encryptWeComTestPayload(t, key, corpID, []byte(inner))
 	outer := "<xml><Encrypt>" + encrypted + "</Encrypt></xml>"
 
@@ -123,7 +127,75 @@ func TestParseCallbackDebugLogOmitsMessageContent(t *testing.T) {
 	if strings.Contains(logs, sentinel) {
 		t.Fatalf("log contains sentinel: %s", logs)
 	}
-	if !strings.Contains(logs, "body_bytes=") || !strings.Contains(logs, "content_len=") {
+	if !strings.Contains(logs, "body_bytes=") || !strings.Contains(logs, "content_len=") ||
+		!strings.Contains(logs, "picurl_len=") || !strings.Contains(logs, "mediaid_len=") {
 		t.Fatalf("log missing length fields: %s", logs)
+	}
+}
+
+func TestDownloadFromURLDebugLogOmitsFileName(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+sentinel+`.pdf"`)
+		_, _ = w.Write([]byte("%PDF"))
+	}))
+	t.Cleanup(srv.Close)
+	saved := httpClient
+	httpClient = srv.Client()
+	t.Cleanup(func() { httpClient = saved })
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+
+	body, fileName, err := downloadFromURL(context.Background(), srv.URL+"/media", "", u.Hostname())
+	if err != nil {
+		t.Fatalf("downloadFromURL: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, body)
+	_ = body.Close()
+	if fileName != sentinel+".pdf" {
+		t.Fatalf("fileName = %q, want the Content-Disposition name", fileName)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "content_disposition_len=") {
+		t.Fatalf("log missing content_disposition_len: %s", logs)
+	}
+}
+
+func TestLongConnCallbackDebugLogOmitsFileURLs(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	var got *im.IncomingMessage
+	c := &LongConnClient{handler: func(_ context.Context, msg *im.IncomingMessage) error {
+		got = msg
+		return nil
+	}}
+	body := `{"msgid":"m1","msgtype":"image","chattype":"single","from":{"userid":"u1"},` +
+		`"image":{"url":"https://example.com/i?sig=` + sentinel + `"}}`
+	c.handleCallback(context.Background(), nil, wsFrame{Body: []byte(body)})
+
+	if got == nil || !strings.Contains(got.FileKey, sentinel) {
+		t.Fatalf("incoming = %+v, want the URL kept in FileKey", got)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "image_url_len=") || !strings.Contains(logs, "file_url_len=") {
+		t.Fatalf("log missing url length fields: %s", logs)
 	}
 }
