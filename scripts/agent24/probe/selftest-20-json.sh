@@ -295,5 +295,6 @@ if [ "$rc" -ne 1 ] || ! grep -F -q 'FAIL 解码视图补扫函数未定义' "$dr
   sed 's/^/  /' "$drv/out"
 fi
 
-SELFTEST_MIN_20=61
-SELFTEST_DONE_20=1
+run_case 1 '跨行重复键第一个值' "$R_FIELD" f.json "" 'f.json:password' 'realsecret123' <<<$'{"password":"realsecret123",\n"password":"<redacted>"}'
+neg_s '跨行重复键都是占位符' $'{"password":"<redacted>",\n"password":"***"}' f.json
+SELFTEST_MIN_20=63; SELFTEST_DONE_20=1

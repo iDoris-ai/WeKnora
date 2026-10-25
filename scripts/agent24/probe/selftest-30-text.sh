@@ -283,5 +283,17 @@ if [ "$rc" -ne 1 ] || ! grep -F -q 'FAIL 自测未完成：selftest-10-basic.sh'
   sed 's/^/  /' "$drv/out"
 fi
 
-SELFTEST_MIN_30=105
-SELFTEST_DONE_30=1
+pos_s "$R_FIELD" '混合引号单键双值' "{'password': \"it's-realsecret1\"}"
+pos_s "$R_FIELD" '混合引号双键单值' "\"password\": 'realsecret1'"
+pos_s "$R_FIELD" '混合引号 token' "x 'token': \"realsecret123\""
+neg_s '混合引号占位符' $'"password": \'<redacted>\'\n\'password\': "<redacted>"\n"password": \'<redacted:token>\'\n\'password\': "<redacted:token>"\n"password": \'***\'\n\'password\': "***"'
+neg_s '混合引号短值' $'\'pwd\': "abc"\n"pwd": \'abc\''
+pos_s "$R_FIELD" '截断数组' 'x "tokens":["realsecret123'
+pos_s "$R_FIELD" '数组值在下一行' '"password": ['
+neg_s '截断数组占位符' '"password": ["<redacted>"'
+pos_s "$R_FIELD" '嵌套对象' 'request_body={"secret":{"value":"realsecret123"}}'
+pos_s "$R_FIELD" '单引号嵌套对象' "'token': {'v': 'realsecret1'}"
+neg_s '空对象' '{"secret":{}}'
+pos_s "$R_FIELD" '对象在下一行' 'x "password": {'
+neg_s 'secret_count 数字' '"secret_count": 3'
+SELFTEST_MIN_30=118; SELFTEST_DONE_30=1

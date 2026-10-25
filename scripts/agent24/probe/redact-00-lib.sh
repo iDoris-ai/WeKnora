@@ -13,10 +13,10 @@ HDR_PRE='(x-api-key|x-external-user-token|x-auth-token)\\*"?[[:space:]]*[:=][[:s
 HDR_VAL='[^][:space:],}"]{6,}'
 HDR_SUF='\\*"?'
 _sq="'"
-FIELD_KEY_DQ="\"(${FIELD_NAME})\""
-FIELD_KEY_SQ="${_sq}(${FIELD_NAME})${_sq}"
-FIELD_RE="${FIELD_KEY_DQ}[[:space:]]*:[[:space:]]*\"[^\"]{6,}|${FIELD_KEY_SQ}[[:space:]]*:[[:space:]]*${_sq}[^${_sq}]{6,}"
-ARRAY_RE="${FIELD_KEY_DQ}[[:space:]]*:[[:space:]]*\\[[^]]*\\]|${FIELD_KEY_SQ}[[:space:]]*:[[:space:]]*\\[[^]]*\\]"
+# 键和值的引号可以不同。数组、对象本行没有闭合时取到行尾。敏感键后的非空 {…} 也命中。
+_fkey="(\"(${FIELD_NAME})\"|${_sq}(${FIELD_NAME})${_sq})[[:space:]]*:[[:space:]]*"
+FIELD_RE="${_fkey}(\"[^\"]{6,}|${_sq}[^${_sq}]{6,}|\\{([^}]*\\}|[^}]*\$))"
+ARRAY_RE="${_fkey}\\[([^]]*\\]|[^]]*\$)"
 FIELD_RULE='敏感字段带值（password/secret/token/credential/refresh/api key/pwd/session_id/hmac/signature/auth/sig/…）'
 KV_RULE='非 JSON 敏感赋值（key=value / key: value）'
 Q_RULE='URL query 敏感参数'
