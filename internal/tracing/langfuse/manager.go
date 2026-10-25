@@ -106,6 +106,10 @@ func Init(cfg Config) (*Manager, error) {
 			"[Langfuse] enabled host=%s flush_at=%d flush_interval=%s sample_rate=%.2f (OTLP/OTel SDK)",
 			cfg.Host, cfg.FlushAt, cfg.FlushInterval, cfg.SampleRate,
 		)
+		if cfg.ExportBodies {
+			logger.Warnf(context.Background(),
+				"AGENT24_LANGFUSE_BODY is enabled: Langfuse exports inputs, outputs and error texts")
+		}
 	}
 	return m, nil
 }
@@ -121,6 +125,18 @@ func GetManager() *Manager {
 // Enabled reports whether the manager would actually emit spans.
 func (m *Manager) Enabled() bool {
 	return m != nil && m.cfg.Enabled && !m.closed.Load() && m.tp != nil
+}
+
+// exportBodies reports whether input, output and error texts are written onto
+// spans. Nil-safe.
+func (m *Manager) exportBodies() bool {
+	return m != nil && m.cfg.ExportBodies
+}
+
+// ExportBodies reports whether callers should attach original text to Langfuse
+// metadata. Nil-safe, and false when Langfuse itself is off.
+func (m *Manager) ExportBodies() bool {
+	return m != nil && m.Enabled() && m.cfg.ExportBodies
 }
 
 // Tracer exposes the OTel tracer so middleware can create spans directly

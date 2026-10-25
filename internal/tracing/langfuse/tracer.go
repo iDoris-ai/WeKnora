@@ -3,6 +3,7 @@ package langfuse
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -116,7 +117,7 @@ func (m *Manager) StartTrace(ctx context.Context, opts TraceOptions) (context.Co
 	if rel != "" {
 		attrs = append(attrs, attribute.String(attrRelease, rel))
 	}
-	attrs = append(attrs, jsonAttr(attrTraceInput, opts.Input))
+	attrs = append(attrs, m.bodyAttr(attrTraceInput, opts.Input))
 	attrs = append(attrs, jsonAttr(attrTraceMetadata, opts.Metadata))
 	if len(opts.Tags) > 0 {
 		attrs = append(attrs, jsonAttr(attrTraceTags, opts.Tags))
@@ -135,7 +136,7 @@ func (t *Trace) Finish(output interface{}, metadata map[string]interface{}) {
 	if t == nil || t.manager == nil || !t.manager.Enabled() || t.span == nil {
 		return
 	}
-	attrs := []attribute.KeyValue{jsonAttr(attrTraceOutput, output)}
+	attrs := []attribute.KeyValue{t.manager.bodyAttr(attrTraceOutput, output)}
 	if merged := mergeMetadata(t.metadata, metadata); merged != nil {
 		attrs = append(attrs, jsonAttr(attrTraceMetadata, merged))
 	}
@@ -228,7 +229,7 @@ func (m *Manager) startSpan(ctx context.Context, opts SpanOptions, createTrace b
 	}
 	attrs := []attribute.KeyValue{
 		attribute.String(attrObsType, obsTypeSpan),
-		jsonAttr(attrObsInput, opts.Input),
+		m.bodyAttr(attrObsInput, opts.Input),
 		jsonAttr(attrObsMetadata, opts.Metadata),
 	}
 	ctx, span := m.tracer.Start(ctx, opts.Name, trace.WithTimestamp(time.Now()), trace.WithAttributes(attrs...))
@@ -252,14 +253,13 @@ func (s *Span) Finish(output interface{}, metadata map[string]interface{}, err e
 	if s == nil || s.manager == nil || !s.manager.Enabled() || s.span == nil {
 		return
 	}
-	attrs := []attribute.KeyValue{jsonAttr(attrObsOutput, output)}
+	attrs := []attribute.KeyValue{s.manager.bodyAttr(attrObsOutput, output)}
 	if merged := mergeMetadata(s.metadata, metadata); merged != nil {
 		attrs = append(attrs, jsonAttr(attrObsMetadata, merged))
 	}
 	s.span.SetAttributes(attrs...)
 	if err != nil {
-		s.span.RecordError(err)
-		s.span.SetStatus(codes.Error, err.Error())
+		s.manager.recordError(s.span, err)
 	}
 	s.span.End()
 	if s.autoTrace != nil {
@@ -285,7 +285,7 @@ func (m *Manager) StartGeneration(ctx context.Context, opts GenerationOptions) (
 	attrs := []attribute.KeyValue{
 		attribute.String(attrObsType, obsTypeGeneration),
 		attribute.String(attrObsModel, opts.Model),
-		jsonAttr(attrObsInput, opts.Input),
+		m.bodyAttr(attrObsInput, opts.Input),
 		jsonAttr(attrObsMetadata, opts.Metadata),
 		jsonAttr(attrObsModelParams, opts.ModelParameters),
 	}
@@ -307,14 +307,13 @@ func (g *Generation) Finish(output interface{}, usage *TokenUsage, err error) {
 	if g == nil || g.manager == nil || !g.manager.Enabled() || g.span == nil {
 		return
 	}
-	attrs := []attribute.KeyValue{jsonAttr(attrObsOutput, output)}
+	attrs := []attribute.KeyValue{g.manager.bodyAttr(attrObsOutput, output)}
 	if usage != nil {
 		attrs = append(attrs, jsonAttr(attrObsUsageDetails, usage))
 	}
 	g.span.SetAttributes(attrs...)
 	if err != nil {
-		g.span.RecordError(err)
-		g.span.SetStatus(codes.Error, err.Error())
+		g.manager.recordError(g.span, err)
 	}
 	g.span.End()
 	if g.autoTrace != nil {
@@ -348,6 +347,40 @@ func mergeMetadata(start, finish map[string]interface{}) map[string]interface{} 
 		merged[k] = v
 	}
 	return merged
+}
+
+// bodyAttr is jsonAttr gated by exportBodies (fork patch A24-OBS-08). When the
+// switch is on, the attribute is identical to jsonAttr. When it is off, a
+// non-empty payload is replaced by its JSON byte length.
+func (m *Manager) bodyAttr(key string, v interface{}) attribute.KeyValue {
+	if m.exportBodies() {
+		return jsonAttr(key, v)
+	}
+	raw := jsonAttr(key, v)
+	if raw.Value.Type() == attribute.EMPTY {
+		return raw
+	}
+	return jsonAttr(key, map[string]interface{}{
+		"redacted": true,
+		"bytes":    len(raw.Value.AsString()),
+	})
+}
+
+// recordError marks span as ERROR. When exportBodies is on, the error text is
+// recorded as before. When it is off, only the error type and text length are
+// recorded — RecordError would write the original text.
+func (m *Manager) recordError(span trace.Span, err error) {
+	if m.exportBodies() {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return
+	}
+	summary := fmt.Sprintf("%T (len=%d)", err, len(err.Error()))
+	span.SetStatus(codes.Error, summary)
+	span.AddEvent("exception", trace.WithAttributes(
+		attribute.String("exception.type", fmt.Sprintf("%T", err)),
+		attribute.String("exception.message", summary),
+	))
 }
 
 // jsonAttr serializes v to a compact JSON string and wraps it as a string
