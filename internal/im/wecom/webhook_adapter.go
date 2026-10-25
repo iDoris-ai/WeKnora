@@ -228,8 +228,8 @@ func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, err
 	}
 
 	logger.Debugf(c.Request.Context(),
-		"[WeCom] Parsed webhook message: msgid=%s msgtype=%s from=%s content_len=%d picurl=%q mediaid=%q",
-		msg.MsgID, msg.MsgType, msg.FromUserName, len(msg.Content), msg.PicUrl, msg.MediaId)
+		"[WeCom] Parsed webhook message: msgid=%s msgtype=%s from=%s content_len=%d picurl_len=%d mediaid_len=%d",
+		msg.MsgID, msg.MsgType, msg.FromUserName, len(msg.Content), len(msg.PicUrl), len(msg.MediaId))
 
 	// Determine chat type
 	chatType := im.ChatTypeDirect

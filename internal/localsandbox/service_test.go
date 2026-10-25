@@ -613,3 +613,32 @@ func TestServiceRunWithPolicyRejectsInvalidPolicy(t *testing.T) {
 	require.Error(t, err)
 	require.Empty(t, backend.prepared)
 }
+
+// The project directory is the host directory the user chose: neither the resolve error that quotes it nor the
+// resolved root reaches the log through the Service entry points, only their lengths.
+func TestGuardForSessionLogsOmitProjectDir(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	project := filepath.Join(t.TempDir(), sentinel, "sub")
+	require.NoError(t, os.MkdirAll(project, 0o755))
+	svc := serviceFixtureWithProjects(t, &fakeBackend{exit: ExitStatus{Code: 0}}, ModeAuto, fixedProject(project))
+	_, ws, err := svc.GuardForSession(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Contains(t, ws.Root, sentinel)
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Equal(t, 3, strings.Count(logs, "root_len=")) // Resolve, workspaceFor, GuardForSession
+
+	buf.Reset()
+	missing := filepath.Join(t.TempDir(), sentinel)
+	svc = serviceFixtureWithProjects(t, &fakeBackend{exit: ExitStatus{Code: 0}}, ModeAuto, fixedProject(missing))
+	_, _, err = svc.GuardForSession(context.Background(), "s1")
+	require.Error(t, err)
+	logs = buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "resolve workspace session=s1: error_len=")
+}
