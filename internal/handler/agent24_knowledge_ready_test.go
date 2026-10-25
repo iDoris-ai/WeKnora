@@ -20,6 +20,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -690,6 +693,40 @@ func TestAgent24KnowledgeAuditUnauthenticated(t *testing.T) {
 	require.Contains(t, raw, `"principal":null`)
 	require.Contains(t, raw, `"credential_id":null`)
 	require.Contains(t, raw, `"tenant_id":null`)
+}
+
+// Unauthenticated rows sit in tenant 0, the system scope. The system feed lists only unscoped rows, so a
+// flood of anonymous requests cannot page a real system event out of its first page (PR #96 probe).
+func TestAgent24KnowledgeAuditAnonymousRowsStayOutOfSystemFeed(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "audit.db")), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.AuditLog{}))
+	svc := service.NewAuditLogService(repository.NewAuditLogRepository(db))
+	require.NoError(t, svc.Log(context.Background(), &types.AuditLog{Action: types.AuditActionSystemSettingChanged}))
+
+	const anonymous = 60 // more than the feed's default page of 50
+	for range anonymous {
+		w := agent24AuditServe(t, svc, false, "/api/v1/agent24/knowledge/search", "", func(c *gin.Context) {
+			c.AbortWithStatus(http.StatusUnauthorized)
+		})
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+	}
+	var written int64
+	require.NoError(t, db.Model(&types.AuditLog{}).
+		Where("tenant_id = 0 AND scope_type = ?", agent24AuditScopeType).Count(&written).Error)
+	require.Positive(t, written, "the anonymous rows must reach tenant 0 for this test to mean anything")
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/system/audit-log", NewAuditLogHandler(svc).ListSystemAuditLog)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/audit-log", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page auditLogListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Data, 1)
+	require.Equal(t, types.AuditActionSystemSettingChanged, page.Data[0].Action)
 }
 
 // The integration credential gate rejects after Auth bound a caller (platform key, direct-mode tenant key):
