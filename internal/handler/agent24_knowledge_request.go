@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -31,20 +33,59 @@ func agent24ReadBody(c *gin.Context) ([]byte, bool) {
 // agent24RequestIDMaxRunes is maxLength of request_id (common.schema.json), in characters.
 const agent24RequestIDMaxRunes = 128
 
-// agent24JSONInt64 reports whether raw is a JSON integer that fits in int64.
-func agent24JSONInt64(raw json.RawMessage) (int64, bool) {
+// agent24JSONDecimal reads a JSON number exactly, as |value| = digits × 10^exp with digits free of leading
+// and trailing zeros ("" for zero). The literal is read digit by digit, in time linear in its length, with
+// no rounding. false if raw is not a JSON number.
+func agent24JSONDecimal(raw json.RawMessage) (neg bool, digits string, exp int64, ok bool) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var v any
 	if dec.Decode(&v) != nil {
+		return false, "", 0, false
+	}
+	n, isNum := v.(json.Number)
+	if !isNum {
+		return false, "", 0, false
+	}
+	lit, neg := strings.CutPrefix(strings.ToLower(string(n)), "-")
+	mant, expPart, _ := strings.Cut(lit, "e")
+	intPart, frac, _ := strings.Cut(mant, ".")
+	if expPart != "" {
+		var err error
+		if exp, err = strconv.ParseInt(expPart, 10, 32); err != nil { // beyond int32: only the sign matters
+			exp = 1 << 31
+			if strings.HasPrefix(expPart, "-") {
+				exp = -exp
+			}
+		}
+	}
+	all := strings.TrimLeft(intPart+frac, "0")
+	digits = strings.TrimRight(all, "0")
+	exp += int64(len(all)-len(digits)) - int64(len(frac))
+	return neg, digits, exp, true
+}
+
+// agent24JSONInt64 reads a JSON number that is exactly an integer in int64. As in JSON Schema 2020-12,
+// 1.0 and 1e0 are integers (and -0 is 0); a fractional part or a value outside int64 is false, never
+// clamped.
+func agent24JSONInt64(raw json.RawMessage) (int64, bool) {
+	neg, digits, exp, ok := agent24JSONDecimal(raw)
+	switch {
+	case !ok:
+		return 0, false
+	case digits == "":
+		return 0, true
+	case exp < 0 || int64(len(digits))+exp > 19: // a fraction, or more digits than int64 holds
 		return 0, false
 	}
-	n, ok := v.(json.Number)
-	if !ok {
+	u, err := strconv.ParseUint(digits+strings.Repeat("0", int(exp)), 10, 64)
+	switch {
+	case err != nil || u > 1<<63 || (!neg && u == 1<<63):
 		return 0, false
+	case neg:
+		return int64(-u), true
 	}
-	i, err := n.Int64()
-	return i, err == nil
+	return int64(u), true
 }
 
 // parseAgent24KnowledgeCommon decodes the body and validates protocol_version,

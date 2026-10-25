@@ -130,6 +130,16 @@ func TestAgent24KnowledgeParseCommon(t *testing.T) {
 		{"rid empty", `{"protocol_version":1,"request_id":"","generation":1}`, false, "", nil, int64(1)},
 		{"rid number", `{"protocol_version":1,"request_id":5,"generation":1}`, false, "", nil, int64(1)},
 		{"gen negative", `{"protocol_version":1,"request_id":"r","generation":-1}`, false, "", "r", nil},
+		// As in JSON Schema, 1.0 and 1e0 are the integer 1 (WeKnora#56); generation echoes canonically.
+		{"pv 1.0", `{"protocol_version":1.0,"request_id":"r","generation":7.0,"query":"q"}`, true, "", "r", int64(7)},
+		{"pv 1e0", `{"protocol_version":1e0,"request_id":"r","generation":5E1,"query":"q"}`, true, "", "r", int64(50)},
+		{
+			"pv 2.0", `{"protocol_version":2.0,"request_id":"r","generation":3}`,
+			false, "unsupported_protocol_version", "r", int64(3),
+		},
+		{"gen -0.0", `{"protocol_version":1,"request_id":"r","generation":-0.0,"query":"q"}`, true, "", "r", int64(0)},
+		{"gen 1e30", `{"protocol_version":1,"request_id":"r","generation":1e30}`, false, "", "r", nil},
+		{"pv huge", `{"protocol_version":1e1000000000,"request_id":"r","generation":1}`, false, "", "r", int64(1)},
 		{"gen fraction", `{"protocol_version":1,"request_id":"r","generation":1.5}`, false, "", "r", nil},
 		{"gen string", `{"protocol_version":1,"request_id":"r","generation":"3"}`, false, "", "r", nil},
 		{"valid", `{"protocol_version":1,"request_id":"r","generation":0,"query":"q"}`, true, "", "r", int64(0)},
@@ -157,6 +167,25 @@ func TestAgent24KnowledgeParseCommon(t *testing.T) {
 		} else {
 			require.Equal(t, tc.gen, *echo.Generation, tc.name)
 		}
+	}
+}
+
+func TestAgent24JSONInt64(t *testing.T) {
+	for raw, want := range map[string]int64{
+		"0": 0, "-0": 0, "0.000": 0, "0e99999999999": 0, "7": 7, "7.0": 7, "70e-1": 7, "0.7e1": 7, "1E2": 100,
+		"-12.0": -12, "9223372036854775807": 1<<63 - 1, "-9223372036854775808": -1 << 63,
+		"922337203685477580.7e1": 1<<63 - 1,
+	} {
+		got, ok := agent24JSONInt64(json.RawMessage(raw))
+		require.True(t, ok, raw)
+		require.Equal(t, want, got, raw)
+	}
+	for _, raw := range []string{
+		"1.5", "7e-1", "9223372036854775808", "-9223372036854775809", "1e19", "1e99999999999", "1e-99999999999",
+		`"1"`, "true", "null", "[1]", "{",
+	} {
+		_, ok := agent24JSONInt64(json.RawMessage(raw))
+		require.False(t, ok, raw)
 	}
 }
 
