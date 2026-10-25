@@ -163,25 +163,47 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 		if errors.Is(err, types.ErrProcessingDenied) {
 			return nil, fmt.Errorf("%w", types.ErrProcessingDenied)
 		}
-		return nil, &TransportError{Op: "send request", Err: processingStripURL(req.Context(), err)}
+		return nil, &TransportError{Op: "send request", Err: processingRedact(req.Context(), err)}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		_ = resp.Body.Close()
-		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
+		httpErr := &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
+		if types.ProcessingGuardFromContext(req.Context()) != nil {
+			// A vendor body can echo the request path and query; under a guard the text keeps the status only.
+			return nil, &processingRedactedError{
+				msg: fmt.Sprintf("API request failed with status %d (body_len=%d)", resp.StatusCode, len(body)),
+				err: httpErr,
+			}
+		}
+		return nil, httpErr
 	}
 	return resp, nil
 }
 
-// processingStripURL drops the URL net/http quotes in a *url.Error (path and query included, also for a
-// redirect Location) when the request ran under a processing guard; the operation and the cause are kept.
-// Without a guard the error is returned as it was.
-func processingStripURL(ctx context.Context, err error) error {
-	var ue *url.Error
-	if types.ProcessingGuardFromContext(ctx) == nil || !errors.As(err, &ue) {
+// processingRedactedError carries an error raised under a processing guard with a text that quotes nothing from
+// the request or the reply. Unwrap keeps the original, so errors.Is and errors.As (a deadline, an HTTPError's
+// status) still classify it; only the text changes.
+type processingRedactedError struct {
+	msg string
+	err error
+}
+
+func (e *processingRedactedError) Error() string { return e.msg }
+func (e *processingRedactedError) Unwrap() error { return e.err }
+
+// processingRedact hides the text of a transport error under a processing guard: net/http quotes the URL (path
+// and query, also a redirect Location, and again inside the cause when the Location does not parse). The text
+// keeps the operation and the cause's type. Without a guard the error is returned as it was.
+func processingRedact(ctx context.Context, err error) error {
+	if types.ProcessingGuardFromContext(ctx) == nil {
 		return err
 	}
-	return fmt.Errorf("%s: %w", ue.Op, ue.Err)
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return &processingRedactedError{msg: fmt.Sprintf("%s: request failed (%T)", ue.Op, ue.Err), err: err}
+	}
+	return &processingRedactedError{msg: fmt.Sprintf("request failed (%T)", err), err: err}
 }
 
 // guardedProcessingClient is c with each redirect target checked against the

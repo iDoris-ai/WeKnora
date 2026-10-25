@@ -403,6 +403,42 @@ func TestPolicyEmbedderErrorsOmitURLUnderGuard(t *testing.T) {
 		t.Fatalf("redirect loop error quotes the Location: %s", err.Error())
 	}
 
+	// A Location that does not parse: net/http quotes it in the cause, not only in the URL field.
+	badLocation := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "/"+sentinel+"%zz?token="+sentinel)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(badLocation.Close)
+	// A reply body that echoes the request path and query. The status still classifies through errors.As.
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unknown endpoint: "+r.URL.RequestURI(), http.StatusNotFound)
+	}))
+	t.Cleanup(echo.Close)
+	echoCfg := Config{
+		Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m", BaseURL: echo.URL, APIKey: "k",
+	}
+	echoCfg.Spec = &types.ModelSpecOverride{Compat: map[string]any{"path": "/" + sentinel + "?token=" + sentinel}}
+	for name, c := range map[string]Config{
+		"location does not parse": {
+			Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m", BaseURL: badLocation.URL, APIKey: "k",
+		},
+		"body echoes the request": echoCfg,
+	} {
+		e, err := NewEmbedder(c, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = e.Embed(guarded(), "q")
+		if err == nil || strings.Contains(err.Error(), sentinel) {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+		var httpErr *api.HTTPError
+		if name == "body echoes the request" &&
+			(!errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound) {
+			t.Fatalf("%s: the status no longer classifies: %v", name, err)
+		}
+	}
+
 	hits = 0
 	badPath := "@other.invalid/" + sentinel + "%zz?token=" + sentinel
 	cfg.Spec = &types.ModelSpecOverride{Compat: map[string]any{"path": badPath}}

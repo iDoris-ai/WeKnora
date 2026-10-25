@@ -174,8 +174,29 @@ func TestOllamaServiceErrorsOmitURLUnderGuard(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "S3NT1NEL") {
 		t.Fatalf("guarded: err = %v", err)
 	}
-	if !strings.Contains(err.Error(), "redirects") {
-		t.Fatalf("guarded: the cause is lost: %v", err)
+	if !strings.Contains(err.Error(), "request failed") {
+		t.Fatalf("guarded: err = %v", err)
+	}
+	if _, err := svc.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("standalone keeps the error as it was: %v", err)
+	}
+}
+
+// A reply body that echoes the request (an Ollama StatusError carries it) is not quoted under a guard either.
+func TestOllamaServiceStatusErrorOmitsBodyUnderGuard(t *testing.T) {
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"unknown S3NT1NEL `+r.URL.Path+`"}`, http.StatusNotFound)
+	}))
+	t.Cleanup(echo.Close)
+	t.Setenv("OLLAMA_BASE_URL", echo.URL)
+	t.Setenv("OLLAMA_OPTIONAL", "")
+	svc, err := GetOllamaService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.ListModels(types.WithProcessingGuard(context.Background(), &pullGuard{allow: true}))
+	if err == nil || strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("guarded: err = %v", err)
 	}
 	if _, err := svc.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
 		t.Fatalf("standalone keeps the error as it was: %v", err)

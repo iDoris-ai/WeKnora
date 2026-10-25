@@ -162,9 +162,10 @@ func guardedRedirect(req *http.Request, via []*http.Request) error {
 }
 
 // processingSafeErr (Agent24 A24-KB-17): under a processing guard, net/http errors come back as a *url.Error that
-// quotes the full URL, path and query included (a redirect Location too). A refusal becomes the bare sentinel;
-// any other error keeps its operation and cause without the URL. Neither the error nor a log line carries it.
-// Without a guard the error is returned as it was.
+// quotes the full URL, path and query included (a redirect Location too, and again in the cause when it does not
+// parse), and a StatusError carries the reply body. A refusal becomes the bare sentinel; any other error keeps its
+// operation and the cause's type only. Neither the error nor a log line carries it. Without a guard the error is
+// returned as it was.
 func processingSafeErr(ctx context.Context, err error) error {
 	if err == nil || types.ProcessingGuardFromContext(ctx) == nil {
 		return err
@@ -172,12 +173,23 @@ func processingSafeErr(ctx context.Context, err error) error {
 	if errors.Is(err, types.ErrProcessingDenied) {
 		return fmt.Errorf("%w", types.ErrProcessingDenied)
 	}
+	// The text quotes nothing from the request or the reply (a *url.Error's URL and its cause, a StatusError's
+	// body); Unwrap keeps the original for errors.Is and errors.As.
 	var ue *url.Error
 	if errors.As(err, &ue) {
-		return fmt.Errorf("%s: %w", ue.Op, ue.Err)
+		return &processingRedactedError{msg: fmt.Sprintf("ollama %s: request failed (%T)", ue.Op, ue.Err), err: err}
 	}
-	return err
+	return &processingRedactedError{msg: fmt.Sprintf("ollama request failed (%T)", err), err: err}
 }
+
+// processingRedactedError: see processingSafeErr.
+type processingRedactedError struct {
+	msg string
+	err error
+}
+
+func (e *processingRedactedError) Error() string { return e.msg }
+func (e *processingRedactedError) Unwrap() error { return e.err }
 
 // BaseURL returns the base URL this service sends requests to
 // (OLLAMA_BASE_URL, otherwise the default). A nil service returns "".
