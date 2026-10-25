@@ -505,11 +505,17 @@ func TestStdlibLogIsLineSafe(t *testing.T) {
 		t.Fatalf("stdlib log want a single line, got %q", got)
 	}
 
+	// The message itself carries the newline. slog quotes a newline inside an
+	// attribute value even without LineSafeWriter, so that shape would pass
+	// without proving the wrapper ran.
 	buf.Reset()
-	slog.Info("m", "panic", "a\nb")
+	slog.Info("a\nERROR forged")
 	got = buf.String()
 	if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
 		t.Fatalf("slog.Default want a single line, got %q", got)
+	}
+	if !strings.Contains(got, `\nERROR forged`) {
+		t.Fatalf("slog.Default want escaped newline, got %q", got)
 	}
 }
 
