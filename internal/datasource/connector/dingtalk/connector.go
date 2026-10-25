@@ -736,8 +736,8 @@ func (c *Connector) sync(
 			// Never infer deletions from an incomplete tree. Other independent
 			// selections may still complete, while this scope keeps its previous
 			// cursor and is retried on the next run.
-			logger.Warnf(ctx, "[DingTalk] scan scope %s failed, will retry next sync: %v",
-				scopeLabel(scope), err)
+			logger.Warnf(ctx, "[DingTalk] scan scope %s failed, will retry next sync: error_len=%d error_type=%T",
+				scopeLabel(scope), len(err.Error()), err)
 			complete = false
 			next.Resources[scope.ResourceID] = cloneRevisions(oldRevisions)
 			items = append(items, failedResource(scope.ResourceID, err))
@@ -748,8 +748,8 @@ func (c *Connector) sync(
 		// them, so they are reported once and never retried — unlike a failed
 		// read below, which must stay retryable.
 		for _, node := range skipped {
-			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
-				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node, settings))
+			logger.Infof(ctx, "[DingTalk] skip node %s (name_len=%d type=%s category=%s extension_len=%d): %s",
+				node.ID, len(node.title()), node.Type, node.Category, len(node.Extension), skipReason(node, settings))
 		}
 
 		newRevisions := make(map[string]string, len(documents))
@@ -776,8 +776,9 @@ func (c *Connector) sync(
 					return nil, nil, err
 				}
 				logger.Warnf(ctx,
-					"[DingTalk] read document %s (name=%q extension=%s) failed, will retry next sync: %v",
-					document.ID, document.title(), document.Extension, err)
+					"[DingTalk] read document %s (name_len=%d extension_len=%d) failed, will retry next sync: "+
+						"error_len=%d error_type=%T",
+					document.ID, len(document.title()), len(document.Extension), len(err.Error()), err)
 				items = append(items, failedDocument(
 					scope.ResourceID, scope.Reference.WorkspaceID, document, err,
 				))

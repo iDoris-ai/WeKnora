@@ -509,9 +509,9 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 	}
 
 	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s "+
-		"text_len=%d image_url=%q file_url=%q voice_len=%d mixed_items=%d",
+		"text_len=%d image_url_len=%d file_url_len=%d voice_len=%d mixed_items=%d",
 		msg.MsgID, msg.MsgType, msg.From.UserID, msg.ChatType,
-		len(msg.Text.Content), msg.Image.URL, msg.File.URL, len(msg.Voice.Content), len(msg.Mixed.MsgItem))
+		len(msg.Text.Content), len(msg.Image.URL), len(msg.File.URL), len(msg.Voice.Content), len(msg.Mixed.MsgItem))
 
 	// Handle server-side events (e.g. disconnected_event) before normal messages.
 	if msg.MsgType == "event" {

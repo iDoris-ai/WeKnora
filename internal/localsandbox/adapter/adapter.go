@@ -92,11 +92,12 @@ func (a *Adapter) SessionWorkspaceLayout(
 	}
 	_, ws, err := a.svc.GuardForSession(ctx, sessionID)
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] layout session=%s: %v", sessionID, err)
+		logger.Warnf(ctx, "[LocalSandbox] layout session=%s: error_len=%d error_type=%T",
+			sessionID, len(err.Error()), err)
 		return sandbox.WorkspaceLayout{}, err
 	}
 	layout := LayoutFor(ws)
-	logger.Debugf(ctx, "[LocalSandbox] layout session=%s root=%s", sessionID, layout.Root)
+	logger.Debugf(ctx, "[LocalSandbox] layout session=%s root_len=%d", sessionID, len(layout.Root))
 	return layout, nil
 }
 
