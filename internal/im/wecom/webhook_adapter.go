@@ -600,8 +600,9 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 		return nil, "", fmt.Errorf("download failed: status=%d", resp.StatusCode)
 	}
 
-	logger.Debugf(ctx, "[WeCom] Download response: status=%d content-type=%s content-disposition=%s",
-		resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"))
+	// Content-Disposition carries the file name; log only its length.
+	logger.Debugf(ctx, "[WeCom] Download response: status=%d content-type=%s content_disposition_len=%d",
+		resp.StatusCode, resp.Header.Get("Content-Type"), len(resp.Header.Get("Content-Disposition")))
 
 	// Try to extract filename from Content-Disposition header.
 	// Supports both standard filename and RFC 5987 filename* parameters.

@@ -2,12 +2,15 @@ package wecom
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/binary"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -125,5 +128,44 @@ func TestParseCallbackDebugLogOmitsMessageContent(t *testing.T) {
 	}
 	if !strings.Contains(logs, "body_bytes=") || !strings.Contains(logs, "content_len=") {
 		t.Fatalf("log missing length fields: %s", logs)
+	}
+}
+
+func TestDownloadFromURLDebugLogOmitsFileName(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+sentinel+`.pdf"`)
+		_, _ = w.Write([]byte("%PDF"))
+	}))
+	t.Cleanup(srv.Close)
+	saved := httpClient
+	httpClient = srv.Client()
+	t.Cleanup(func() { httpClient = saved })
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+
+	body, fileName, err := downloadFromURL(context.Background(), srv.URL+"/media", "", u.Hostname())
+	if err != nil {
+		t.Fatalf("downloadFromURL: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, body)
+	_ = body.Close()
+	if fileName != sentinel+".pdf" {
+		t.Fatalf("fileName = %q, want the Content-Disposition name", fileName)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "content_disposition_len=") {
+		t.Fatalf("log missing content_disposition_len: %s", logs)
 	}
 }
