@@ -159,14 +159,18 @@ ff_run() { # 期望退出 用例名 上游main 上游正式版 [noverify|pr-main
   local m=${!3} r=${!4}; g -C "$F/up" update-ref refs/heads/main "$m" && g -C "$F/up" tag -f v1.0.0 "$r" >/dev/null || { echo "FAIL $2（准备仓库）"; fail=1; return; }
   g clone -q -b a24/develop "$F/origin.git" "$F/work" && mkdir -p "$F/work/.github/scripts" && cp "$G" "$F/work/.github/scripts/" \
     || { echo "FAIL $2（准备仓库）"; fail=1; return; }
-  # 步骤写的 /tmp/upstream-sync-issue.md 改到 $F 下（被测步骤退化、走到建 issue 时也不写测试目录之外）
+  # 步骤写的 /tmp/upstream-sync-issue.md 换成指向 $F 下的变量（被测步骤退化、走到建 issue 时也不写测试目录之外）；
+  # 用变量而不是把 $F 拼进替换串，临时目录里有空格或 sed 的特殊字符也不出错。其他 /tmp 路径先在原步骤里查。
+  if sed 's#/tmp/upstream-sync-issue\.md##g' "$F/step.sh" | grep -q '/tmp/'; then
+    echo "FAIL $2（步骤里有未改写的 /tmp 路径）"; fail=1; return
+  fi
   if [ "$mode" = noverify ]; then grep -v 'git merge-base --is-ancestor origin/upstream-' "$F/step.sh"; else cat "$F/step.sh"; fi \
-    | sed "s#/tmp/upstream-sync-issue\.md#$F/upstream-sync-issue.md#g" > "$F/run.sh"
-  if grep -q '/tmp/' "$F/run.sh"; then echo "FAIL $2（步骤里还有写 /tmp 的地方）"; fail=1; return; fi
+    | sed 's#/tmp/upstream-sync-issue\.md#"$AGENT24_TEST_ISSUE_FILE"#g' > "$F/run.sh"
   (cd "$F/work" && env PATH="$F/bin:$PATH" GH_LOG="$F/gh.log" PR_HEAD="upstream-${mode#pr-}" GITHUB_REPOSITORY=example/sandbox GITHUB_STEP_SUMMARY="$F/summary" \
     GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0="url.$F/up.insteadOf" GIT_CONFIG_VALUE_0=https://github.com/Tencent/WeKnora.git \
     GIT_CONFIG_KEY_1="url.$F/blocked/.insteadOf" GIT_CONFIG_VALUE_1=https://github.com/ \
     GIT_CONFIG_KEY_2="url.$F/blocked/.pushInsteadOf" GIT_CONFIG_VALUE_2=https:// GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL=file \
+    AGENT24_TEST_ISSUE_FILE="$F/upstream-sync-issue.md" \
     LC_ALL=C GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash --noprofile --norc -eo pipefail "$F/run.sh") > "$F/out" 2>&1; local rc=$?
   local om or; om=$(g --git-dir="$F/origin.git" rev-parse upstream-main); or=$(g --git-dir="$F/origin.git" rev-parse upstream-release)
   local em=$m er=$r; [ "$mode" = pr-main ] && em=$A; [ "$mode" = pr-release ] && er=$SR
