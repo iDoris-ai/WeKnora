@@ -1594,6 +1594,42 @@ func TestFetchDocxWithBlocks_AttachmentDownloadFailure(t *testing.T) {
 	}
 }
 
+// A failed attachment logs its name by length only (A24-OBS-12): the name is user text.
+func TestFetchDocxWithBlocks_AttachmentDownloadFailureLogOmitsName(t *testing.T) {
+	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const (
+		nodeToken = "nt-docx-fail"
+		objToken  = "obj-docx-fail"
+		attToken  = "ft-att-bad"
+		attName   = "S3NT1NEL-slides.pdf"
+	)
+	nodes := []core.WikiNode{{
+		NodeToken: nodeToken, ObjToken: objToken, ObjType: "docx", Title: "Doc", NodeEditTime: "1711468800",
+	}}
+	ts, cfg := fakeFeishuWithBlocksAndDownloadStatus(nodes, objToken, attToken, attName, http.StatusInternalServerError)
+	defer ts.Close()
+
+	_, err := core.FetchDocxWithBlocks(context.Background(), core.NewClient(cfg), core.DocxFetchInput{
+		DocToken: nodeToken, ObjToken: objToken, Title: "Doc",
+		EditTime: core.ParseFeishuTimestamp("1711468800"), BaseMeta: map[string]string{}, MultimodalEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("FetchDocxWithBlocks: %v", err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, "S3NT1NEL") {
+		t.Fatalf("log contains the attachment name:\n%s", logs)
+	}
+	if !strings.Contains(logs, "download failed: name_len=19") {
+		t.Fatalf("log missing the download-failure line:\n%s", logs)
+	}
+}
+
 // TestFetchDocxWithBlocks_EmbeddedImage verifies that embedded images are emitted
 // as standalone sub-items (whose bytes flow into the VLM OCR pipeline) only when
 // the KB has multimodal enabled, but their external_id is ALWAYS kept in

@@ -1,12 +1,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -362,4 +364,31 @@ func mustWriteSandboxArgs(path, content string) json.RawMessage {
 		panic(err)
 	}
 	return raw
+}
+
+// The path is a tool argument from the model, and a sink error can quote it: both logs record lengths only
+// (A24-OBS-12, #93 review G1). The failing write still answers the model with its own error text.
+func TestWriteSandboxFileLogsOmitPath(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	path := "/workspace/output/" + sentinel + ".txt"
+	sink := &fakeSandboxFileSink{err: fmt.Errorf("write %q denied", path)}
+	result, err := NewWriteSandboxFileTool(sink, 0).Execute(sandboxFileTestContext(), mustWriteSandboxArgs(path, "x"))
+	require.NoError(t, err)
+	require.False(t, result.Success)
+
+	sink.err = nil
+	result, err = NewWriteSandboxFileTool(sink, 0).Execute(sandboxFileTestContext(), mustWriteSandboxArgs(path, "x"))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "write failed: session=")
+	assert.Contains(t, logs, "error_len=")
+	assert.Equal(t, 2, strings.Count(logs, "path_len="))
 }
