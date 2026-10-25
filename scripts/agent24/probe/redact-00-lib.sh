@@ -13,9 +13,10 @@ HDR_PRE='(x-api-key|x-external-user-token|x-auth-token)\\*"?[[:space:]]*[:=][[:s
 HDR_VAL='[^][:space:],}"]{6,}'
 HDR_SUF='\\*"?'
 _sq="'"
-# 键和值的引号可以不同。数组、对象本行没有闭合时取到行尾。敏感键后的非空 {…} 也命中。
+# 键和值的引号可以不同。数组、对象本行没有闭合时取到行尾。对象单独扫（OBJ_RE），免得 grep -o 吞掉里面的敏感标量。
 _fkey="(\"(${FIELD_NAME})\"|${_sq}(${FIELD_NAME})${_sq})[[:space:]]*:[[:space:]]*"
-FIELD_RE="${_fkey}(\"[^\"]{6,}|${_sq}[^${_sq}]{6,}|\\{([^}]*\\}|[^}]*\$))"
+FIELD_RE="${_fkey}(\"[^\"]{6,}|${_sq}[^${_sq}]{6,})"
+OBJ_RE="${_fkey}\\{([^}]*\\}|[^}]*\$)"
 ARRAY_RE="${_fkey}\\[([^]]*\\]|[^]]*\$)"
 FIELD_RULE='敏感字段带值（password/secret/token/credential/refresh/api key/pwd/session_id/hmac/signature/auth/sig/…）'
 KV_RULE='非 JSON 敏感赋值（key=value / key: value）'
@@ -24,7 +25,6 @@ H_RULE='凭据头带值（X-API-Key / X-External-User-Token / X-Auth-Token）'
 DV_SKIP_RE=
 DV_VALUE_PRE=
 DV_VALUE_SUF=
-
 find "$DIR" -type f -print0 >"$W/files"
 FIND_RC=$?
 cp "$W/files" "$W/text.targets"

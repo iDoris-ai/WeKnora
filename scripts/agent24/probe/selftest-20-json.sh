@@ -295,5 +295,6 @@ neg_s '跨行重复键都是占位符' $'{"password":"<redacted>",\n"password":"
 neg_s '格式化 JSON 的占位符数组' $'{\n  "password": [\n    "<redacted>"\n  ]\n}' f.json
 neg_s '格式化 JSON 的空对象' $'{\n  "secret": {\n  }\n}' f.json
 neg_s 'JSON 里内层已脱敏的对象' '{"secret":{"v":"<redacted>"}}' f.json
+pos_s "$R_FIELD" '重复键首值里的敏感对象' '{"msg":"request_body={\"secret\":{\"password\":\"firstsecret1\"}}","msg":"ok"}' f.json
 run_case 1 '格式化 JSON 的内层真值' "$R_FIELD" f.json "" 'secret.v' 'realsecret123' <<<$'{\n  "secret": {\n    "v": "realsecret123"\n  }\n}'
-SELFTEST_MIN_20=67; SELFTEST_DONE_20=1
+SELFTEST_MIN_20=68; SELFTEST_DONE_20=1

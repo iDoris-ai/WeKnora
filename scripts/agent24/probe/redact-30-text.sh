@@ -274,11 +274,11 @@ append_value_hits() {
     done <"$W/raw"
   done <"$list"
 }
-
 build_passes
 : >"$W/field.locs"
 for _p in "$W/pass.a" "$W/pass.b"; do
   grep_list "$FIELD_RULE" "$_p" -oiE "$FIELD_RE" && consume_matches scalar
+  grep_list "$FIELD_RULE" "$_p" -oiE "$OBJ_RE" && consume_matches scalar
   grep_list "$FIELD_RULE" "$_p" -oiE "$ARRAY_RE" && consume_matches array
 done
 report "$FIELD_RULE" "$(sort -u "$W/field.locs")"

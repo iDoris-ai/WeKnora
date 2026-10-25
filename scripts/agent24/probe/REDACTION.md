@@ -104,7 +104,7 @@ URL query：`?` 或 `&` 后面的参数名与 KV 同一份字段名，紧贴 `=`
 - 下面几种写法也漏：全角冒号 `password：…`；带引号的键接 `=`，如 `"password"=…`、`"password" = "…"`、`'password'='…'`、`\"password\"=…`（KV 要求键名后直接是空白加 `[:=]`，字段正则要求 `:`）；`=` 本身被百分号编码的 `password%3D…`。
 - 文本规则的键名字符类是 `[A-Za-z0-9_-]`。键名带 `.`、空格、`:` 时，非 JSON 文本里的 `log line {"db.password":"…"}`、字符串里解析不了的片段 `{"msg":"{\"db.password\":\"…\" (truncated"}` 都报不出。整文件能解析时，这类键名的重复键由流式遍历看到第一个值。
 - 字符串里内嵌的 JSON（`fromjson` 解出来的）有重复键时，仍只看到最后一个值：流式遍历只拆外层，内层由 `fromjson` 解析，会折叠重复键。例如 `{"body":"{\"db.password\":\"…\",\"db.password\":\"<redacted>\"}"}`。
-- 只会多报的情况：敏感键下的非空对象一律报，内层值已经是占位符也报（如 `{"secret":{"v":"<redacted>"}}`）。`key: value` 把行尾都当成值，所以占位符后面还有别的头时整行算命中，例如 `map[X-Api-Key:[******] X-Signature:[******]]`、`map[X-Signature:[******] X-Auth-Token:[<redacted>]]` 都会报。
+- 只会多报的情况：非 JSON 文本和解码视图里，敏感键下的非空对象一律报，内层值已经是占位符也报（如日志行里的 `{"secret":{"v":"<redacted>"}}`；jq 能解析的 JSON 文件按叶子判，不受影响）。`key: value` 把行尾都当成值，所以占位符后面还有别的头时整行算命中，例如 `map[X-Api-Key:[******] X-Signature:[******]]`、`map[X-Signature:[******] X-Auth-Token:[<redacted>]]` 都会报。
 - jq 的解析深度有上限，随版本不同：jq-1.7.1-apple 上纯数组嵌套到 256 层、对象嵌套到 128 层就报 `Exceeds depth limit for parsing`（255、127 层能过）；jq-1.6-apple 上分别是 257 和 129 层。超过上限的文件会被当成非 JSON，只走正则，深层敏感值可能漏报。
 
 跟踪 issue：#25
