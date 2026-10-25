@@ -712,13 +712,16 @@ func TestAgent24KnowledgeAuditCredentialInvalidAfterAuthIsAnonymous(t *testing.T
 	require.NotContains(t, raw, "principal-7")
 }
 
-// A panic in the handler still leaves one row, as internal, and reaches Recovery.
+// A panic in the handler leaves one row, as internal even after a success was noted, with the size of the
+// 500 that Recovery (mounted inside the audit, as in router.go) wrote.
 func TestAgent24KnowledgeAuditRecordsPanic(t *testing.T) {
 	stub := &agent24AuditStub{}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(gin.CustomRecovery(func(c *gin.Context, _ any) { c.AbortWithStatus(http.StatusInternalServerError) }))
 	r.Use(Agent24KnowledgeAudit(stub))
+	r.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+	}))
 	r.Use(agent24AuditIdentity)
 	r.POST("/api/v1/agent24/knowledge/read", func(c *gin.Context) {
 		agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Outcome = agent24AuditOK })
@@ -729,7 +732,30 @@ func TestAgent24KnowledgeAuditRecordsPanic(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 	require.Len(t, stub.entries, 1)
 	require.Equal(t, types.AuditOutcomeFailed, stub.entries[0].Outcome)
-	require.Contains(t, string(stub.entries[0].Details), `"outcome":"internal"`)
+	var details struct {
+		Outcome  string `json:"outcome"`
+		Metering struct {
+			BytesReturned int `json:"bytes_returned"`
+		} `json:"metering"`
+	}
+	require.NoError(t, json.Unmarshal(stub.entries[0].Details, &details))
+	require.Equal(t, "internal", details.Outcome)
+	require.Equal(t, w.Body.Len(), details.Metering.BytesReturned)
+	require.Positive(t, details.Metering.BytesReturned)
+}
+
+// A guard ahead of the handler (the API-key capability gate, the Viewer guard) writes its own 403: the row is
+// forbidden and denied, not internal.
+func TestAgent24KnowledgeAuditInfersForbiddenFromGuard(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/read", "", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	})
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Len(t, stub.entries, 1)
+	require.Equal(t, types.AuditOutcomeDenied, stub.entries[0].Outcome)
+	require.Contains(t, string(stub.entries[0].Details), `"outcome":"forbidden"`)
+	require.Contains(t, string(stub.entries[0].Details), `"principal":{"type"`)
 }
 
 func TestAgent24KnowledgeAuditSkipsOtherPaths(t *testing.T) {

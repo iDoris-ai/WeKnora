@@ -1,7 +1,8 @@
 // Agent24 fork product patch A24-KB-16 (CONTRACT-READONLY-v1 r10 R10.1–R10.4, WeKnora#41).
 //
-// One audit row per POST /api/v1/agent24/knowledge/{ready,search,read}. The middleware sits outside Auth
-// so the row sees the status that was actually written, including a rejection the auth envelope rewrote.
+// One audit row per POST /api/v1/agent24/knowledge/{ready,search,read}. The middleware sits outside Recovery
+// and Auth, so the row sees the status and size that were actually written, including a rejection the auth
+// envelope rewrote and Recovery's 500.
 // Extra fields live in Details. ActorUserID stays empty (R10.4). The query, document text, snippets,
 // content_tag and raw credentials are not recorded (R10.3).
 
@@ -160,8 +161,8 @@ func agent24ReadAuditResource(knowledgeID string, rev agent24DocRevision, segs [
 
 // Agent24KnowledgeAudit writes one audit row for the three knowledge endpoints. A nil service, and every
 // other request, is passed through. Mount it outside Auth: Log runs after the handler chain, on a context
-// that ignores client cancellation, and Log's own error is ignored. A panic further down is recorded as
-// internal and then re-raised for Recovery.
+// that ignores client cancellation, and Log's own error is ignored. Mount it outside Recovery too: a panic
+// further down then reaches here as Recovery's 500, recorded as internal.
 func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if svc == nil || !agent24KnowledgeAuditPath(c) {
@@ -169,15 +170,9 @@ func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
 			return
 		}
 		started := time.Now()
-		defer func() {
-			rec := recover()
-			entry := agent24KnowledgeAuditEntry(c, started, rec != nil)
-			_ = svc.Log(context.WithoutCancel(c.Request.Context()), entry)
-			if rec != nil {
-				panic(rec)
-			}
-		}()
 		c.Next()
+		entry := agent24KnowledgeAuditEntry(c, started)
+		_ = svc.Log(context.WithoutCancel(c.Request.Context()), entry)
 	}
 }
 
@@ -204,6 +199,10 @@ func agent24AuditAction(path string) types.AuditAction {
 	}
 }
 
+func agent24AuditSucceeded(outcome string) bool {
+	return outcome == agent24AuditOK || outcome == agent24AuditPartial
+}
+
 func agent24AuditColumnOutcome(outcome string) types.AuditOutcome {
 	switch outcome {
 	case agent24AuditOK:
@@ -219,10 +218,17 @@ func agent24AuditColumnOutcome(outcome string) types.AuditOutcome {
 	}
 }
 
-// agent24AuditInfer classifies a request that recorded no facts. A 401 with no reason is credential_invalid.
+// agent24AuditInfer classifies a request that recorded no facts: a rejection written before the handler (Auth,
+// the API-key capability gate, the Viewer guard) or Recovery's 500. A 401 with no reason is credential_invalid;
+// a 403 is forbidden without a reason, since those guards do not say which contract reason applies.
 func agent24AuditInfer(c *gin.Context) (outcome, reason string) {
-	if c.Writer.Status() == http.StatusUnauthorized {
+	switch c.Writer.Status() {
+	case http.StatusUnauthorized:
 		return string(agent24CodeUnauthorized), "credential_invalid"
+	case http.StatusForbidden:
+		return string(agent24CodeForbidden), ""
+	case http.StatusBadRequest:
+		return string(agent24CodeInvalidRequest), ""
 	}
 	if errors.Is(c.Request.Context().Err(), context.Canceled) {
 		return agent24AuditCancelled, ""
@@ -247,18 +253,17 @@ func agent24AuditAnonymous(outcome, reason string) bool {
 		(reason == "" || reason == "credential_missing" || reason == "credential_invalid")
 }
 
-func agent24KnowledgeAuditEntry(c *gin.Context, started time.Time, panicked bool) *types.AuditLog {
+func agent24KnowledgeAuditEntry(c *gin.Context, started time.Time) *types.AuditLog {
 	var facts *agent24AuditFacts
 	if v, ok := c.Get(agent24AuditFactsKey); ok {
 		facts, _ = v.(*agent24AuditFacts)
 	}
 	outcome, reason := "", ""
 	switch {
-	case panicked:
-		outcome = string(agent24CodeInternal)
-	case facts != nil && facts.Outcome != "":
+	case facts != nil && facts.Outcome != "" &&
+		(c.Writer.Status() < http.StatusInternalServerError || !agent24AuditSucceeded(facts.Outcome)):
 		outcome, reason = facts.Outcome, facts.Reason
-	default:
+	default: // includes a success noted before a panic that Recovery answered with 500
 		outcome, reason = agent24AuditInfer(c)
 	}
 	path := c.FullPath()

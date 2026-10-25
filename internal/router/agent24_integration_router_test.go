@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -459,4 +461,29 @@ func TestAgent24IntegrationKnowledgeAuditBeforeAuth(t *testing.T) {
 	require.Equal(t, "unauthorized", details.Outcome)
 	require.Equal(t, "", audit.entries[0].ActorUserID)
 	require.Equal(t, "agent24_knowledge", audit.entries[0].ScopeType)
+}
+
+// TestAgent24KnowledgeAuditMountedOutsideRecovery guards A24-KB-16: the audit middleware runs before
+// Recovery, so a panic reaches it as Recovery's 500 (status and size as written), not as a bare panic.
+func TestAgent24KnowledgeAuditMountedOutsideRecovery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	r := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		AuditLogService: &agent24KnowledgeAuditStub{},
+	})
+	audit, recovery := -1, -1
+	for i, h := range r.Handlers {
+		name := runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name()
+		switch {
+		// Inlining may report the closure under NewRouter (router.NewRouter.Recovery.func6), so match the tail.
+		case strings.Contains(name, ".Agent24KnowledgeAudit.func"):
+			audit = i
+		case strings.Contains(name, ".Recovery.func"):
+			recovery = i
+		}
+	}
+	require.GreaterOrEqual(t, audit, 0)
+	require.GreaterOrEqual(t, recovery, 0)
+	require.Less(t, audit, recovery)
 }

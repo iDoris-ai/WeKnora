@@ -146,6 +146,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Language())
 	r.Use(middleware.Logger())
+	// Agent24 A24-KB-16: audit the knowledge endpoints outside Recovery and Auth, so the row records the status
+	// and size that were actually written, including an Auth rejection the envelope rewrote and Recovery's 500.
+	// Standalone and integration both install it; a nil AuditLogService passes the request through.
+	r.Use(handler.Agent24KnowledgeAudit(params.AuditLogService))
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
 
@@ -212,10 +216,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
 	r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
 
-	// Agent24 A24-KB-16: audit the knowledge endpoints outside Auth, so the row records the status that was
-	// actually written, including an Auth rejection the envelope rewrote. Standalone and integration both
-	// install it; a nil AuditLogService passes the request through.
-	r.Use(handler.Agent24KnowledgeAudit(params.AuditLogService))
 	// Agent24 A24-KB-11: in integration mode Auth's rejections on the knowledge endpoints get the contract
 	// envelope.
 	installAgent24IntegrationAuthEnvelope(r)
