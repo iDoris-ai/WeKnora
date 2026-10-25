@@ -1,11 +1,31 @@
 package event
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
+
+// panicLogBuf records logger output and closes done once the panic line is in.
+type panicLogBuf struct {
+	bytes.Buffer
+	once sync.Once
+	done chan struct{}
+}
+
+func (b *panicLogBuf) Write(p []byte) (int, error) {
+	n, err := b.Buffer.Write(p)
+	if strings.Contains(b.String(), "event handler panic recovered") {
+		b.once.Do(func() { close(b.done) })
+	}
+	return n, err
+}
 
 // Example: Basic usage of event system
 func ExampleEventBus_basic() {
@@ -224,6 +244,33 @@ func TestEventBus_EmitAndWait(t *testing.T) {
 
 	if counter != 3 {
 		t.Errorf("Expected 3 handlers to complete, got %d", counter)
+	}
+}
+
+func TestEmitHandlerPanicOmitsSentinel(t *testing.T) {
+	buf := &panicLogBuf{done: make(chan struct{})}
+	logger.SetOutput(buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	bus := NewAsyncEventBus()
+	bus.On(EventError, func(context.Context, Event) error {
+		panic("S3NT1NEL")
+	})
+	if err := bus.Emit(context.Background(), NewEvent(EventError, nil)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-buf.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for panic log")
+	}
+	logText := buf.String()
+	if strings.Contains(logText, "S3NT1NEL") {
+		t.Fatalf("log contains the panic value:\n%s", logText)
+	}
+	if !strings.Contains(logText, "string (len=8)") {
+		t.Fatalf("log missing redacted panic value:\n%s", logText)
 	}
 }
 

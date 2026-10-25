@@ -152,6 +152,45 @@ func TestResetRedactsRegistrySecret(t *testing.T) {
 	assertAuditRedacted(t, audit.entries[0], "***", nil)
 }
 
+func TestUpdateFirstWriteRedactsRegistrySecret(t *testing.T) {
+	installObsSecretSpec(t)
+	repo := &auditSettingRepo{}
+	svc, audit := newObsSecretService(repo)
+	row, err := svc.Update(context.Background(), obsSecretSettingKey, "S3NT1NEL-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil || !row.IsSecret {
+		t.Fatalf("returned IsSecret = %v, want true", row)
+	}
+	if repo.written == nil || !repo.written.IsSecret {
+		t.Fatalf("written IsSecret = %v, want true", repo.written)
+	}
+	if len(audit.entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(audit.entries))
+	}
+	assertAuditRedacted(t, audit.entries[0], nil, "***")
+}
+
+func TestResetReadErrorSkipsWriteAndAudit(t *testing.T) {
+	installObsSecretSpec(t)
+	repo := &auditSettingRepo{getErr: errors.New("db down")}
+	svc, audit := newObsSecretService(repo)
+	err := svc.Reset(context.Background(), obsSecretSettingKey)
+	if err == nil {
+		t.Fatal("expected read error")
+	}
+	if !strings.Contains(err.Error(), `read system setting "test.obs_secret"`) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(audit.entries) != 0 {
+		t.Fatalf("audit entries = %d, want 0", len(audit.entries))
+	}
+	if repo.upserts != 0 {
+		t.Fatalf("upserts = %d, want 0", repo.upserts)
+	}
+}
+
 func TestUpdateReadErrorSkipsWriteAndAudit(t *testing.T) {
 	installObsSecretSpec(t)
 	repo := &auditSettingRepo{getErr: errors.New("db down")}
