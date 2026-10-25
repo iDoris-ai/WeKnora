@@ -164,22 +164,32 @@ func (r *ToolRegistry) ExecuteTool(
 	if err := ctx.Err(); err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
+	tool, err := r.GetTool(name)
+	retiredMsg := ""
+	if err != nil {
+		retiredMsg = RetiredToolReplacement(name)
+	}
+	// An unregistered name is whatever the model emitted, so it is logged by length only (A24-OBS-10).
+	loggedName := name
+	if err != nil && retiredMsg == "" {
+		loggedName = "unknown"
+	}
 	common.PipelineInfo(ctx, "AgentTool", "execute_start", map[string]interface{}{
-		"tool":     name,
+		"tool":     loggedName,
 		"args_len": len(args),
 	})
-	tool, err := r.GetTool(name)
 	if err != nil {
-		if msg := RetiredToolReplacement(name); msg != "" {
+		if retiredMsg != "" {
 			common.PipelineWarn(ctx, "AgentTool", "retired_tool", map[string]interface{}{
 				"tool":  name,
-				"error": msg,
+				"error": retiredMsg,
 			})
-			return &types.ToolResult{Success: false, Error: msg}, nil
+			return &types.ToolResult{Success: false, Error: retiredMsg}, nil
 		}
 		common.PipelineError(ctx, "AgentTool", "execute_failed", map[string]interface{}{
-			"tool":  name,
-			"error": err.Error(),
+			"tool":            loggedName,
+			"tool_name_bytes": len(name),
+			"error_len":       len(err.Error()),
 		})
 		return &types.ToolResult{
 			Success: false,
