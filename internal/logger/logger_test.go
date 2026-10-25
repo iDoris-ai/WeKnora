@@ -2,6 +2,9 @@ package logger
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -300,5 +303,107 @@ func TestCloneContextWithoutTraceDropsTheChatTrace(t *testing.T) {
 	got, _ := detached.Value(types.TenantIDContextKey).(uint64)
 	if got != tenantID {
 		t.Fatalf("TenantID = %d, want %d (identity must survive the detach)", got, tenantID)
+	}
+}
+
+func TestEscapeLogText(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "newline", in: "a\nb", want: `a\nb`},
+		{name: "cr", in: "\r", want: `\r`},
+		{name: "tab", in: "\t", want: `\t`},
+		{name: "c1 nel", in: "\u0085", want: `\u0085`},
+		{name: "line separator", in: "\u2028", want: `\u2028`},
+		{name: "paragraph separator", in: "\u2029", want: `\u2029`},
+		{name: "del", in: "\u007f", want: `\u007f`},
+		{name: "soh", in: "\u0001", want: `\u0001`},
+		{name: "backslash", in: `a\b`, want: `a\b`},
+		{name: "chinese", in: "中文", want: "中文"},
+		{name: "invalid utf-8", in: "a\xffb", want: "a\xffb"},
+		{name: "empty", in: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := escapeLogText(tt.in); got != tt.want {
+				t.Fatalf("escapeLogText(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatEscapesLogInjection(t *testing.T) {
+	msg := "hello\nlevel=error forged-msg"
+	field := "val\nlevel=error forged-field"
+	req := "req\nlevel=error forged-req"
+	entry := newEntry(logrus.ErrorLevel, msg, logrus.Fields{
+		"request_id": req,
+		"caller":     "c.go:1[Fn]",
+		"k":          field,
+	})
+	cases := []struct {
+		name string
+		f    *CustomFormatter
+	}{
+		{name: "default", f: &CustomFormatter{}},
+		{name: "color", f: &CustomFormatter{ForceColor: true}},
+		{name: "template", f: &CustomFormatter{Template: "[%d] %level %logger %traceId | %msg"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tc.f.Format(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(out)
+			if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+				t.Fatalf("want a single trailing newline, got %q", got)
+			}
+			for _, want := range []string{
+				`\nlevel=error forged-msg`,
+				`\nlevel=error forged-field`,
+				`\nlevel=error forged-req`,
+			} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("output missing %q: %q", want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestPanicValue(t *testing.T) {
+	var gotRuntime string
+	func() {
+		defer func() {
+			r := recover()
+			re, ok := r.(runtime.Error)
+			if !ok {
+				t.Fatalf("index panic type %T, want runtime.Error", r)
+			}
+			gotRuntime = PanicValue(r)
+			if gotRuntime != re.Error() {
+				t.Fatalf("PanicValue(runtime.Error) = %q, want %q", gotRuntime, re.Error())
+			}
+		}()
+		var s []int
+		_ = s[0]
+	}()
+	if gotRuntime == "" {
+		t.Fatal("index panic was not recovered")
+	}
+
+	const sentinel = "S3NT1NEL"
+	for _, r := range []any{errors.New(sentinel), sentinel} {
+		got := PanicValue(r)
+		if strings.Contains(got, sentinel) {
+			t.Fatalf("PanicValue(%T) = %q, contains sentinel", r, got)
+		}
+		typeName := fmt.Sprintf("%T", r)
+		if !strings.Contains(got, typeName) {
+			t.Fatalf("PanicValue(%T) = %q, want type name %s", r, got, typeName)
+		}
 	}
 }
