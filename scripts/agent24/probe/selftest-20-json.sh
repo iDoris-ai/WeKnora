@@ -12,8 +12,7 @@ for k in $keys; do
   comma=,
 done
 printf '%s\n' "${body}}" >"$d/f.json"
-"$CHECK" --skip-env "$d" >"$d/out" 2>&1
-rc=$?
+"$CHECK" --skip-env "$d" >"$d/out" 2>&1; rc=$?
 miss=
 for k in $keys; do
   grep -E -q "f.json:${k}$" "$d/out" || miss="$miss $k"
@@ -151,8 +150,7 @@ LT_TOKEN=pw<secret1
 GT_TOKEN=pw>secret1
 AMP_TOKEN=pw&secret1
 EOF
-"$CHECK" "$d" >"$d/out" 2>&1
-rc=$?
+"$CHECK" "$d" >"$d/out" 2>&1; rc=$?
 ok_env=1
 for need in 'f.json:bs (BS_TOKEN)' 'f.json:lt (LT_TOKEN)' 'f.json:gt (GT_TOKEN)' 'f.json:amp (AMP_TOKEN)'; do
   grep -F -q -- "$need" "$d/out" || ok_env=0
@@ -211,8 +209,7 @@ chmod +x "$BASE/jqfail/jq"
 o5_path=$PATH
 PATH="$BASE/jqfail:$PATH"
 export PATH
-"$CHECK" --skip-env "$d" >"$d/out" 2>&1
-rc=$?
+"$CHECK" --skip-env "$d" >"$d/out" 2>&1; rc=$?
 PATH=$o5_path
 export PATH
 if [ "$rc" -ne 1 ] || ! grep -F -q 'jq 不可用' "$d/out"; then
@@ -257,8 +254,7 @@ chmod +x "$BASE/jqerr/jq"
 oerr=$PATH
 PATH="$BASE/jqerr:$PATH"
 export PATH
-"$CHECK" --skip-env "$d" >"$d/out" 2>&1
-rc=$?
+"$CHECK" --skip-env "$d" >"$d/out" 2>&1; rc=$?
 PATH=$oerr
 export PATH
 if [ "$rc" -ne 1 ] || ! grep '^FAIL' "$d/out" | grep -F -q 'jq 出错'; then
@@ -272,8 +268,7 @@ d=$BASE/c$n
 mkdir -p "$d"
 printf '%s\n' '{"log":"first line\nsecond pw\\secret1"}' >"$d/f.json"
 printf '%s\n' 'BS_TOKEN=pw\secret1' >"$STACK_DIR/.env"
-"$CHECK" "$d" >"$d/out" 2>&1
-rc=$?
+"$CHECK" "$d" >"$d/out" 2>&1; rc=$?
 if [ "$rc" -ne 1 ] || ! grep -F -q 'f.json:log' "$d/out" \
   || ! grep '^FAIL' "$d/out" | grep -F -q -- "$R_ENV" \
   || grep -F -q 'pw\secret1' "$d/out"; then
@@ -297,4 +292,8 @@ fi
 
 run_case 1 '跨行重复键第一个值' "$R_FIELD" f.json "" 'f.json:password' 'realsecret123' <<<$'{"password":"realsecret123",\n"password":"<redacted>"}'
 neg_s '跨行重复键都是占位符' $'{"password":"<redacted>",\n"password":"***"}' f.json
-SELFTEST_MIN_20=63; SELFTEST_DONE_20=1
+neg_s '格式化 JSON 的占位符数组' $'{\n  "password": [\n    "<redacted>"\n  ]\n}' f.json
+neg_s '格式化 JSON 的空对象' $'{\n  "secret": {\n  }\n}' f.json
+neg_s 'JSON 里内层已脱敏的对象' '{"secret":{"v":"<redacted>"}}' f.json
+run_case 1 '格式化 JSON 的内层真值' "$R_FIELD" f.json "" 'secret.v' 'realsecret123' <<<$'{\n  "secret": {\n    "v": "realsecret123"\n  }\n}'
+SELFTEST_MIN_20=67; SELFTEST_DONE_20=1
