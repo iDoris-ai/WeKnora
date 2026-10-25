@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -890,8 +891,9 @@ func (s *agent24StalledAudit) Log(ctx context.Context, _ *types.AuditLog) error 
 	return ctx.Err()
 }
 
-// The reviewer's probe on a real server: with the audit store stalled, the 401 still reaches the client, and
-// the write gives up after agent24AuditWriteTimeout.
+// The reviewer's probe on a real server: with the audit store stalled, the 401's status and body still reach
+// the client, and the write gives up after agent24AuditWriteTimeout. The final chunk, and so EOF, follows the
+// write (accepted in the PR #96 decision); the test does not read to EOF.
 func TestAgent24KnowledgeAuditStalledStoreDoesNotHoldResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	stalled := &agent24StalledAudit{done: make(chan error, 1)}
@@ -973,8 +975,89 @@ func TestAgent24KnowledgeAuditDefaultAnonymousBurst(t *testing.T) {
 	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
 		c.AbortWithStatus(http.StatusUnauthorized)
 	})
+	started := time.Now()
 	for range agent24AuditAnonymousBurst + 5 {
 		agent24AuditAnonymousRequest(t, r)
 	}
-	require.Len(t, stub.entries, agent24AuditAnonymousBurst)
+	// The bucket refills once a second; a slow run may earn a token per second it took.
+	refilled := int(time.Since(started) / agent24AuditAnonymousEvery)
+	require.GreaterOrEqual(t, len(stub.entries), agent24AuditAnonymousBurst)
+	require.LessOrEqual(t, len(stub.entries), agent24AuditAnonymousBurst+refilled)
+}
+
+// agent24FlakyAudit records rows and fails the next Log when fail is set.
+type agent24FlakyAudit struct {
+	agent24AuditStub
+	fail bool
+}
+
+func (s *agent24FlakyAudit) Log(ctx context.Context, entry *types.AuditLog) error {
+	if s.fail {
+		s.fail = false
+		return errors.New("store down")
+	}
+	return s.agent24AuditStub.Log(ctx, entry)
+}
+
+// An admitted anonymous row whose write fails gives its suppressed count back to the next one.
+func TestAgent24KnowledgeAuditFailedWriteKeepsSuppressedCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24FlakyAudit{}
+	limiter := newAgent24AnonymousAuditLimiter(time.Hour, 1)
+	r := gin.New()
+	r.Use(agent24KnowledgeAudit(stub, limiter))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	for range 4 {
+		agent24AuditAnonymousRequest(t, r)
+	}
+	require.Len(t, stub.entries, 1)
+
+	limiter.bucket.SetLimit(rate.Inf)
+	stub.fail = true
+	agent24AuditAnonymousRequest(t, r) // admitted with suppressed 3, write fails
+	agent24AuditAnonymousRequest(t, r)
+	require.Len(t, stub.entries, 2)
+	require.Contains(t, string(stub.entries[1].Details), `"suppressed":3`)
+}
+
+// agent24AuditCtxErr records the context error Log saw.
+type agent24AuditCtxErr struct {
+	interfaces.AuditLogService
+	seen chan error
+}
+
+func (s *agent24AuditCtxErr) Log(ctx context.Context, _ *types.AuditLog) error {
+	s.seen <- ctx.Err()
+	return nil
+}
+
+// Flushing a rejection makes net/http read the unread request body first. A client that declares a body and
+// never sends it holds the flush; the row's deadline starts after it, so the row is still written.
+func TestAgent24KnowledgeAuditStalledRequestBodyStillWritesRow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	probe := &agent24AuditCtxErr{seen: make(chan error, 1)}
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(probe))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	require.NoError(t, err)
+	_, err = conn.Write([]byte("POST /api/v1/agent24/knowledge/search HTTP/1.1\r\nHost: x\r\n" +
+		"Content-Type: application/json\r\nContent-Length: 1\r\n\r\n"))
+	require.NoError(t, err)
+	time.Sleep(agent24AuditWriteTimeout + 300*time.Millisecond) // longer than the row's timeout
+	require.NoError(t, conn.Close())
+
+	select {
+	case err := <-probe.seen:
+		require.NoError(t, err, "the row's context must not have run out while the flush waited")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the row was not written")
+	}
 }

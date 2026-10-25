@@ -107,7 +107,7 @@ func newAgent24AnonymousAuditLimiter(every time.Duration, burst int) *agent24Ano
 }
 
 // admit reports whether an anonymous row may be written and, when it may, how many were dropped before it.
-// The count is taken when the row is admitted, so a row whose write then fails takes its count with it.
+// The count is taken when the row is admitted; a row whose write fails gives it back.
 func (l *agent24AnonymousAuditLimiter) admit() (bool, int64) {
 	if !l.bucket.Allow() {
 		l.suppressed.Add(1)
@@ -222,23 +222,29 @@ func agent24KnowledgeAudit(svc interfaces.AuditLogService, anonymous *agent24Ano
 func agent24WriteKnowledgeAudit(
 	c *gin.Context, svc interfaces.AuditLogService, anonymous *agent24AnonymousAuditLimiter, started time.Time,
 ) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agent24AuditWriteTimeout)
-	defer cancel()
+	base := context.WithoutCancel(c.Request.Context())
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf(ctx, "agent24 knowledge audit: panic while writing the row: %s", logger.PanicValue(r))
+			logger.Errorf(base, "agent24 knowledge audit: panic while writing the row: %s", logger.PanicValue(r))
 		}
 	}()
-	entry := agent24KnowledgeAuditEntry(c, started, anonymous)
+	entry, suppressed := agent24KnowledgeAuditEntry(c, started, anonymous)
 	if entry == nil {
 		return
 	}
 	agent24FlushResponse(c)
-	_ = svc.Log(ctx, entry)
+	// The deadline starts after the flush: net/http reads any unread request body before it sends the
+	// headers, and a client that stalls that body must not run the row's time out.
+	ctx, cancel := context.WithTimeout(base, agent24AuditWriteTimeout)
+	defer cancel()
+	if err := svc.Log(ctx, entry); err != nil && suppressed > 0 {
+		anonymous.suppressed.Add(suppressed) // the row did not land: the next one carries its count
+	}
 }
 
-// agent24FlushResponse sends the response before the row is written, so the client does not wait on the
-// audit store. A writer that cannot flush panics in gin; the response then goes out when the handler returns.
+// agent24FlushResponse sends the status and body before the row is written. The handler has not returned,
+// so net/http sends them chunked and the final chunk follows the write (at most agent24AuditWriteTimeout
+// later). A writer that cannot flush panics in gin; the response then goes out when the handler returns.
 func agent24FlushResponse(c *gin.Context) {
 	defer func() { _ = recover() }()
 	c.Writer.Flush()
@@ -321,11 +327,11 @@ func agent24AuditAnonymous(outcome, reason string) bool {
 		(reason == "" || reason == "credential_missing" || reason == "credential_invalid")
 }
 
-// agent24KnowledgeAuditEntry builds the row, or returns nil when the row is anonymous and the token bucket
-// drops it.
+// agent24KnowledgeAuditEntry builds the row and returns the suppressed count it carries, or returns nil when
+// the row is anonymous and the token bucket drops it.
 func agent24KnowledgeAuditEntry(
 	c *gin.Context, started time.Time, limiter *agent24AnonymousAuditLimiter,
-) *types.AuditLog {
+) (*types.AuditLog, int64) {
 	var facts *agent24AuditFacts
 	if v, ok := c.Get(agent24AuditFactsKey); ok {
 		facts, _ = v.(*agent24AuditFacts)
@@ -347,7 +353,7 @@ func agent24KnowledgeAuditEntry(
 	if anonymous && limiter != nil {
 		var ok bool
 		if ok, suppressed = limiter.admit(); !ok {
-			return nil
+			return nil, 0
 		}
 	}
 	details := agent24AuditDetail(c, facts, outcome, reason, started, anonymous)
@@ -369,7 +375,7 @@ func agent24KnowledgeAuditEntry(
 		RequestMethod: c.Request.Method,
 		Outcome:       agent24AuditColumnOutcome(outcome),
 		Details:       types.JSON(raw),
-	}
+	}, suppressed
 }
 
 // agent24AuditTenantColumn is the caller's tenant after authentication, otherwise 0 (the column is NOT NULL;
