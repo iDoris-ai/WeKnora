@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -162,7 +163,8 @@ func agent24ReadAuditResource(knowledgeID string, rev agent24DocRevision, segs [
 // Agent24KnowledgeAudit writes one audit row for the three knowledge endpoints. A nil service, and every
 // other request, is passed through. Mount it outside Auth: Log runs after the handler chain, on a context
 // that ignores client cancellation, and Log's own error is ignored. Mount it outside Recovery too: a panic
-// further down then reaches here as Recovery's 500, recorded as internal.
+// further down then reaches here as Recovery's 500, recorded as internal. Being outside Recovery, a panic
+// while writing the row is contained here: the row is lost, the response already written is kept.
 func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if svc == nil || !agent24KnowledgeAuditPath(c) {
@@ -171,9 +173,18 @@ func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
 		}
 		started := time.Now()
 		c.Next()
-		entry := agent24KnowledgeAuditEntry(c, started)
-		_ = svc.Log(context.WithoutCancel(c.Request.Context()), entry)
+		agent24WriteKnowledgeAudit(c, svc, started)
 	}
+}
+
+func agent24WriteKnowledgeAudit(c *gin.Context, svc interfaces.AuditLogService, started time.Time) {
+	ctx := context.WithoutCancel(c.Request.Context())
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf(ctx, "agent24 knowledge audit: panic while writing the row: %s", logger.PanicValue(r))
+		}
+	}()
+	_ = svc.Log(ctx, agent24KnowledgeAuditEntry(c, started))
 }
 
 func agent24KnowledgeAuditPath(c *gin.Context) bool {

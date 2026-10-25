@@ -744,6 +744,24 @@ func TestAgent24KnowledgeAuditRecordsPanic(t *testing.T) {
 	require.Positive(t, details.Metering.BytesReturned)
 }
 
+type agent24PanickingAudit struct{ interfaces.AuditLogService }
+
+func (agent24PanickingAudit) Log(context.Context, *types.AuditLog) error {
+	panic("audit store S3NT1NEL")
+}
+
+// The audit sits outside Recovery: a panic while writing the row is contained, and the response the handler
+// already wrote reaches the client unchanged.
+func TestAgent24KnowledgeAuditContainsOwnPanic(t *testing.T) {
+	var w *httptest.ResponseRecorder
+	require.NotPanics(t, func() {
+		w = agent24AuditServe(t, agent24PanickingAudit{}, true, "/api/v1/agent24/knowledge/ready", "",
+			func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"ok":true}`, w.Body.String())
+}
+
 // A guard ahead of the handler (the API-key capability gate, the Viewer guard) writes its own 403: the row is
 // forbidden and denied, not internal.
 func TestAgent24KnowledgeAuditInfersForbiddenFromGuard(t *testing.T) {
