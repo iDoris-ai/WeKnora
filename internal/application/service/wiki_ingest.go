@@ -1354,7 +1354,8 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 				logger.Warnf(ctx, "wiki ingest: failed to release claim for retry id=%d: %v", op.dbID, err)
 				settleErrs = append(settleErrs, fmt.Errorf("release retry claim id=%d: %w", op.dbID, err))
 			}
-			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+			logger.Infof(ctx, "wiki ingest: re-queued failed op %s title_len=%d for retry (attempt %d/%d)",
+				op.KnowledgeID, len(op.DocTitle), count, wikiMaxFailRetries)
 			continue
 		}
 
@@ -1366,7 +1367,8 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		if op.Op == WikiOpIngest {
 			s.finalizeWikiSubtask(ctx, op.KnowledgeID, op.Attempt)
 		}
-		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+		logger.Warnf(ctx, "wiki ingest: dropping op %s title_len=%d after %d failures (limit %d)",
+			op.KnowledgeID, len(op.DocTitle), count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
 			payloadBytes, _ := json.Marshal(op)
 			if dlErr := s.deadLetterRepo.Insert(ctx, &types.TaskDeadLetter{

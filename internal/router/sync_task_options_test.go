@@ -268,3 +268,30 @@ func TestSyncTaskExecutorPanicLogsOmitPanicValue(t *testing.T) {
 	require.Contains(t, logText, "exhausted retries")
 	require.Contains(t, logText, "error_len=")
 }
+
+func TestSyncTaskExecutorExhaustedErrorOmitsSentinel(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	executor := NewSyncTaskExecutor()
+	executor.RegisterHandler("test:err-value", func(context.Context, *asynq.Task) error {
+		return errors.New("S3NT1NEL")
+	})
+	hookErr := make(chan error, 1)
+	executor.SetFinalFailureHook(func(_ context.Context, _ *asynq.Task, err error) { hookErr <- err })
+	_, err := executor.Enqueue(asynq.NewTask("test:err-value", nil, asynq.MaxRetry(0)))
+	require.NoError(t, err)
+
+	select {
+	case got := <-hookErr:
+		require.Contains(t, got.Error(), "S3NT1NEL")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for final-failure hook")
+	}
+	logText := buf.String()
+	require.False(t, strings.Contains(logText, "S3NT1NEL"), "log contains the error text:\n%s", logText)
+	require.Contains(t, logText, "exhausted retries")
+	require.Contains(t, logText, "error_len=")
+}

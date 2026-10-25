@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -138,6 +140,36 @@ func escapeLogText(s string) string {
 	return b.String()
 }
 
+// lineSafeWriter 把一次 Write 收成一行。标准库 log 每次日志调用一次 Write。
+type lineSafeWriter struct {
+	w io.Writer
+}
+
+// LineSafeWriter 返回按行转义的 io.Writer，供 container 等包套住自建的标准库 log。
+// 标准库 log、默认 slog 与 gorm logger 不经过 CustomFormatter（fork patch A24-OBS-11）。
+func LineSafeWriter(w io.Writer) io.Writer {
+	return lineSafeWriter{w: w}
+}
+
+// Write 去掉结尾的一个 \n（若有），对其余部分做 escapeLogText，再写出并补回结尾 \n。
+// 成功时返回 len(p)，调用方按原长度判断成功；写失败时返回 0 与 err。
+func (s lineSafeWriter) Write(p []byte) (int, error) {
+	body := p
+	trailingNL := false
+	if len(body) > 0 && body[len(body)-1] == '\n' {
+		body = body[:len(body)-1]
+		trailingNL = true
+	}
+	out := escapeLogText(string(body))
+	if trailingNL {
+		out += "\n"
+	}
+	if _, err := s.w.Write([]byte(out)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	timestamp := entry.Time.Format("2006-01-02 15:04:05.000")
 	level := strings.ToUpper(entry.Level.String())
@@ -159,7 +191,7 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	if f.Template != "" {
 		msg := escapeLogText(entry.Message)
 		for _, k := range keys {
-			msg += fmt.Sprintf(" %s=%s", k, escapeLogText(fmt.Sprintf("%v", entry.Data[k])))
+			msg += fmt.Sprintf(" %s=%s", escapeLogText(k), escapeLogText(fmt.Sprintf("%v", entry.Data[k])))
 		}
 		shortCaller := caller
 		if len(shortCaller) > 50 {
@@ -234,9 +266,9 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 				coloredVal = fmt.Sprintf("%s%s%s", colorRed, val, colorReset)
 			}
 			fields += fmt.Sprintf("%s%s%s=%s ",
-				colorCyan, k, colorReset, coloredVal)
+				colorCyan, escapeLogText(k), colorReset, coloredVal)
 		} else {
-			fields += fmt.Sprintf("%s=%s ", k, val)
+			fields += fmt.Sprintf("%s=%s ", escapeLogText(k), val)
 		}
 	}
 
@@ -327,6 +359,9 @@ func ConfigureFromEnv() {
 		threadNeeded: strings.Contains(tmpl, "%thread"),
 	})
 	appLogger.SetReportCaller(false)
+
+	// 标准库 log 原本就写 stderr。默认 slog 的输出经 log.Default()，因此一并覆盖。
+	log.SetOutput(LineSafeWriter(os.Stderr))
 }
 
 // GetLogger 获取日志实例
@@ -599,10 +634,20 @@ func CloneContextWithoutTrace(ctx context.Context) context.Context {
 	return newCtx
 }
 
-// PanicValue 格式化 panic 值：它可以是任意 error 或字符串，可能带正文。
+// PanicValue 格式化 panic 值。runtime 自己的错误只带下标、长度和类型名，
+// 所以仅当值实现 runtime.Error，且动态类型（指针取 Elem）的 PkgPath 为 "runtime" 时返回 Error()。
+// 其余值只记类型和长度，避免正文进入日志。
 func PanicValue(r any) string {
 	if re, ok := r.(runtime.Error); ok {
-		return re.Error()
+		t := reflect.TypeOf(re)
+		if t != nil {
+			if t.Kind() == reflect.Pointer {
+				t = t.Elem()
+			}
+			if t.PkgPath() == "runtime" {
+				return re.Error()
+			}
+		}
 	}
 	return fmt.Sprintf("%T (len=%d)", r, len(fmt.Sprint(r)))
 }

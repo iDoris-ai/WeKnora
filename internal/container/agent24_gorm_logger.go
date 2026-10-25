@@ -9,6 +9,8 @@ import (
 	"time"
 
 	gormlogger "gorm.io/gorm/logger"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // agent24GormLogger is gorm's default logger (slow and failed SQL at Warn, 200ms threshold) with the bound
@@ -19,8 +21,10 @@ func agent24GormLogger(w io.Writer) gormlogger.Interface {
 	gormlogger.RecorderParamsFilter = func(_ context.Context, sql string, _ ...interface{}) (string, []interface{}) {
 		return sql, nil
 	}
-	return gormlogger.New(log.New(w, "\r\n", log.LstdFlags), gormlogger.Config{
-		SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Warn, Colorful: true,
+	// gorm breaks between the file:line and the SQL; escaping turns that into a "\n" on the same line.
+	// Colorful is off: an ANSI ESC would be escaped to "\u001b", and the color only helps on a terminal.
+	return gormlogger.New(log.New(logger.LineSafeWriter(w), "", log.LstdFlags), gormlogger.Config{
+		SlowThreshold: 200 * time.Millisecond, LogLevel: gormlogger.Warn, Colorful: false,
 		ParameterizedQueries: true,
 	})
 }

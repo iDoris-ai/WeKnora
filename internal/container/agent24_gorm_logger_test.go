@@ -2,6 +2,7 @@ package container
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -31,6 +32,16 @@ func TestAgent24GormLoggerHidesBoundValues(t *testing.T) {
 	}
 	if !strings.Contains(out, "y = ?") {
 		t.Fatalf("want placeholders in the logged SQL, got:\n%s", out)
+	}
+}
+
+func TestAgent24GormLoggerEscapesInteriorNewlines(t *testing.T) {
+	var buf bytes.Buffer
+	l := agent24GormLogger(&buf)
+	l.Error(context.Background(), "x %s", "a\nERROR forged")
+	out := buf.String()
+	if strings.Count(out, "\n") != 1 || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("want a single line, got %q", out)
 	}
 }
 
