@@ -1,3 +1,6 @@
+// Agent24 fork product patch A24-KB-28 (CONTRACT-READONLY-v1 r10 R3.11, R6.6,
+// §6, WeKnora#42).
+
 package api
 
 import (
@@ -7,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // RetryPolicy describes how often to retry a failed request and how long to
@@ -65,6 +69,13 @@ func (e Endpoint) PostJSONWithRetry(
 // withRetry runs send until it succeeds, fails with anything other than a
 // TransportError, or the budget runs out. The last error lives in the
 // enclosing scope and the loop cannot fall through without it.
+//
+// Every attempt, the first included, is one external call against the
+// request's processing budget, charged before send (after the wait for a
+// retry). This is the one place every remote embedding request passes, so a
+// caller that splits a batch is charged per request it sends. An exhausted
+// budget is returned as-is and send is not called. A context with no budget
+// is unchanged.
 func withRetry(ctx context.Context, policy RetryPolicy, label string, send func() error) error {
 	var lastErr error
 	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
@@ -77,6 +88,9 @@ func withRetry(ctx context.Context, policy RetryPolicy, label string, send func(
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+		}
+		if err := types.ChargeProcessingCall(ctx); err != nil {
+			return err
 		}
 		err := send()
 		if err == nil {

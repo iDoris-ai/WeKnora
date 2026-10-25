@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -559,5 +561,163 @@ func TestPolicyEmbedderReplyNumbersOmittedUnderGuard(t *testing.T) {
 			t.Fatalf("%s standalone keeps the error as it was: %v", name, err)
 		}
 		srv.Close()
+	}
+}
+
+// budgetGuard is a counting stand-in for a guard that carries a per-request budget.
+type budgetGuard struct {
+	maxCalls int64
+	maxBytes int64
+	calls    atomic.Int64
+	bytes    atomic.Int64
+	inflight chan struct{}
+}
+
+func (g *budgetGuard) Allow(context.Context, types.ProcessingDestination) error { return nil }
+
+func (g *budgetGuard) Charge(_ context.Context, calls, n int) error {
+	if g.calls.Add(int64(calls)) > g.maxCalls || g.bytes.Add(int64(n)) > g.maxBytes {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	return nil
+}
+
+func (g *budgetGuard) Acquire(context.Context) (func(), error) {
+	select {
+	case g.inflight <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-g.inflight }) }, nil
+	default:
+		return nil, fmt.Errorf("%w", types.ErrProcessingOverloaded)
+	}
+}
+
+func TestPolicyEmbedderBudget(t *testing.T) {
+	dest := types.ProcessingDestination{
+		Category: types.ProcessingEmbedding, Endpoint: "https://s3nt1nel.example:443", Model: "S3NT1NEL",
+	}
+	t.Run("calls", func(t *testing.T) {
+		const n = 2
+		guard := &budgetGuard{maxCalls: n, maxBytes: 1000, inflight: make(chan struct{}, 4)}
+		inner := &countEmbedder{}
+		p := &policyEmbedder{inner: inner, dest: dest, chargesCalls: true}
+		ctx := types.WithProcessingGuard(context.Background(), guard)
+		for i := 0; i < n; i++ {
+			if _, err := p.Embed(ctx, "S3NT1NEL"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := p.Embed(ctx, "S3NT1NEL")
+		if !errors.Is(err, types.ErrProcessingDenied) || inner.n != n {
+			t.Fatalf("err = %v, calls = %d", err, inner.n)
+		}
+		if strings.Contains(err.Error(), "S3NT1NEL") || strings.Contains(err.Error(), "s3nt1nel") {
+			t.Fatalf("error leaks the input or the destination: %s", err.Error())
+		}
+	})
+	t.Run("input bytes", func(t *testing.T) {
+		guard := &budgetGuard{maxCalls: 4, maxBytes: 10, inflight: make(chan struct{}, 4)}
+		inner := &countEmbedder{}
+		p := &policyEmbedder{inner: inner, dest: dest, chargesCalls: true}
+		ctx := types.WithProcessingGuard(context.Background(), guard)
+		_, err := p.BatchEmbed(ctx, []string{"S3NT1NEL", "S3NT1NEL"})
+		if !errors.Is(err, types.ErrProcessingDenied) || inner.n != 0 {
+			t.Fatalf("err = %v, calls = %d", err, inner.n)
+		}
+		if strings.Contains(err.Error(), "S3NT1NEL") {
+			t.Fatalf("error leaks the input: %s", err.Error())
+		}
+	})
+	t.Run("inflight", func(t *testing.T) {
+		inflight := make(chan struct{}, 1)
+		guard := &budgetGuard{maxCalls: 4, maxBytes: 1000, inflight: inflight}
+		inner := &countEmbedder{}
+		p := &policyEmbedder{inner: inner, dest: dest, chargesCalls: true}
+		ctx := types.WithProcessingGuard(context.Background(), guard)
+		if _, err := p.Embed(ctx, "q"); err != nil || inner.n != 1 || len(inflight) != 0 {
+			t.Fatalf("err = %v, calls = %d, len = %d", err, inner.n, len(inflight))
+		}
+		inflight <- struct{}{}
+		inner.n = 0
+		_, err := p.Embed(ctx, "q")
+		if !errors.Is(err, types.ErrProcessingOverloaded) || inner.n != 0 {
+			t.Fatalf("err = %v, calls = %d", err, inner.n)
+		}
+		if got := guard.calls.Load(); got != 1 {
+			t.Fatalf("an overloaded call spent the budget: charged %d, want 1", got)
+		}
+		<-inflight
+		if len(inflight) != 0 {
+			t.Fatalf("len = %d, want 0", len(inflight))
+		}
+	})
+	t.Run("denied charge frees the slot", func(t *testing.T) {
+		inflight := make(chan struct{}, 1)
+		guard := &budgetGuard{maxCalls: 0, maxBytes: 1000, inflight: inflight}
+		inner := &countEmbedder{}
+		p := &policyEmbedder{inner: inner, dest: dest, chargesCalls: true}
+		ctx := types.WithProcessingGuard(context.Background(), guard)
+		_, err := p.Embed(ctx, "q")
+		if !errors.Is(err, types.ErrProcessingDenied) || inner.n != 0 || len(inflight) != 0 {
+			t.Fatalf("err = %v, calls = %d, len = %d", err, inner.n, len(inflight))
+		}
+	})
+	t.Run("remote charges bytes only", func(t *testing.T) {
+		guard := &budgetGuard{maxCalls: 0, maxBytes: 1000, inflight: make(chan struct{}, 1)}
+		inner := &countEmbedder{}
+		p := &policyEmbedder{inner: inner, dest: dest} // remote: api.withRetry charges each request
+		ctx := types.WithProcessingGuard(context.Background(), guard)
+		if _, err := p.BatchEmbed(ctx, []string{"ab", "c"}); err != nil || inner.n != 1 {
+			t.Fatalf("err = %v, calls = %d", err, inner.n)
+		}
+		if guard.calls.Load() != 0 || guard.bytes.Load() != 3 {
+			t.Fatalf("charged %d calls and %d bytes, want 0 and 3", guard.calls.Load(), guard.bytes.Load())
+		}
+	})
+	t.Run("no budget", func(t *testing.T) {
+		inner := &countEmbedder{}
+		p := &policyEmbedder{inner: inner, dest: dest, chargesCalls: true}
+		ctx := types.WithProcessingGuard(context.Background(), &allowCountGuard{})
+		if _, err := p.Embed(ctx, "q"); err != nil || inner.n != 1 {
+			t.Fatalf("err = %v, calls = %d", err, inner.n)
+		}
+	})
+}
+
+// A remote batch split into one request per text is charged per request: the
+// charge sits in api.withRetry, under every split (PR review C1).
+func TestPolicyEmbedderBudgetCountsEachSplitRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		maxCalls int64
+		requests int
+		denied   bool
+	}{
+		{"budget for one", 1, 1, true},
+		{"budget for both", 2, 2, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := newUpstream(t)
+			row := &types.Model{
+				ID: "split", Name: "custom", Source: types.ModelSourceRemote,
+				Parameters: types.ModelParameters{
+					Provider: "generic", BaseURL: u.url, APIKey: "k",
+					Spec: &types.ModelSpecOverride{Compat: map[string]any{"max_batch_size": 1}},
+				},
+			}
+			e, err := NewEmbedder(ConfigFromModel(row, "", ""), nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			guard := &budgetGuard{maxCalls: tc.maxCalls, maxBytes: 1000, inflight: make(chan struct{}, 1)}
+			ctx := types.WithProcessingGuard(context.Background(), guard)
+			_, err = e.BatchEmbed(ctx, []string{"a", "b"})
+			if errors.Is(err, types.ErrProcessingDenied) != tc.denied {
+				t.Fatalf("err = %v, denied want %v", err, tc.denied)
+			}
+			if len(u.requests) != tc.requests {
+				t.Fatalf("upstream got %d requests, want %d", len(u.requests), tc.requests)
+			}
+		})
 	}
 }

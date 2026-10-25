@@ -87,7 +87,8 @@ func TestInstallAgent24IntegrationModeRejectsInvalidPolicy(t *testing.T) {
 	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
 	t.Setenv(handler.Agent24KnowledgePolicyEnv,
-		`{"version":"v","destinations":[{"category":"embedding","endpoint":"S3NT1NEL"}]}`)
+		`{"version":"v","destinations":[{"category":"embedding","endpoint":"S3NT1NEL"}],`+
+			`"budget":{"max_external_calls":1,"max_input_bytes":1,"max_inflight_external":1}}`)
 	t.Setenv(handler.Agent24KnowledgePolicyFileEnv, "")
 	handler.ResetAgent24ProcessingPolicyForTest()
 	t.Cleanup(handler.ResetAgent24ProcessingPolicyForTest)

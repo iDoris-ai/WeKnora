@@ -17,6 +17,7 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -283,4 +284,38 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 	status, env, _, _ := agent24WriteErr(t, nil, agent24KnowledgeEcho{})
 	require.Equal(t, 500, status)
 	require.Equal(t, "internal", env["code"])
+}
+
+func TestClassifyAgent24ProcessingOverloaded(t *testing.T) {
+	secret := &apperrors.AppError{
+		Code: apperrors.ErrInternalServer, Message: "https://S3NT1NEL.example model-S3NT1NEL",
+	}
+	cases := []error{
+		fmt.Errorf("embed: %w", types.ErrProcessingOverloaded),
+		fmt.Errorf("provider: %w", errors.Join(secret, types.ErrProcessingOverloaded)),
+	}
+	for _, err := range cases {
+		e, gone := classifyAgent24KnowledgeExecError(context.Background(), err)
+		require.False(t, gone)
+		require.Equal(t, agent24CodeUnavailable, e.Code)
+		require.Equal(t, "overloaded", e.Reason)
+		require.True(t, e.Retryable)
+		require.Equal(t, 1000, e.Extra["retry_after_ms"])
+		status, _, details, raw := agent24WriteErr(t, e, agent24KnowledgeEcho{})
+		require.Equal(t, 503, status)
+		require.Equal(t, true, details["retryable"])
+		require.Equal(t, "overloaded", details["reason"])
+		require.Equal(t, float64(1000), details["retry_after_ms"])
+		require.NotContains(t, raw, "S3NT1NEL")
+	}
+	plain, gone := classifyAgent24KnowledgeExecError(context.Background(), &api.HTTPError{StatusCode: 429})
+	require.False(t, gone)
+	require.Equal(t, "overloaded", plain.Reason)
+	require.Nil(t, plain.Extra)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	e, gone := classifyAgent24KnowledgeExecError(canceled, fmt.Errorf("%w", types.ErrProcessingOverloaded))
+	require.True(t, gone)
+	require.Nil(t, e)
 }

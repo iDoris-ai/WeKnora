@@ -1,4 +1,5 @@
-// Agent24 fork product patch A24-KB-03, A24-KB-20 (CONTRACT-READONLY-v1 R3.4–R3.5, R7.1–R7.2, WeKnora#56).
+// Agent24 fork product patch A24-KB-03, A24-KB-20, A24-KB-28 (CONTRACT-READONLY-v1 R3.3–R3.5,
+// R7.1–R7.2, r10 R3.11, R6.6, §6, WeKnora#56, WeKnora#42).
 //
 // Execution error classification of the Agent24 knowledge integration
 // endpoints. Raw error text never leaves this file.
@@ -26,9 +27,15 @@ func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24
 		return nil, true
 	}
 	// A call-site guard refusal is policy_denied even when an AppError or an
-	// HTTP status wraps it. Cancellation still wins, above.
+	// HTTP status wraps it. A full in-flight limit is overloaded and names how
+	// long to wait. Cancellation still wins, above.
 	if errors.Is(err, types.ErrProcessingDenied) {
 		return agent24Forbidden("policy_denied"), false
+	}
+	if errors.Is(err, types.ErrProcessingOverloaded) {
+		overloaded := agent24Unavailable("overloaded")
+		overloaded.Extra = map[string]any{"retry_after_ms": agent24PolicyRetryAfterMS}
+		return overloaded, false
 	}
 	ctxExpired := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	deadlineOr := func() *agent24KnowledgeError {

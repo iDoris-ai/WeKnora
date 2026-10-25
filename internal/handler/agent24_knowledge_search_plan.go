@@ -1,4 +1,5 @@
-// Agent24 fork product patch A24-KB-07, A24-KB-20 (CONTRACT-READONLY-v1 r10 §3 R3.2–R3.6, §6 R6.4, WeKnora#56).
+// Agent24 fork product patch A24-KB-07, A24-KB-20, A24-KB-28 (CONTRACT-READONLY-v1 r10 §3 R3.2–R3.6, §6 R6.4,
+// WeKnora#56, WeKnora#42).
 //
 // Search request parsing, budget clamping, branch planning over E and the R3.4 outcome. Pure
 // functions; the endpoint wiring lands in a later slice (WeKnora#38).
@@ -225,5 +226,11 @@ func agent24SearchOutcome(plan agent24SearchPlan, searchErr *agent24KnowledgeErr
 		}
 	}
 	e.Extra = map[string]any{"partial_failures": fs}
+	// A full in-flight limit names when to retry (A24-KB-28); keep it on the rebuilt error.
+	if searchErr != nil && e.Reason == searchErr.Reason {
+		if v, ok := searchErr.Extra["retry_after_ms"]; ok {
+			e.Extra["retry_after_ms"] = v
+		}
+	}
 	return "", nil, e
 }
