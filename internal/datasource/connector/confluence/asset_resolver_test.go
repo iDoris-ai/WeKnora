@@ -634,4 +634,12 @@ func TestLogImageFailureOmitsPath(t *testing.T) {
 		!strings.Contains(logs, "host=confluence.test") || !strings.Contains(logs, "reason=download_failed") {
 		t.Fatalf("image failure log missing %s:\n%s", want, logs)
 	}
+
+	buf.Reset()
+	bad := "https://confluence.test/%zz?sig=" + sentinel
+	logImageFailure(context.Background(), bad, errImagePageBudget)
+	logs = buf.String()
+	if strings.Contains(logs, sentinel) || !strings.Contains(logs, fmt.Sprintf("host= path_len=%d ", len(bad))) {
+		t.Fatalf("unparsable URL log should keep only its length:\n%s", logs)
+	}
 }

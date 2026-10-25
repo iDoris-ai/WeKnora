@@ -248,7 +248,8 @@ func (r *assetResolver) classify(src string) (imgAction, string) {
 // logImageFailure records a redacted warning: host and path length only, never the
 // query (which may carry signed tokens), the Authorization header, or the body.
 func logImageFailure(ctx context.Context, abs string, err error) {
-	host, path := abs, ""
+	// An unparsable abs counts as path only, so the raw string never reaches the log.
+	host, path := "", abs
 	if u, perr := url.Parse(abs); perr == nil {
 		host, path = u.Host, u.Path
 	}
