@@ -1742,8 +1742,9 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 
 	logger.Infof(ctx, "[IM] HandleMessage: channel=%s platform=%s user=%s chat=%s msgtype=%s content_len=%d",
 		channelID, msg.Platform, msg.UserID, msg.ChatID, msg.MessageType, len(msg.Content))
-	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey=%s filename_len=%d",
-		msg.MessageID, msg.Extra["raw_msgtype"], msg.FileKey, len(msg.FileName))
+	// Some adapters put a download URL (WeChat, WeCom) or the data itself (Yunzhijia) in FileKey.
+	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey_len=%d filename_len=%d",
+		msg.MessageID, msg.Extra["raw_msgtype"], len(msg.FileKey), len(msg.FileName))
 
 	// ── File/Image message handling ──
 	// File messages use the normal QA path as well.  A configured knowledge base
@@ -3457,7 +3458,8 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 	fileName := file.fileName
 	ext := fileExtension(fileName)
 	if !supportedKBFileExts[ext] {
-		logger.Infof(ctx, "[IM] Unsupported file type after download: %s (file_len=%d)", ext, len(fileName))
+		// ext is whatever follows the last dot of the user's file name; only unsupported ones reach here.
+		logger.Infof(ctx, "[IM] Unsupported file type after download: ext_len=%d file_len=%d", len(ext), len(fileName))
 		return
 	}
 

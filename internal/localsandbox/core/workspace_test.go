@@ -180,6 +180,24 @@ func TestResolveSessionWorkspaceIsOwnerPrivate(t *testing.T) {
 	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 }
 
+func TestResolveProjectDirLogsOmitPath(t *testing.T) {
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	dir := filepath.Join(t.TempDir(), sentinel, "sub")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	ws, err := workspaceFixture(t, dir).Resolve(context.Background(), "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, WorkspaceProject, ws.Kind)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Equal(t, 1, strings.Count(logs, fmt.Sprintf("kind=project root_len=%d", len(ws.Root))))
+}
+
 func TestResolveMissingProjectDirLogsOmitPath(t *testing.T) {
 	logger.SetLogLevel(logger.LevelDebug)
 	var buf bytes.Buffer

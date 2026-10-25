@@ -622,11 +622,11 @@ func TestSyncLogsEverySkippedNodeWithItsReason(t *testing.T) {
 
 	output := logs.String()
 	for _, want := range []string{
-		`[DingTalk] skip node video-1 (name_len=10 type=FILE category=VIDEO extension=mp4): ` +
+		`[DingTalk] skip node video-1 (name_len=10 type=FILE category=VIDEO extension_len=3): ` +
 			"video/media files are deliberately not downloaded by this connector",
-		`[DingTalk] skip node table-1 (name_len=12 type=FILE category=ALIDOC extension=able): ` +
+		`[DingTalk] skip node table-1 (name_len=12 type=FILE category=ALIDOC extension_len=4): ` +
 			"DingTalk multi-dimensional table has no ingest path in this connector yet",
-		`[DingTalk] skip node mind-1 (name_len=10 type=FILE category=ALIDOC extension=amind): ` +
+		`[DingTalk] skip node mind-1 (name_len=10 type=FILE category=ALIDOC extension_len=5): ` +
 			"DingTalk mind map has no ingest path in this connector yet",
 	} {
 		if !strings.Contains(output, want) {
