@@ -62,6 +62,7 @@ type auditSettingRepo struct {
 	row     *types.SystemSetting
 	written *types.SystemSetting
 	upserts int
+	deletes int
 	getErr  error
 }
 
@@ -81,6 +82,7 @@ func (r *auditSettingRepo) Upsert(_ context.Context, row *types.SystemSetting) e
 }
 
 func (r *auditSettingRepo) Delete(context.Context, string) (bool, error) {
+	r.deletes++
 	if r.row == nil {
 		return false, nil
 	}
@@ -174,7 +176,8 @@ func TestUpdateFirstWriteRedactsRegistrySecret(t *testing.T) {
 
 func TestResetReadErrorSkipsWriteAndAudit(t *testing.T) {
 	installObsSecretSpec(t)
-	repo := &auditSettingRepo{getErr: errors.New("db down")}
+	existing := &types.SystemSetting{Key: obsSecretSettingKey}
+	repo := &auditSettingRepo{row: existing, getErr: errors.New("db down")}
 	svc, audit := newObsSecretService(repo)
 	err := svc.Reset(context.Background(), obsSecretSettingKey)
 	if err == nil {
@@ -186,8 +189,8 @@ func TestResetReadErrorSkipsWriteAndAudit(t *testing.T) {
 	if len(audit.entries) != 0 {
 		t.Fatalf("audit entries = %d, want 0", len(audit.entries))
 	}
-	if repo.upserts != 0 {
-		t.Fatalf("upserts = %d, want 0", repo.upserts)
+	if repo.deletes != 0 || repo.row != existing {
+		t.Fatalf("deletes = %d, row = %v; the row must survive a failed read", repo.deletes, repo.row)
 	}
 }
 
