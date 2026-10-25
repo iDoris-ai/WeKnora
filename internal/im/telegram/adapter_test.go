@@ -1,9 +1,16 @@
 package telegram
 
 import (
+	"bytes"
+	"context"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/im"
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 func TestParseTelegramMessage_ForumTopicThread(t *testing.T) {
@@ -104,5 +111,103 @@ func TestParseUpdate_NilMessage(t *testing.T) {
 	incoming := parseUpdate(update)
 	if incoming != nil {
 		t.Error("expected nil for nil update.Message")
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestGetUpdatesRedactsBotToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	client := &LongConnClient{
+		botToken: sentinel,
+		httpClient: &http.Client{
+			Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, context.DeadlineExceeded
+			}),
+		},
+	}
+
+	_, err := client.getUpdates(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains bot token: %v", err)
+	}
+}
+
+// startLogCapture records logger writes. hit closes once the getUpdates error
+// line is present, so the test can cancel Start after that line is written.
+type startLogCapture struct {
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	hit  chan struct{}
+	once sync.Once
+}
+
+func (c *startLogCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n, err := c.buf.Write(p)
+	if strings.Contains(c.buf.String(), "getUpdates error:") {
+		c.once.Do(func() { close(c.hit) })
+	}
+	return n, err
+}
+
+func (c *startLogCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
+
+func TestLongConnStartGetUpdatesLogOmitsBotToken(t *testing.T) {
+	logs := &startLogCapture{hit: make(chan struct{})}
+	logger.SetOutput(logs)
+	logger.SetLogLevel(logger.LevelError)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	client := &LongConnClient{
+		botToken: sentinel,
+		handler:  func(context.Context, *im.IncomingMessage) error { return nil },
+		httpClient: &http.Client{
+			Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, context.DeadlineExceeded
+			}),
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- client.Start(ctx)
+	}()
+
+	select {
+	case <-logs.hit:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("getUpdates error was not logged")
+	}
+	// Cancel only after the error line is written. An earlier cancel makes
+	// Start return ctx.Err() and skip the getUpdates log.
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not return after cancel")
+	}
+
+	text := logs.String()
+	if strings.Contains(text, sentinel) {
+		t.Fatalf("log contains bot token: %s", text)
+	}
+	if !strings.Contains(text, "getUpdates error: error_len=") {
+		t.Fatalf("log missing redacted getUpdates error: %s", text)
 	}
 }

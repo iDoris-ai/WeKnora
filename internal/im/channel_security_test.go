@@ -1,6 +1,9 @@
 package im
 
 import (
+	"context"
+	"errors"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,4 +23,58 @@ func TestDingtalkOnlySupportsStream(t *testing.T) {
 	channel.Platform = "slack"
 	channel.Mode = "webhook"
 	require.NoError(t, validateChannelTransport(channel))
+}
+
+func TestRedactRequestError(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+
+	t.Run("telegram path token", func(t *testing.T) {
+		err := &url.Error{
+			Op:  "Post",
+			URL: "https://api.telegram.org/bot" + sentinel + "/sendMessage",
+			Err: context.DeadlineExceeded,
+		}
+		got := RedactRequestError(err)
+		require.NotContains(t, got.Error(), sentinel)
+		require.Contains(t, got.Error(), "api.telegram.org")
+		require.ErrorIs(t, got, context.DeadlineExceeded)
+		var uerr *url.Error
+		require.ErrorAs(t, got, &uerr)
+		require.True(t, uerr.Timeout())
+		require.Contains(t, err.URL, sentinel, "the caller's error keeps its URL")
+	})
+
+	t.Run("access_token query", func(t *testing.T) {
+		err := &url.Error{
+			Op:  "Get",
+			URL: "https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=" + sentinel,
+			Err: context.DeadlineExceeded,
+		}
+		got := RedactRequestError(err)
+		require.NotContains(t, got.Error(), sentinel)
+		require.Contains(t, got.Error(), "qyapi.weixin.qq.com")
+		require.ErrorIs(t, got, context.DeadlineExceeded)
+	})
+
+	t.Run("corpsecret query", func(t *testing.T) {
+		err := &url.Error{
+			Op:  "Get",
+			URL: "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=ww&corpsecret=" + sentinel,
+			Err: context.DeadlineExceeded,
+		}
+		got := RedactRequestError(err)
+		require.NotContains(t, got.Error(), sentinel)
+		require.Contains(t, got.Error(), "qyapi.weixin.qq.com")
+		require.ErrorIs(t, got, context.DeadlineExceeded)
+	})
+
+	t.Run("other error", func(t *testing.T) {
+		err := errors.New("plain failure")
+		got := RedactRequestError(err)
+		require.True(t, got == err)
+	})
+
+	t.Run("nil", func(t *testing.T) {
+		require.Nil(t, RedactRequestError(nil))
+	})
 }

@@ -2,6 +2,7 @@ package im
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 )
 
@@ -46,4 +47,30 @@ func GetBool(creds map[string]any, key string) bool {
 	default:
 		return false
 	}
+}
+
+// RedactRequestError (Agent24 KB-OBS-01) returns err with the request URL of a *url.Error cut down to
+// scheme://host: IM APIs carry credentials in the path (Telegram's /bot<token>/) or the query
+// (access_token, corpsecret), and net/http quotes the whole URL. Pass the error http.Client.Do returned,
+// which is a *url.Error itself; any other error, wrapped ones included, is returned as it was.
+func RedactRequestError(err error) error {
+	uerr, ok := err.(*url.Error) // not errors.As: a wrapper around it could not be rebuilt
+	if !ok || uerr == nil {
+		return err
+	}
+	// Copy so the caller's error keeps its URL. Unwrap stays the original cause, so
+	// errors.Is and net.Error.Timeout still see that cause.
+	cloned := *uerr
+	cloned.URL = requestURLSchemeHost(uerr.URL)
+	return &cloned
+}
+
+// requestURLSchemeHost returns scheme://host. Parse failure, or a URL with no
+// scheme or host, becomes "" so the original credential-bearing string is dropped.
+func requestURLSchemeHost(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }

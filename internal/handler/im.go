@@ -451,7 +451,8 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 
 	// Verify callback signature
 	if err := adapter.VerifyCallback(c); err != nil {
-		logger.Errorf(ctx, "[IM] Callback verification failed for channel %s: %v", channelID, err)
+		logger.Errorf(ctx, "[IM] Callback verification failed for channel %s: error_len=%d error_type=%T",
+			channelID, len(err.Error()), err)
 		c.JSON(http.StatusForbidden, gin.H{"error": "verification failed"})
 		return
 	}
@@ -459,7 +460,8 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	// Parse the callback message
 	msg, err := adapter.ParseCallback(c)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] Parse callback failed for channel %s: %v", channelID, err)
+		logger.Errorf(ctx, "[IM] Parse callback failed for channel %s: error_len=%d error_type=%T",
+			channelID, len(err.Error()), err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "parse failed"})
 		return
 	}
