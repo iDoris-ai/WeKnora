@@ -1,13 +1,16 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
@@ -234,4 +237,34 @@ func TestSyncTaskExecutorRecoversPanickingFinalFailureHook(t *testing.T) {
 	// An unrecovered panic in the executor goroutine would kill the test
 	// binary; give it a moment to surface before declaring success.
 	time.Sleep(100 * time.Millisecond)
+}
+
+// A handler's panic value can carry body text (A24-OBS-07): CallRecovered puts it in the returned error, so
+// neither the recovery log nor the exhausted-retries log may print that error.
+func TestSyncTaskExecutorPanicLogsOmitPanicValue(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	executor := NewSyncTaskExecutor()
+	executor.RegisterHandler("test:panic-value", func(context.Context, *asynq.Task) error {
+		panic("S3NT1NEL")
+	})
+	hookErr := make(chan error, 1)
+	executor.SetFinalFailureHook(func(_ context.Context, _ *asynq.Task, err error) { hookErr <- err })
+	_, err := executor.Enqueue(asynq.NewTask("test:panic-value", nil, asynq.MaxRetry(0)))
+	require.NoError(t, err)
+
+	select {
+	case got := <-hookErr:
+		require.Contains(t, got.Error(), "S3NT1NEL", "the returned error keeps the panic value")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for final-failure hook")
+	}
+	logText := buf.String()
+	require.False(t, strings.Contains(logText, "S3NT1NEL"), "log contains the panic value:\n%s", logText)
+	require.Contains(t, logText, "string (len=8)")
+	require.Contains(t, logText, "exhausted retries")
+	require.Contains(t, logText, "error_len=")
 }

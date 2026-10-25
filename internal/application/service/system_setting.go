@@ -93,6 +93,10 @@ type settingSpec struct {
 	// (e.g. asynq worker pool size). The UI shows a restart badge; the
 	// service persists the flag on first write.
 	RequiresRestart bool
+	// IsSecret keeps the value out of the audit log (old and new are both
+	// written as "***"). The registry is the authority; the row's is_secret
+	// column is only a supplement.
+	IsSecret bool
 }
 
 // registry pins the set of legal keys. Expanding it is a deliberate,
@@ -984,15 +988,19 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 	// Capture pre-image for the audit log — pulled fresh, not from
 	// any cache, so concurrent admin edits race-fairly (last writer
 	// wins, audit reflects what was actually replaced).
-	prev, _ := s.repo.Get(ctx, key)
+	prev, err := s.repo.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("read system setting %q: %w", key, err)
+	}
 	var oldValue types.JSON
 	var category, description string
-	var isSecret, requiresRestart bool
+	isSecret := spec.IsSecret
+	var requiresRestart bool
 	if prev != nil {
 		oldValue = prev.Value
 		category = prev.Category
 		description = prev.Description
-		isSecret = prev.IsSecret
+		isSecret = spec.IsSecret || prev.IsSecret
 		requiresRestart = prev.RequiresRestart
 	} else {
 		// First-write path: derive category/description from registry
@@ -1068,7 +1076,10 @@ func (s *systemSettingService) Reset(ctx context.Context, key string) error {
 	}
 
 	// Capture pre-image for the audit log before the row vanishes.
-	prev, _ := s.repo.Get(ctx, key)
+	prev, err := s.repo.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("read system setting %q: %w", key, err)
+	}
 
 	deleted, err := s.repo.Delete(ctx, key)
 	if err != nil {
@@ -1093,7 +1104,7 @@ func (s *systemSettingService) Reset(ctx context.Context, key string) error {
 	// is intentionally null to flag this as a reset (vs an Update
 	// which always writes a concrete new_value).
 	if deleted && prev != nil {
-		s.emitChangeAudit(ctx, key, spec.Type, prev.Value, nil, prev.IsSecret)
+		s.emitChangeAudit(ctx, key, spec.Type, prev.Value, nil, spec.IsSecret || prev.IsSecret)
 	}
 	return nil
 }

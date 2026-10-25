@@ -789,6 +789,16 @@ func initRedisClient() (*redis.Client, error) {
 	return client, nil
 }
 
+// newGormConfig is the config initDatabase opens gorm with; split out so the logger wiring is tested.
+func newGormConfig(w io.Writer) *gorm.Config {
+	return &gorm.Config{
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+		Logger: agent24GormLogger(w), // A24-OBS-01
+	}
+}
+
 // initDatabase initializes database connection
 // Creates and configures database connection based on environment configuration
 // Supports multiple database backends (PostgreSQL)
@@ -865,12 +875,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{
-		NowFunc: func() time.Time {
-			return time.Now().UTC()
-		},
-		Logger: agent24GormLogger(os.Stdout), // A24-OBS-01
-	})
+	db, err := gorm.Open(dialector, newGormConfig(os.Stdout))
 	if err != nil {
 		return nil, err
 	}

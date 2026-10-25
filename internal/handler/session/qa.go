@@ -1398,7 +1398,8 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					stageName = "Agent QA"
 				}
 				logger.ErrorWithFields(streamCtx.asyncCtx,
-					errors.NewInternalServerError(fmt.Sprintf("%s service panicked: %v\n%s", stageName, r, string(buf))),
+					errors.NewInternalServerError(fmt.Sprintf(
+						"%s service panicked: %s\n%s", stageName, logger.PanicValue(r), string(buf))),
 					map[string]interface{}{"session_id": sessionID})
 			}
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
