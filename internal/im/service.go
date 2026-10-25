@@ -2006,7 +2006,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// Non-streaming fallback: collect full answer then send.
 	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
+		logger.Errorf(ctx, "[IM] QA failed: error_len=%d error_type=%T, sending fallback reply",
+			len(err.Error()), err)
 		answer = imQAFailureReply(err)
 	}
 
@@ -2055,7 +2056,8 @@ func (s *Service) handleMessageFullOutput(
 		ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote,
 	)
 	if qaErr != nil {
-		logger.Errorf(ctx, "[IM] Full-output QA failed: %v, sending fallback reply", qaErr)
+		logger.Errorf(ctx, "[IM] Full-output QA failed: error_len=%d error_type=%T, sending fallback reply",
+			len(qaErr.Error()), qaErr)
 		answer = imQAFailureReply(qaErr)
 	}
 
@@ -2625,7 +2627,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		if !ok {
 			return nil
 		}
-		logger.Errorf(ctx, "[IM] QA stream error: %s", data.Error)
+		logger.Errorf(ctx, "[IM] QA stream error: error_len=%d stage=%s error_code=%s",
+			len(data.Error), data.Stage, data.ErrorCode)
 		bufMu.Lock()
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		bufMu.Unlock()
@@ -2829,7 +2832,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			err = s.sessionService.KnowledgeQA(qaCtx, req, eventBus)
 		}
 		if err != nil {
-			logger.Errorf(ctx, "[IM] QA stream execution error: %v", err)
+			logger.Errorf(ctx, "[IM] QA stream execution error: error_len=%d error_type=%T",
+				len(err.Error()), err)
 			bufMu.Lock()
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			bufMu.Unlock()
@@ -2960,7 +2964,7 @@ loop:
 func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
 	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
+		logger.Errorf(ctx, "[IM] QA fallback failed: error_len=%d error_type=%T", len(err.Error()), err)
 		answer = imQAFailureReply(err)
 	}
 
@@ -3115,7 +3119,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 			err = s.sessionService.KnowledgeQA(ctx, req, eventBus)
 		}
 		if err != nil {
-			logger.Errorf(ctx, "[IM] QA execution error: %v", err)
+			logger.Errorf(ctx, "[IM] QA execution error: error_len=%d error_type=%T", len(err.Error()), err)
 			answerMu.Lock()
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			answerMu.Unlock()

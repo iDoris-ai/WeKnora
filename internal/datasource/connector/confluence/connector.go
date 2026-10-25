@@ -232,7 +232,8 @@ func (c *Connector) ResolveResourceAncestors(
 		}
 		ancestors, err := client.pageAncestors(ctx, s, ref.PageID)
 		if err != nil {
-			logger.Warnf(ctx, "skip Confluence resource %s during ancestor resolution: %v", id, err)
+			logger.Warnf(ctx, "skip Confluence resource %s during ancestor resolution: error_len=%d error_type=%T",
+				id, len(err.Error()), err)
 			continue
 		}
 		add(s.ID)

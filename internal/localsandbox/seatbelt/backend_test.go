@@ -3,6 +3,7 @@
 package seatbelt
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/localsandbox/core"
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 func darwinFixture(t *testing.T) (core.Backend, core.Policy, string) {
@@ -476,4 +478,44 @@ func TestSeatbeltPreparedFingerprintMatchesPolicy(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = prep.Close() }()
 	require.Equal(t, p.Fingerprint(), prep.Fingerprint())
+}
+
+// A .git symlink to a directory outside the project resolves outside the writable root, and compile
+// rejects that read-only subpath. Both paths are quoted in the error; the log records only its length.
+func TestSeatbeltCompileLogOmitsSymlinkedGitPath(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	backend, err := New()
+	require.NoError(t, err)
+	require.NoError(t, backend.Available())
+
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	root := filepath.Join(base, "project")
+	outside := filepath.Join(base, sentinel)
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	require.NoError(t, os.MkdirAll(outside, 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, ".git")))
+
+	p := core.Policy{
+		WritableRoots: []core.WritableRoot{{
+			Path:             root,
+			ReadOnlySubpaths: []string{filepath.Join(root, ".git")},
+		}},
+		Network: core.NetworkDenied,
+		Cwd:     root,
+	}
+	require.NoError(t, p.Validate())
+
+	_, err = backend.Prepare(context.Background(), p)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "read-only subpath")
+	require.Contains(t, err.Error(), "outside writable root")
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "seatbelt compile: error_len=")
 }

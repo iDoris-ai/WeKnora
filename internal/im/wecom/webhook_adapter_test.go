@@ -198,4 +198,21 @@ func TestLongConnCallbackDebugLogOmitsFileURLs(t *testing.T) {
 	if !strings.Contains(logs, "image_url_len=") || !strings.Contains(logs, "file_url_len=") {
 		t.Fatalf("log missing url length fields: %s", logs)
 	}
+
+	buf.Reset()
+	got = nil
+	fileURL := "https://example.com/f?sig=" + sentinel
+	fileBody := `{"msgid":"m2","msgtype":"file","chattype":"single","from":{"userid":"u1"},` +
+		`"file":{"url":"` + fileURL + `"}}`
+	c.handleCallback(context.Background(), nil, wsFrame{Body: []byte(fileBody)})
+	if got == nil || got.FileKey != fileURL {
+		t.Fatalf("file incoming = %+v, want FileKey %q", got, fileURL)
+	}
+	logs = buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("file log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "msgtype=file") || !strings.Contains(logs, "file_url_len=") {
+		t.Fatalf("file log missing length fields: %s", logs)
+	}
 }
