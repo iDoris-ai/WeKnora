@@ -69,7 +69,9 @@ func TestHybridSearchLogsQueryLengthNotText(t *testing.T) {
 	require.NotContains(t, logs, sentinel)
 	require.Contains(t, logs, "query_len=")
 	require.Contains(t, logs, "Failed to embed query text")
-	require.Contains(t, logs, "simulated retrieve failure")
+	require.Contains(t, logs, "error_len=")
+	require.Contains(t, logs, "error_type=")
+	require.NotContains(t, logs, "simulated retrieve failure")
 }
 
 func TestRetrieveSpanInputOmitsQueryText(t *testing.T) {

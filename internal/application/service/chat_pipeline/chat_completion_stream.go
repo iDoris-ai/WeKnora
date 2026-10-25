@@ -109,7 +109,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	if responseChan == nil {
 		pipelineError(ctx, "Stream", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
-			"error":      "nil_channel",
+			"reason":     "nil_channel",
 		})
 		return ErrModelCall.WithError(errors.New("chat stream returned nil channel"))
 	}

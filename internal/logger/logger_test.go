@@ -581,3 +581,30 @@ func TestConfigureFromEnvMakesStdlibLogLineSafe(t *testing.T) {
 		t.Fatalf("log.Writer() = %T, want lineSafeWriter", log.Writer())
 	}
 }
+
+func TestErrorWithFieldsOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	SetOutput(&buf)
+	SetLogLevel(LevelDebug)
+	t.Cleanup(ConfigureFromEnv)
+
+	ErrorWithFields(context.Background(), errors.New(sentinel), logrus.Fields{
+		"session_id": "sess-1",
+	})
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("ErrorWithFields leaked error text: %s", logs)
+	}
+	wantLen := fmt.Sprintf("error_len=%d", len(sentinel))
+	if !strings.Contains(logs, wantLen) {
+		t.Fatalf("log = %s, want %s", logs, wantLen)
+	}
+	if !strings.Contains(logs, "error_type=*errors.errorString") {
+		t.Fatalf("log = %s, want error_type=", logs)
+	}
+	if !strings.Contains(logs, "session_id=sess-1") {
+		t.Fatalf("log = %s, want session_id=sess-1", logs)
+	}
+}

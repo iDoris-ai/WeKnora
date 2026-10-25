@@ -21,8 +21,12 @@ func Recovery() gin.HandlerFunc {
 				// Print stacktrace
 				stacktrace := debug.Stack()
 				// Log error with structured logger
-				logger.ErrorWithFields(ctx, fmt.Errorf("panic: %s", logger.PanicValue(err)), logrus.Fields{
+				// PanicValue is already reduced to the value's type and length; ErrorWithFields keeps only the
+				// length of the error text (A24-OBS-16), so the description goes in its own field.
+				panicValue := logger.PanicValue(err)
+				logger.ErrorWithFields(ctx, fmt.Errorf("panic: %s", panicValue), logrus.Fields{
 					"request_id": requestID,
+					"panic":      panicValue,
 					"stacktrace": string(stacktrace),
 				})
 
