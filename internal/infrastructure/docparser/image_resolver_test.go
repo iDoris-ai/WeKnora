@@ -10,12 +10,15 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"log"
 	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	docclient "github.com/Tencent/WeKnora/docreader/client"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -632,5 +635,36 @@ func TestResolveAndStoreSharedMHTMLContract(t *testing.T) {
 	}
 	if !strings.Contains(out, "```\nline1\n\n\nline2\n```") {
 		t.Fatalf("fenced code blank lines changed: %s", out)
+	}
+}
+
+func TestResolveRemoteImagesLogEscapesNewlineInHTMLSrc(t *testing.T) {
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(logger.LineSafeWriter(&buf))
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	markdown := `<img src="https://example.invalid/x&#10;ERROR [forged] admin login ok">`
+	_, _, err := NewImageResolver().ResolveRemoteImages(context.Background(), markdown, &mockFileService{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Count(out, "\n") != 1 || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("want a single line, got %q", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "ERROR [forged]") {
+			t.Fatalf("forged log line: %q", out)
+		}
+	}
+	if !strings.Contains(out, `\nERROR [forged]`) {
+		t.Fatalf("newline in the image URL was not escaped: %q", out)
+	}
+}
+
+func TestDocReaderClientLoggerIsLineSafe(t *testing.T) {
+	if got := fmt.Sprintf("%T", docclient.Logger.Writer()); got != "logger.lineSafeWriter" {
+		t.Fatalf("docreader client logger writer = %s, want logger.lineSafeWriter", got)
 	}
 }
