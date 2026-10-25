@@ -466,6 +466,35 @@ func TestServiceRunDeniedLogOmitsPath(t *testing.T) {
 	require.Contains(t, logs, "path_len=")
 }
 
+// work_dir is a tool argument (A24-OBS-09): neither a refused work_dir nor the cwd resolved from an accepted
+// one reaches the log, only their lengths.
+func TestServiceRunWorkDirLogsOmitPath(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	project, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(project, sentinel), 0o755))
+	svc := serviceFixtureWithProjects(t, &fakeBackend{exit: ExitStatus{Code: 0}}, ModeAuto, fixedProject(project))
+
+	_, err = svc.Run(context.Background(), RunRequest{
+		SessionID: "s1", Command: "pwd", WorkDir: "/" + sentinel + "-outside",
+	})
+	require.Error(t, err)
+	_, err = svc.Run(context.Background(), RunRequest{
+		SessionID: "s1", Command: "pwd", WorkDir: filepath.Join(project, sentinel),
+	})
+	require.NoError(t, err)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "work_dir_len=")
+	require.Contains(t, logs, "cwd_len=")
+}
+
 // Two sessions on the same project share one directory. Overlapping Run
 // would let them stomp each other's files and git state.
 func TestServiceRunSerializesSharedProjectRoot(t *testing.T) {

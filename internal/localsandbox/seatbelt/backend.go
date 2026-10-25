@@ -122,14 +122,14 @@ func (b *seatbeltBackend) Spawn(
 	}
 	started := time.Now()
 	if err := execCmd.Start(); err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] seatbelt start cwd=%s: %v", cmd.Cwd, err)
+		logger.Errorf(ctx, "[LocalSandbox] seatbelt start cwd_len=%d: %v", len(cmd.Cwd), err)
 		return nil, fmt.Errorf("localsandbox: start sandboxed command: %w", err)
 	}
 	pid := 0
 	if execCmd.Process != nil {
 		pid = execCmd.Process.Pid
 	}
-	logger.Infof(ctx, "[LocalSandbox] seatbelt spawn pid=%d cwd=%s argv0=%s", pid, cmd.Cwd, cmd.Argv[0])
+	logger.Infof(ctx, "[LocalSandbox] seatbelt spawn pid=%d cwd_len=%d argv0=%s", pid, len(cmd.Cwd), cmd.Argv[0])
 
 	proc := &seatbeltProcess{
 		cmd:      execCmd,
