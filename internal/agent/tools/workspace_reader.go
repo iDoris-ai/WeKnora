@@ -167,8 +167,8 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 	ctx = sandbox.WithSessionFileOperation(ctx)
 	stat, err := t.source.StatSessionFile(ctx, sessionID, clean)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][ReadSandboxFile] stat failed: session=%s path=%s err=%v",
-			sessionID, clean, err)
+		logger.Warnf(ctx, "[Tool][ReadSandboxFile] stat failed: session=%s path_len=%d error_len=%d error_type=%T",
+			sessionID, len(clean), len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("failed to inspect %s before reading: %v", clean, err),
@@ -196,15 +196,15 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 		}, nil
 	}
 	if stat.Size > maxReadSandboxDownloadBytes {
-		logger.Infof(ctx, "[Tool][ReadSandboxFile] refused oversize file: session=%s path=%s size=%d limit=%d",
-			sessionID, clean, stat.Size, maxReadSandboxDownloadBytes)
+		logger.Infof(ctx, "[Tool][ReadSandboxFile] refused oversize file: session=%s path_len=%d size=%d limit=%d",
+			sessionID, len(clean), stat.Size, maxReadSandboxDownloadBytes)
 		return oversizedSandboxFileResult(sessionID, clean, rootDir, stat.Size), nil
 	}
 
 	data, err := t.readWithCache(ctx, sessionID, clean, stat)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][ReadSandboxFile] read failed: session=%s path=%s err=%v",
-			sessionID, clean, err)
+		logger.Warnf(ctx, "[Tool][ReadSandboxFile] read failed: session=%s path_len=%d error_len=%d error_type=%T",
+			sessionID, len(clean), len(err.Error()), err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("failed to read %s: %v", clean, err),
@@ -231,11 +231,13 @@ func sandboxImageResult(ctx context.Context, data []byte, sessionID, clean, root
 	}
 	prepared, err := imageprep.Prepare(data, searchutil.VisionImageLimits)
 	if err != nil {
-		logger.Infof(ctx, "[Tool][ReadSandboxFile] image not attached: session=%s path=%s err=%v",
-			sessionID, clean, err)
+		logger.Infof(ctx,
+			"[Tool][ReadSandboxFile] image not attached: session=%s path_len=%d error_len=%d error_type=%T",
+			sessionID, len(clean), len(err.Error()), err)
 		return nil
 	}
-	logger.Infof(ctx, "[Tool][ReadSandboxFile] session=%s path=%s size=%d image=%s", sessionID, clean, len(data), mime)
+	logger.Infof(ctx, "[Tool][ReadSandboxFile] session=%s path_len=%d size=%d image=%s",
+		sessionID, len(clean), len(data), mime)
 	return &types.ToolResult{
 		Success: true,
 		Output: fmt.Sprintf("=== File: %s ===\n\nsize=%d bytes, %s image attached for you to inspect. "+
@@ -329,8 +331,8 @@ func renderFilePage(ctx context.Context, input ReadFileInput, data []byte, sessi
 	total := int64(len(data))
 	// The file may have grown between Stat and Read.
 	if total > maxReadSandboxDownloadBytes {
-		logger.Warnf(ctx, "[Tool][ReadSandboxFile] file grew during read: session=%s path=%s size=%d limit=%d",
-			sessionID, clean, total, maxReadSandboxDownloadBytes)
+		logger.Warnf(ctx, "[Tool][ReadSandboxFile] file grew during read: session=%s path_len=%d size=%d limit=%d",
+			sessionID, len(clean), total, maxReadSandboxDownloadBytes)
 		return oversizedSandboxFileResult(sessionID, clean, rootDir, total)
 	}
 	return renderFileContent(ctx, input, data, sessionID, clean, rootDir)
@@ -371,7 +373,7 @@ func renderFileContent(
 		}
 		resultData["returned_bytes"] = 0
 		resultData["truncated"] = false
-		logger.Infof(ctx, "[Tool][ReadSandboxFile] session=%s path=%s size=%d binary", sessionID, clean, total)
+		logger.Infof(ctx, "[Tool][ReadSandboxFile] session=%s path_len=%d size=%d binary", sessionID, len(clean), total)
 		return &types.ToolResult{Success: true, Output: b.String(), Data: resultData}
 	}
 	if strings.TrimSpace(input.Query) != "" {
@@ -453,8 +455,8 @@ func renderFileContent(
 		resultData["next_offset"] = page.nextOffset
 	}
 
-	logger.Infof(ctx, "[Tool][ReadSandboxFile] session=%s path=%s size=%d lines=%d-%d/%d returned=%d",
-		sessionID, clean, total, page.startLine, page.endLine, page.totalLines, len(page.text))
+	logger.Infof(ctx, "[Tool][ReadSandboxFile] session=%s path_len=%d size=%d lines=%d-%d/%d returned=%d",
+		sessionID, len(clean), total, page.startLine, page.endLine, page.totalLines, len(page.text))
 
 	return &types.ToolResult{Success: true, Output: b.String(), Data: resultData}
 }
