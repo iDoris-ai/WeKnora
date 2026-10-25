@@ -66,10 +66,20 @@ func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24
 	}
 	// Storage and vector-store drivers return their network errors as is (the
 	// single-group fast path passes the retriever's error through), so a
-	// refused or reset connection there is a dependency failure too (R3.5).
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		if netErr.Timeout() {
+	// refused or reset connection, or a failed lookup, there is a dependency
+	// failure too (R3.5). Only these concrete types count: *url.Error is a
+	// net.Error as well, and a URL that does not parse is a configuration
+	// error (internal), not a failure worth retrying.
+	var opErr *net.OpError
+	var dnsErr *net.DNSError
+	switch {
+	case errors.As(err, &opErr):
+		if opErr.Timeout() {
+			return deadlineOr(), false
+		}
+		return agent24Unavailable("dependency"), false
+	case errors.As(err, &dnsErr):
+		if dnsErr.Timeout() {
 			return deadlineOr(), false
 		}
 		return agent24Unavailable("dependency"), false

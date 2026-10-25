@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"syscall"
@@ -207,6 +208,13 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED},
 	})
 	netTimeout := fmt.Errorf("retrieve: %w", &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded})
+	noHost := &url.Error{
+		Op: "Get", URL: "http://es.invalid", Err: &net.DNSError{Err: "no such host", Name: "es.invalid"},
+	}
+	// A URL that does not parse is a net.Error too (*url.Error), but a configuration error, not a dependency.
+	// What url.Parse("http://store.invalid/%zz") returns.
+	parseErr := &url.Error{Op: "parse", URL: "http://store.invalid/%zz", Err: url.EscapeError("%zz")}
+	badURL := fmt.Errorf("embed: %w", parseErr)
 	cases := []struct {
 		name   string
 		ctx    context.Context
@@ -236,6 +244,9 @@ func TestAgent24KnowledgeClassify(t *testing.T) {
 		{"expired store refused", expired, refused, agent24CodeUnavailable, "dependency"},
 		{"live store timeout", bg, netTimeout, agent24CodeUnavailable, "dependency"},
 		{"expired store timeout", expired, netTimeout, agent24CodeTimeout, ""},
+		{"store lookup failed", bg, noHost, agent24CodeUnavailable, "dependency"},
+		{"url does not parse", bg, badURL, agent24CodeInternal, ""},
+		{"expired url does not parse", expired, badURL, agent24CodeInternal, ""},
 		{"expired other", expired, errors.New("x"), agent24CodeInternal, ""},
 		{"secret", bg, errors.New("secret text"), agent24CodeInternal, ""},
 	}
