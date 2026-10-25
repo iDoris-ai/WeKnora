@@ -322,7 +322,7 @@ func (e *AgentEngine) executeToolCallsParallel(
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Errorf(ctx, "[Agent][Round-%d] Tool call %s panicked: %s\n%s",
-						round, tc.Function.Name, logger.PanicValue(r), debug.Stack())
+						round, e.loggedToolName(tc.Function.Name), logger.PanicValue(r), debug.Stack())
 					mu.Lock()
 					results[i] = panickedToolCall(tc, i)
 					mu.Unlock()
