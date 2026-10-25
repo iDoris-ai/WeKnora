@@ -477,7 +477,8 @@ func TestAgent24KnowledgeAuditMountedOutsideRecovery(t *testing.T) {
 		name := runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name()
 		switch {
 		// Inlining may report the closure under NewRouter (router.NewRouter.Recovery.func6), so match the tail.
-		case strings.Contains(name, ".Agent24KnowledgeAudit.func"):
+		// The audit closure is built by the unexported agent24KnowledgeAudit.
+		case strings.Contains(name, ".agent24KnowledgeAudit.func"):
 			audit = i
 		case strings.Contains(name, ".Recovery.func"):
 			recovery = i
