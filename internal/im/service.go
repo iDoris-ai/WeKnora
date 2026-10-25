@@ -2126,7 +2126,7 @@ func (s *Service) handleCommand(
 
 	result, err := cmd.Execute(ctx, cmdCtx, args)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] Command /%s error: %v", cmd.Name(), err)
+		logger.Errorf(ctx, "[IM] Command /%s error: error_len=%d error_type=%T", cmd.Name(), len(err.Error()), err)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 			Content: "抱歉，执行指令时出现了异常，请稍后再试。",
 			IsFinal: true,
@@ -3016,7 +3016,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		if !ok {
 			return nil
 		}
-		logger.Errorf(ctx, "[IM] QA error: %s", data.Error)
+		logger.Errorf(ctx, "[IM] QA error: error_len=%d stage=%s error_code=%s",
+			len(data.Error), data.Stage, data.ErrorCode)
 		answerMu.Lock()
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		answerMu.Unlock()
