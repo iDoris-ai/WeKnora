@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Config is everything the client needs, already resolved by the api.
@@ -213,6 +214,11 @@ func (c *Client) post(ctx context.Context, body map[string]any, want int) ([][]f
 		return nil, err
 	}
 	if decoded.Error != nil && decoded.Error.Message != "" {
+		// Agent24 A24-KB-21: under a processing guard the vendor message can echo the request,
+		// so the text keeps only its length. Without a guard the message is returned as it was.
+		if types.ProcessingGuardFromContext(ctx) != nil {
+			return nil, fmt.Errorf("embedding API error (message_len=%d)", len(decoded.Error.Message))
+		}
 		return nil, fmt.Errorf("embedding API error: %s", decoded.Error.Message)
 	}
 	return api.PlaceEmbeddings(want, len(decoded.Data), func(i int) (int, []float32) {

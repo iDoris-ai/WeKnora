@@ -456,3 +456,77 @@ func TestPolicyEmbedderErrorsOmitURLUnderGuard(t *testing.T) {
 		t.Fatalf("logs: %s", logs.String())
 	}
 }
+
+// A chunked reply whose trailer line does not parse makes ReadAll fail with that line in the error
+// (Go's textproto quotes a header line that has no colon). Under a guard the read stays a TransportError
+// and the text drops the server bytes; without a guard the same error still quotes them.
+func TestPolicyEmbedderReadResponseOmitsServerBytesUnderGuard(t *testing.T) {
+	allowLoopback(t)
+	saved := retryPolicy
+	retryPolicy = func() api.RetryPolicy { return api.RetryPolicy{MaxRetries: 0} }
+	t.Cleanup(func() { retryPolicy = saved })
+
+	const sentinel = "S3NT1NEL"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			return
+		}
+		conn, rw, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+			"Transfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\nS3NT1NEL-no-colon\r\n\r\n")
+		_ = rw.Flush()
+	}))
+	t.Cleanup(srv.Close)
+	cfg := Config{
+		Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m", BaseURL: srv.URL, APIKey: "k",
+	}
+	e, err := NewEmbedder(cfg, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guarded := types.WithProcessingGuard(context.Background(), &allowCountGuard{})
+	_, err = e.Embed(guarded, "q")
+	if err == nil || strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("guarded: err = %v", err)
+	}
+	var transportErr *api.TransportError
+	if !errors.As(err, &transportErr) || transportErr.Op != "read response" {
+		t.Fatalf("guarded: err = %v", err)
+	}
+	_, err = e.Embed(context.Background(), "q")
+	if err == nil || !strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("standalone keeps the error as it was: %v", err)
+	}
+}
+
+// HTTP 200 with an error envelope is the OpenAI embedding client (generic resolves to that protocol).
+// Under a guard the vendor message is replaced by its length; without a guard the message is kept.
+func TestPolicyEmbedderErrorEnvelopeOmitsMessageUnderGuard(t *testing.T) {
+	allowLoopback(t)
+	const sentinel = "S3NT1NEL"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"message":"S3NT1NEL"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	cfg := Config{
+		Source: types.ModelSourceRemote, Provider: "generic", ModelName: "m", BaseURL: srv.URL, APIKey: "k",
+	}
+	e, err := NewEmbedder(cfg, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Embed(types.WithProcessingGuard(context.Background(), &allowCountGuard{}), "q")
+	if err == nil || strings.Contains(err.Error(), sentinel) || !strings.Contains(err.Error(), "message_len=") {
+		t.Fatalf("guarded: err = %v", err)
+	}
+	_, err = e.Embed(context.Background(), "q")
+	if err == nil || !strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("standalone keeps the error as it was: %v", err)
+	}
+}

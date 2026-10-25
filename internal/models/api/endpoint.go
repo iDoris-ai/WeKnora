@@ -207,7 +207,8 @@ func processingRedact(ctx context.Context, err error) error {
 }
 
 // guardedProcessingClient is c with each redirect target checked against the
-// approved endpoint before the redirect policy c already has.
+// approved endpoint before the redirect policy c already has, and again after
+// that policy returns nil: the caller's CheckRedirect may have rewritten req.URL.
 func guardedProcessingClient(c *http.Client) *http.Client {
 	guarded := *c
 	next := c.CheckRedirect
@@ -216,7 +217,11 @@ func guardedProcessingClient(c *http.Client) *http.Client {
 			return err
 		}
 		if next != nil {
-			return next(req, via)
+			if err := next(req, via); err != nil {
+				return err
+			}
+			// Agent24 A24-KB-21: next may have rewritten req.URL after the check above.
+			return types.CheckProcessingRequestURL(req.Context(), req.URL.String())
 		}
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
@@ -256,7 +261,9 @@ func (e Endpoint) roundTrip(req *http.Request, out any) error {
 	if err != nil {
 		// The connection broke before the reply arrived whole: nothing was
 		// received, so this is the network failing, not the vendor answering.
-		return &TransportError{Op: "read response", Err: err}
+		// Agent24 A24-KB-21: a read error can quote bytes from the reply. Under a
+		// guard the text is redacted; the result stays a TransportError.
+		return &TransportError{Op: "read response", Err: processingRedact(req.Context(), err)}
 	}
 	if out == nil {
 		return nil

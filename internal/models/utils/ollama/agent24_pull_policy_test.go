@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/ollama/ollama/api"
 )
 
 type pullGuard struct {
@@ -199,6 +200,106 @@ func TestOllamaServiceStatusErrorOmitsBodyUnderGuard(t *testing.T) {
 		t.Fatalf("guarded: err = %v", err)
 	}
 	if _, err := svc.ListModels(context.Background()); err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("standalone keeps the error as it was: %v", err)
+	}
+}
+
+// progress.Status is text the server sent. Under a guard the pull log records its length; without a guard
+// the same status is logged as it was.
+func TestPullModelLogsOmitStatusTextUnderGuard(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.WriteHeader(http.StatusOK)
+		case "/api/tags":
+			_, _ = w.Write([]byte(`{"models":[]}`))
+		case "/api/pull":
+			// One line with progress counts and one without: both log branches are exercised.
+			_, _ = w.Write([]byte(`{"status":"pulling S3NT1NEL","total":10,"completed":5}` + "\n" +
+				`{"status":"verifying S3NT1NEL"}` + "\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("OLLAMA_BASE_URL", srv.URL)
+	t.Setenv("OLLAMA_OPTIONAL", "")
+	svc, err := GetOllamaService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.SetLogLevel(logger.LevelDebug)
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	guarded := types.WithProcessingGuard(context.Background(), &pullGuard{allow: true})
+	if err := svc.PullModel(guarded, "m"); err != nil {
+		t.Fatalf("guarded PullModel: %v", err)
+	}
+	if strings.Contains(logs.String(), sentinel) || strings.Count(logs.String(), "status_len=") != 2 {
+		t.Fatalf("guarded logs: %s", logs.String())
+	}
+	logs.Reset()
+	if err := svc.PullModel(context.Background(), "m"); err != nil {
+		t.Fatalf("standalone PullModel: %v", err)
+	}
+	if strings.Count(logs.String(), sentinel) != 2 {
+		t.Fatalf("standalone logs: %s", logs.String())
+	}
+}
+
+// A reply body that echoes the request is not quoted from GetVersion under a guard. The StatusError still
+// classifies. Without a guard the body is kept.
+func TestOllamaGetVersionOmitsBodyUnderGuard(t *testing.T) {
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"unknown S3NT1NEL `+r.URL.Path+`"}`, http.StatusNotFound)
+	}))
+	t.Cleanup(echo.Close)
+	t.Setenv("OLLAMA_BASE_URL", echo.URL)
+	t.Setenv("OLLAMA_OPTIONAL", "")
+	svc, err := GetOllamaService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.GetVersion(types.WithProcessingGuard(context.Background(), &pullGuard{allow: true}))
+	if err == nil || strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("guarded: err = %v", err)
+	}
+	var statusErr api.StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("guarded: the status no longer classifies: %v", err)
+	}
+	_, err = svc.GetVersion(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("standalone keeps the error as it was: %v", err)
+	}
+}
+
+// A reply body that echoes the request is not quoted from GetModelInfo under a guard. The StatusError still
+// classifies. Without a guard the body is kept.
+func TestOllamaGetModelInfoOmitsBodyUnderGuard(t *testing.T) {
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"unknown S3NT1NEL `+r.URL.Path+`"}`, http.StatusNotFound)
+	}))
+	t.Cleanup(echo.Close)
+	t.Setenv("OLLAMA_BASE_URL", echo.URL)
+	t.Setenv("OLLAMA_OPTIONAL", "")
+	svc, err := GetOllamaService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.GetModelInfo(types.WithProcessingGuard(context.Background(), &pullGuard{allow: true}), "m")
+	if err == nil || strings.Contains(err.Error(), "S3NT1NEL") {
+		t.Fatalf("guarded: err = %v", err)
+	}
+	var statusErr api.StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("guarded: the status no longer classifies: %v", err)
+	}
+	_, err = svc.GetModelInfo(context.Background(), "m")
+	if err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
 		t.Fatalf("standalone keeps the error as it was: %v", err)
 	}
 }

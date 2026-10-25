@@ -234,10 +234,20 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 
 	err = s.client.Pull(ctx, pullReq, func(progress api.ProgressResponse) error {
 		if progress.Status != "" {
+			// Agent24 A24-KB-21: Status is text the server sent. Under a processing guard the log
+			// records its length; the percentage is unchanged. Without a guard the status is logged as it was.
+			guarded := types.ProcessingGuardFromContext(ctx) != nil
 			if progress.Total > 0 && progress.Completed > 0 {
 				percentage := float64(progress.Completed) / float64(progress.Total) * 100
-				logger.GetLogger(ctx).Infof("Pull progress: %s (%.2f%%)",
-					progress.Status, percentage)
+				if guarded {
+					logger.GetLogger(ctx).Infof("Pull progress: status_len=%d (%.2f%%)",
+						len(progress.Status), percentage)
+				} else {
+					logger.GetLogger(ctx).Infof("Pull progress: %s (%.2f%%)",
+						progress.Status, percentage)
+				}
+			} else if guarded {
+				logger.GetLogger(ctx).Infof("Pull status: status_len=%d", len(progress.Status))
 			} else {
 				logger.GetLogger(ctx).Infof("Pull status: %s", progress.Status)
 			}
@@ -307,7 +317,7 @@ func (s *OllamaService) GetVersion(ctx context.Context) (string, error) {
 
 	version, err := s.client.Version(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to get Ollama version: %w", err)
+		return "", fmt.Errorf("failed to get Ollama version: %w", processingSafeErr(ctx, err))
 	}
 	return version, nil
 }
@@ -340,7 +350,7 @@ func (s *OllamaService) GetModelInfo(ctx context.Context, modelName string) (*ap
 
 	resp, err := s.client.Show(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get model information: %w", err)
+		return nil, fmt.Errorf("failed to get model information: %w", processingSafeErr(ctx, err))
 	}
 
 	return resp, nil
