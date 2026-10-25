@@ -1,9 +1,12 @@
 package logger
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"log/slog"
 	"runtime"
 	"strings"
 	"testing"
@@ -12,6 +15,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
 )
+
+// sentinelRuntimeError implements runtime.Error but lives outside package runtime.
+type sentinelRuntimeError struct{}
+
+func (sentinelRuntimeError) RuntimeError() {}
+
+func (sentinelRuntimeError) Error() string { return "boom S3NT1NEL" }
 
 func newEntry(level logrus.Level, msg string, data logrus.Fields) *logrus.Entry {
 	e := logrus.NewEntry(logrus.New())
@@ -396,7 +406,7 @@ func TestPanicValue(t *testing.T) {
 	}
 
 	const sentinel = "S3NT1NEL"
-	for _, r := range []any{errors.New(sentinel), sentinel} {
+	for _, r := range []any{errors.New(sentinel), sentinel, sentinelRuntimeError{}} {
 		got := PanicValue(r)
 		if strings.Contains(got, sentinel) {
 			t.Fatalf("PanicValue(%T) = %q, contains sentinel", r, got)
@@ -405,5 +415,163 @@ func TestPanicValue(t *testing.T) {
 		if !strings.Contains(got, typeName) {
 			t.Fatalf("PanicValue(%T) = %q, want type name %s", r, got, typeName)
 		}
+	}
+
+	checkRuntime := func(name string, fn func()) {
+		t.Helper()
+		var got, want string
+		func() {
+			defer func() {
+				r := recover()
+				re, ok := r.(runtime.Error)
+				if !ok {
+					t.Fatalf("%s: panic type %T, want runtime.Error", name, r)
+				}
+				got = PanicValue(r)
+				want = re.Error()
+			}()
+			fn()
+		}()
+		if got == "" {
+			t.Fatalf("%s: did not panic", name)
+		}
+		if got != want {
+			t.Fatalf("%s: PanicValue = %q, want %q", name, got, want)
+		}
+	}
+	checkRuntime("nil map", func() {
+		m := nilMap()
+		m["k"] = 1
+	})
+	checkRuntime("index", func() {
+		var s []int
+		_ = s[1]
+	})
+	checkRuntime("type assert", func() {
+		var i any = 1
+		_ = i.(string)
+	})
+}
+
+// nilMap hides the nil from static analysis so the write panics at run time.
+func nilMap() map[string]int { return nil }
+
+func TestLineSafeWriterEscapesInteriorNewlines(t *testing.T) {
+	var buf bytes.Buffer
+	w := LineSafeWriter(&buf)
+	in := []byte("a\nERROR S3NT1NEL\r\n")
+	n, err := w.Write(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(in) {
+		t.Fatalf("Write n = %d, want %d", n, len(in))
+	}
+	got := buf.String()
+	if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("want a single trailing newline, got %q", got)
+	}
+	if !strings.Contains(got, `a\nERROR S3NT1NEL\r`) {
+		t.Fatalf("escaped output = %q", got)
+	}
+
+	buf.Reset()
+	in = []byte("a\nERROR S3NT1NEL")
+	n, err = w.Write(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(in) {
+		t.Fatalf("Write n = %d, want %d", n, len(in))
+	}
+	got = buf.String()
+	if strings.Contains(got, "\n") {
+		t.Fatalf("output added a newline: %q", got)
+	}
+	if got != `a\nERROR S3NT1NEL` {
+		t.Fatalf("escaped output = %q", got)
+	}
+}
+
+func TestStdlibLogIsLineSafe(t *testing.T) {
+	prev := log.Writer()
+	var buf bytes.Buffer
+	log.SetOutput(LineSafeWriter(&buf))
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	log.Printf("x %s", "a\nERROR forged")
+	got := buf.String()
+	if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("stdlib log want a single line, got %q", got)
+	}
+
+	buf.Reset()
+	slog.Info("m", "panic", "a\nb")
+	got = buf.String()
+	if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("slog.Default want a single line, got %q", got)
+	}
+}
+
+func TestFormatEscapesFieldKeys(t *testing.T) {
+	entry := newEntry(logrus.ErrorLevel, "hello", logrus.Fields{
+		"x\nERROR forged": 1,
+	})
+	cases := []struct {
+		name string
+		f    *CustomFormatter
+	}{
+		{name: "default", f: &CustomFormatter{}},
+		{name: "color", f: &CustomFormatter{ForceColor: true}},
+		{name: "template", f: &CustomFormatter{Template: "[%d] %level %logger %traceId | %msg"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tc.f.Format(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(out)
+			if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+				t.Fatalf("want a single trailing newline, got %q", got)
+			}
+		})
+	}
+}
+
+func TestFormatEscapesCaller(t *testing.T) {
+	entry := newEntry(logrus.InfoLevel, "hello", logrus.Fields{
+		"caller": "c.go:1\nERROR forged",
+	})
+	cases := []struct {
+		name string
+		f    *CustomFormatter
+	}{
+		{name: "default", f: &CustomFormatter{}},
+		{name: "color", f: &CustomFormatter{ForceColor: true}},
+		{name: "template", f: &CustomFormatter{Template: "[%d] %level %logger %traceId | %msg"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tc.f.Format(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(out)
+			if strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+				t.Fatalf("want a single trailing newline, got %q", got)
+			}
+		})
+	}
+}
+
+func TestConfigureFromEnvMakesStdlibLogLineSafe(t *testing.T) {
+	prev := log.Writer()
+	t.Cleanup(func() { log.SetOutput(prev) })
+	log.SetOutput(&bytes.Buffer{})
+
+	ConfigureFromEnv()
+	if _, ok := log.Writer().(lineSafeWriter); !ok {
+		t.Fatalf("log.Writer() = %T, want lineSafeWriter", log.Writer())
 	}
 }

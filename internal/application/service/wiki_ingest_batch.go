@@ -599,7 +599,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				retractOps++
 				retractHandled++
-				docPreview = append(docPreview, fmt.Sprintf("retract[%s]: %s (%d slugs)", previewText(op.KnowledgeID, 24), previewText(op.DocTitle, 48), len(slugSet)))
+				docPreview = append(docPreview, fmt.Sprintf("retract[%s]: title_len=%d (%d slugs)",
+					previewText(op.KnowledgeID, 24), len(op.DocTitle), len(slugSet)))
 
 				for slug := range slugSet {
 					slugUpdates[slug] = append(slugUpdates[slug], SlugUpdate{
@@ -623,7 +624,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			ingestOps++
 			mapMu.Unlock()
 
-			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
+			logger.Infof(mapCtx, "wiki ingest: processing document title_len=%d (%s)",
+				len(op.DocTitle), op.KnowledgeID)
 			result, updates, err := s.mapOneDocumentRecovered(mapCtx, chatModel, payload, op, batchCtx)
 			if err != nil {
 				mapMu.Lock()
@@ -642,7 +644,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				ingestSucceeded++
 				docResults = append(docResults, result)
-				docPreview = append(docPreview, fmt.Sprintf("ingest[%s]: title=%s summary=%s", previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40), previewText(result.Summary, 64)))
+				docPreview = append(docPreview, fmt.Sprintf("ingest[%s]: title_len=%d summary_len=%d",
+					previewText(result.KnowledgeID, 24), len(result.DocTitle), len(result.Summary)))
 				for _, u := range updates {
 					slugUpdates[u.Slug] = append(slugUpdates[u.Slug], u)
 				}
@@ -1735,8 +1738,9 @@ func (s *wikiIngestService) mapOneDocument(
 	}
 
 	logger.Infof(ctx,
-		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
-		knowledgeID, previewText(docTitle, 80),
+		"wiki ingest: mapped knowledge %s title_len=%d candidates=%d chunks=%d batches=%d cited_chunks=%d "+
+			"uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
+		knowledgeID, len(docTitle),
 		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, len(newSlugs),
 		len(updates), reparseOverlap, staleCount, pass0Failed,
 		time.Since(docStartedAt).Round(time.Millisecond),
