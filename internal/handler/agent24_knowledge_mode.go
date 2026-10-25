@@ -52,5 +52,8 @@ func ValidateAgent24IntegrationConfig(cfg *config.Config) error {
 	if _, err := Agent24KnowledgeTagKeyFromEnv(); err != nil {
 		return err
 	}
+	if _, err := agent24ProcessingPolicyFromEnv(); err != nil {
+		return err
+	}
 	return nil
 }

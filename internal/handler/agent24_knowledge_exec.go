@@ -14,6 +14,7 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // classifyAgent24KnowledgeExecError: clientGone means the caller aborted, write
@@ -23,6 +24,11 @@ import (
 func classifyAgent24KnowledgeExecError(ctx context.Context, err error) (*agent24KnowledgeError, bool) {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return nil, true
+	}
+	// A call-site guard refusal is policy_denied even when an AppError or an
+	// HTTP status wraps it. Cancellation still wins, above.
+	if errors.Is(err, types.ErrProcessingDenied) {
+		return agent24Forbidden("policy_denied"), false
 	}
 	ctxExpired := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	deadlineOr := func() *agent24KnowledgeError {
