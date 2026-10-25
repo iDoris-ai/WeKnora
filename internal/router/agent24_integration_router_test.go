@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -410,4 +411,52 @@ func TestAgent24StandaloneAuthEnvelopeNewRouter(t *testing.T) {
 		require.True(t, isString, w.Body.String())
 		require.Equal(t, "Forbidden: API key scope does not allow this operation", errText)
 	})
+}
+
+// agent24KnowledgeAuditStub records Log entries. Other AuditLogService methods panic if called.
+type agent24KnowledgeAuditStub struct {
+	interfaces.AuditLogService
+	mu      sync.Mutex
+	entries []*types.AuditLog
+}
+
+func (s *agent24KnowledgeAuditStub) Log(_ context.Context, entry *types.AuditLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *entry
+	cp.Details = append(types.JSON(nil), entry.Details...)
+	s.entries = append(s.entries, &cp)
+	return nil
+}
+
+// TestAgent24IntegrationKnowledgeAuditBeforeAuth guards A24-KB-16: an invalid key is rejected by Auth, and the
+// audit middleware (mounted before Auth) still records one unauthorized row.
+func TestAgent24IntegrationKnowledgeAuditBeforeAuth(t *testing.T) {
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+	audit := &agent24KnowledgeAuditStub{}
+	r := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		TenantAPIKeyService:           agent24RejectKeySvc{},
+		TenantService:                 agent24FakeTenantSvc{tenant: &types.Tenant{ID: 1}},
+		UserService:                   agent24FakeUserSvc{},
+		AuditLogService:               audit,
+		Agent24KnowledgeSearchHandler: &handler.Agent24KnowledgeSearchHandler{},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "sk-test")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	require.Len(t, audit.entries, 1)
+	var details struct {
+		Outcome string `json:"outcome"`
+	}
+	require.NoError(t, json.Unmarshal(audit.entries[0].Details, &details))
+	require.Equal(t, "unauthorized", details.Outcome)
+	require.Equal(t, "", audit.entries[0].ActorUserID)
+	require.Equal(t, "agent24_knowledge", audit.entries[0].ScopeType)
 }

@@ -205,8 +205,11 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 			"ingest": agent24OperationState{State: "disabled", Reason: "read_only_v1"},
 		},
 	}
+	var auditedScope []string
+	var resultCount int
 	if ids != nil {
 		kbs, err := h.scope.Resolve(pctx, ids)
+		resolved := err == nil
 		var out []gin.H
 		for i := 0; err == nil && i < len(kbs); i++ {
 			var f agent24KBIndexFacts
@@ -219,6 +222,9 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 		}
 		if err != nil {
 			logger.Warnf(ctx, "agent24 knowledge ready: scope: %v", err)
+			if resolved {
+				agent24NoteScope(c, agent24CollectedKBIDs(kbs))
+			}
 			writeAgent24KnowledgeError(c, agent24Unavailable("dependency"), echo)
 			return
 		}
@@ -227,6 +233,16 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 			return
 		}
 		resp["knowledge_bases"] = out
+		auditedScope = agent24CollectedKBIDs(kbs)
+		resultCount = len(out)
 	}
+	agent24NoteAudit(c, func(f *agent24AuditFacts) {
+		f.Echo = echo
+		f.Outcome = agent24AuditOK
+		f.ResultCount = resultCount
+		if len(auditedScope) > 0 {
+			f.EffectiveScope = auditedScope
+		}
+	})
 	c.JSON(http.StatusOK, resp)
 }

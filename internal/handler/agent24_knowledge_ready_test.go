@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -460,4 +461,291 @@ func TestAgent24KnowledgeReadyBodyLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+// agent24AuditStub records Log entries. Other AuditLogService methods panic if called.
+type agent24AuditStub struct {
+	interfaces.AuditLogService
+	mu      sync.Mutex
+	entries []*types.AuditLog
+}
+
+func (s *agent24AuditStub) Log(_ context.Context, entry *types.AuditLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *entry
+	cp.Details = append(types.JSON(nil), entry.Details...)
+	s.entries = append(s.entries, &cp)
+	return nil
+}
+
+// agent24AuditIdentity stands in for middleware.Auth: caller, principal and a tenant API key on the request.
+func agent24AuditIdentity(c *gin.Context) {
+	ctx := types.WithCaller(c.Request.Context(), types.Caller{TenantID: 9, UserID: "user-should-not-leak"})
+	p := types.Principal{Type: types.PrincipalAPITenant, ID: "principal-7"}
+	ctx = types.WithPrincipal(ctx, p)
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KeyID: 7})
+	c.Request = c.Request.WithContext(ctx)
+	c.Set(types.PrincipalContextKey.String(), p)
+	c.Next()
+}
+
+func agent24AuditServe(
+	t *testing.T, svc interfaces.AuditLogService, identity bool, path, body string, h gin.HandlerFunc,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(svc))
+	if identity {
+		r.Use(agent24AuditIdentity)
+	}
+	r.POST(path, h)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func agent24AuditBlob(t *testing.T, entry *types.AuditLog) string {
+	t.Helper()
+	raw, err := json.Marshal(entry)
+	require.NoError(t, err)
+	return string(raw)
+}
+
+func TestAgent24KnowledgeAuditSearch(t *testing.T) {
+	stub := &agent24AuditStub{}
+	e := newAgent24SearchEnv()
+	body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"S3NT1NEL",` +
+		`"scope":{"knowledge_base_ids":["b","a"]},"budget":` + agent24Budget + `}`
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/search", body, e.h.Search)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, types.AuditAction("knowledge.search"), entry.Action)
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, "agent24_knowledge", entry.ScopeType)
+	require.Equal(t, "", entry.ScopeID)
+	require.Equal(t, types.AuditOutcomeSuccess, entry.Outcome)
+
+	var details struct {
+		OccurredAt string  `json:"occurred_at"`
+		RequestID  *string `json:"request_id"`
+		Generation *int64  `json:"generation"`
+		Principal  *struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"principal"`
+		CredentialID   *string  `json:"credential_id"`
+		TenantID       *uint64  `json:"tenant_id"`
+		EffectiveScope []string `json:"effective_scope"`
+		Resource       struct {
+			ChunkIDs []string `json:"chunk_ids"`
+			Count    int      `json:"count"`
+		} `json:"resource"`
+		Revision []struct {
+			ChunkID        string `json:"chunk_id"`
+			SourceRevision string `json:"source_revision"`
+			IndexBuildID   string `json:"index_build_id"`
+			ChunkRevision  int    `json:"chunk_revision"`
+		} `json:"revision"`
+		Outcome  string `json:"outcome"`
+		Metering struct {
+			ResultCount   int `json:"result_count"`
+			BytesReturned int `json:"bytes_returned"`
+		} `json:"metering"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	occurred, err := time.Parse(time.RFC3339Nano, details.OccurredAt)
+	require.NoError(t, err)
+	require.Equal(t, time.UTC, occurred.Location())
+	require.Equal(t, "r1", *details.RequestID)
+	require.Equal(t, int64(7), *details.Generation)
+	require.Equal(t, "api_tenant", details.Principal.Type)
+	require.Equal(t, "principal-7", details.Principal.ID)
+	require.Equal(t, "key:7", *details.CredentialID)
+	require.Equal(t, uint64(9), *details.TenantID)
+	require.Equal(t, []string{"b", "a"}, details.EffectiveScope)
+	require.Equal(t, []string{"c2", "c1"}, details.Resource.ChunkIDs)
+	require.Equal(t, 2, details.Resource.Count)
+	require.Equal(t, 2, details.Metering.ResultCount)
+	require.Greater(t, details.Metering.BytesReturned, 0)
+	require.Equal(t, "ok", details.Outcome)
+	fp := agent24SourceFingerprint{}
+	require.Equal(t, "c2", details.Revision[0].ChunkID)
+	require.Equal(t, agent24SourceRevision(agent24TestKey, "k2", fp), details.Revision[0].SourceRevision)
+	require.Equal(t, agent24IndexBuildID(agent24TestKey, "k2", []string{"c2", "c7"}), details.Revision[0].IndexBuildID)
+	require.Equal(t, 0, details.Revision[0].ChunkRevision)
+	require.Equal(t, "c1", details.Revision[1].ChunkID)
+	require.Equal(t, agent24SourceRevision(agent24TestKey, "k1", fp), details.Revision[1].SourceRevision)
+	require.Equal(t, agent24IndexBuildID(agent24TestKey, "k1", []string{"c1"}), details.Revision[1].IndexBuildID)
+	require.Equal(t, 2, details.Revision[1].ChunkRevision)
+	blob := agent24AuditBlob(t, entry)
+	require.NotContains(t, blob, "S3NT1NEL")
+	require.NotContains(t, blob, "content_tag")
+	require.NotContains(t, blob, "user-should-not-leak")
+}
+
+func TestAgent24KnowledgeAuditRead(t *testing.T) {
+	stub := &agent24AuditStub{}
+	e := newAgent24ReadEnv()
+	doc := e.reads.docs["doc-1"]
+	doc.Chunks[1].Content = "S3NT1NEL"
+	e.reads.docs["doc-1"] = doc
+	tag := agent24ContentTag(agent24TestKey, "c2", "S3NT1NEL")
+	body := agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`, `"knowledge_id":"doc-1"`, `"chunk_id":"c2"`)
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/read", body, e.h.Read)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "S3NT1NEL")
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, types.AuditAction("knowledge.read"), entry.Action)
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, "agent24_knowledge", entry.ScopeType)
+	require.Equal(t, types.AuditOutcomeSuccess, entry.Outcome)
+
+	var details struct {
+		EffectiveScope []string `json:"effective_scope"`
+		Resource       struct {
+			KnowledgeID string   `json:"knowledge_id"`
+			ChunkIDs    []string `json:"chunk_ids"`
+		} `json:"resource"`
+		Revision struct {
+			SourceRevision string `json:"source_revision"`
+			IndexBuildID   string `json:"index_build_id"`
+			Segments       []struct {
+				ChunkID       string `json:"chunk_id"`
+				ChunkRevision int    `json:"chunk_revision"`
+			} `json:"segments"`
+		} `json:"revision"`
+		Outcome  string `json:"outcome"`
+		Metering struct {
+			ResultCount int `json:"result_count"`
+		} `json:"metering"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	require.Equal(t, "ok", details.Outcome)
+	require.Equal(t, []string{"a", "b"}, details.EffectiveScope)
+	require.Equal(t, "doc-1", details.Resource.KnowledgeID)
+	require.Equal(t, []string{"c2"}, details.Resource.ChunkIDs)
+	require.Equal(t, 1, details.Metering.ResultCount)
+	fp := agent24SourceFingerprint{FileHash: "h"}
+	require.Equal(t, agent24SourceRevision(agent24TestKey, "doc-1", fp), details.Revision.SourceRevision)
+	require.Equal(t, agent24IndexBuildID(agent24TestKey, "doc-1", []string{"c1", "c2", "c3"}),
+		details.Revision.IndexBuildID)
+	require.Equal(t, []string{"c2"}, []string{details.Revision.Segments[0].ChunkID})
+	require.Equal(t, 0, details.Revision.Segments[0].ChunkRevision)
+	blob := agent24AuditBlob(t, entry)
+	require.NotContains(t, blob, "S3NT1NEL")
+	require.NotContains(t, blob, tag)
+	require.NotContains(t, blob, "content_tag")
+}
+
+func TestAgent24KnowledgeAuditEmptyScope(t *testing.T) {
+	stub := &agent24AuditStub{}
+	e := newAgent24SearchEnv()
+	body := agent24SearchBody(`"x"`, agent24Budget)
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/search", body, e.h.Search)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, types.AuditOutcomeDenied, entry.Outcome)
+	var details struct {
+		Outcome string `json:"outcome"`
+		Reason  string `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	require.Equal(t, "forbidden", details.Outcome)
+	require.Equal(t, "empty_scope", details.Reason)
+}
+
+func TestAgent24KnowledgeAuditUnauthenticated(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, false, "/api/v1/agent24/knowledge/search", "", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, uint64(0), entry.TenantID)
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, types.AuditOutcomeDenied, entry.Outcome)
+	var details struct {
+		Principal    *struct{ Type, ID string } `json:"principal"`
+		CredentialID *string                    `json:"credential_id"`
+		TenantID     *uint64                    `json:"tenant_id"`
+		Outcome      string                     `json:"outcome"`
+		Reason       string                     `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	require.Equal(t, "unauthorized", details.Outcome)
+	require.Equal(t, "credential_invalid", details.Reason)
+	require.Nil(t, details.Principal)
+	require.Nil(t, details.CredentialID)
+	require.Nil(t, details.TenantID)
+	raw := string(entry.Details)
+	require.Contains(t, raw, `"principal":null`)
+	require.Contains(t, raw, `"credential_id":null`)
+	require.Contains(t, raw, `"tenant_id":null`)
+}
+
+// The integration credential gate rejects after Auth bound a caller (platform key, direct-mode tenant key):
+// R10.2 still records the identity as null for credential_invalid.
+func TestAgent24KnowledgeAuditCredentialInvalidAfterAuthIsAnonymous(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/search", "", func(c *gin.Context) {
+		writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), agent24KnowledgeEcho{})
+	})
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, uint64(0), entry.TenantID)
+	require.Equal(t, types.AuditOutcomeDenied, entry.Outcome)
+	raw := string(entry.Details)
+	require.Contains(t, raw, `"principal":null`)
+	require.Contains(t, raw, `"credential_id":null`)
+	require.Contains(t, raw, `"tenant_id":null`)
+	require.Contains(t, raw, `"reason":"credential_invalid"`)
+	require.NotContains(t, raw, "principal-7")
+}
+
+// A panic in the handler still leaves one row, as internal, and reaches Recovery.
+func TestAgent24KnowledgeAuditRecordsPanic(t *testing.T) {
+	stub := &agent24AuditStub{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(gin.CustomRecovery(func(c *gin.Context, _ any) { c.AbortWithStatus(http.StatusInternalServerError) }))
+	r.Use(Agent24KnowledgeAudit(stub))
+	r.Use(agent24AuditIdentity)
+	r.POST("/api/v1/agent24/knowledge/read", func(c *gin.Context) {
+		agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Outcome = agent24AuditOK })
+		panic("boom")
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/read", strings.NewReader("{}")))
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Len(t, stub.entries, 1)
+	require.Equal(t, types.AuditOutcomeFailed, stub.entries[0].Outcome)
+	require.Contains(t, string(stub.entries[0].Details), `"outcome":"internal"`)
+}
+
+func TestAgent24KnowledgeAuditSkipsOtherPaths(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, true, "/api/v1/other", "", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.Empty(t, stub.entries)
+}
+
+func TestAgent24KnowledgeAuditNilService(t *testing.T) {
+	require.NotPanics(t, func() {
+		w := agent24AuditServe(t, nil, false, "/api/v1/agent24/knowledge/ready", "", func(c *gin.Context) {
+			c.Status(http.StatusNoContent)
+		})
+		require.Equal(t, http.StatusNoContent, w.Code)
+	})
 }

@@ -1,0 +1,363 @@
+// Agent24 fork product patch A24-KB-16 (CONTRACT-READONLY-v1 r10 R10.1–R10.4, WeKnora#41).
+//
+// One audit row per POST /api/v1/agent24/knowledge/{ready,search,read}. The middleware sits outside Auth
+// so the row sees the status that was actually written, including a rejection the auth envelope rewrote.
+// Extra fields live in Details. ActorUserID stays empty (R10.4). The query, document text, snippets,
+// content_tag and raw credentials are not recorded (R10.3).
+
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+)
+
+const (
+	agent24AuditActionSearch types.AuditAction = "knowledge.search"
+	agent24AuditActionRead   types.AuditAction = "knowledge.read"
+	agent24AuditActionReady  types.AuditAction = "knowledge.ready"
+
+	agent24AuditScopeType = "agent24_knowledge"
+
+	agent24AuditOK        = "ok"
+	agent24AuditPartial   = "partial"
+	agent24AuditCancelled = "cancelled"
+
+	agent24AuditPathReady  = "/api/v1/agent24/knowledge/ready"
+	agent24AuditPathSearch = "/api/v1/agent24/knowledge/search"
+	agent24AuditPathRead   = "/api/v1/agent24/knowledge/read"
+
+	// agent24AuditFactsKey is the gin-context key for *agent24AuditFacts. Unexported: handlers in this
+	// package record through agent24NoteAudit, and the middleware is the only reader.
+	agent24AuditFactsKey = "agent24KnowledgeAuditFacts"
+)
+
+// agent24AuditFacts is what a handler records and the middleware reads back after c.Next.
+type agent24AuditFacts struct {
+	Echo           agent24KnowledgeEcho // request_id and generation; either pointer may be nil
+	Outcome        string               // ok, partial, an error code, or cancelled
+	Reason         string
+	EffectiveScope []string
+	Resource       any
+	Revision       any
+	ResultCount    int
+}
+
+type agent24AuditPrincipal struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type agent24AuditMetering struct {
+	LatencyMS     int64 `json:"latency_ms"`
+	ResultCount   int   `json:"result_count"`
+	BytesReturned int   `json:"bytes_returned"`
+}
+
+// agent24AuditDetails is the R10.1 whitelist. Absent values are JSON null; an empty reason is omitted.
+type agent24AuditDetails struct {
+	OccurredAt     string                 `json:"occurred_at"`
+	RequestID      *string                `json:"request_id"`
+	Generation     *int64                 `json:"generation"`
+	Principal      *agent24AuditPrincipal `json:"principal"`
+	CredentialID   *string                `json:"credential_id"`
+	TenantID       *uint64                `json:"tenant_id"`
+	EffectiveScope []string               `json:"effective_scope"`
+	Resource       any                    `json:"resource"`
+	Revision       any                    `json:"revision"`
+	Outcome        string                 `json:"outcome"`
+	Reason         string                 `json:"reason,omitempty"`
+	Metering       agent24AuditMetering   `json:"metering"`
+}
+
+// agent24NoteAudit creates the request's facts on first use, then lets f update them.
+func agent24NoteAudit(c *gin.Context, f func(*agent24AuditFacts)) {
+	var facts *agent24AuditFacts
+	if v, ok := c.Get(agent24AuditFactsKey); ok {
+		facts, _ = v.(*agent24AuditFacts)
+	}
+	if facts == nil {
+		facts = &agent24AuditFacts{}
+		c.Set(agent24AuditFactsKey, facts)
+	}
+	f(facts)
+}
+
+// agent24NoteCancelled records a client abort. scope is E when it was already computed, otherwise nil.
+func agent24NoteCancelled(c *gin.Context, echo agent24KnowledgeEcho, scope []string) {
+	agent24NoteAudit(c, func(f *agent24AuditFacts) {
+		f.Echo = echo
+		f.Outcome = agent24AuditCancelled
+		if len(scope) > 0 {
+			f.EffectiveScope = append([]string(nil), scope...)
+		}
+	})
+}
+
+// agent24NoteScope records E on an error that happened after the scope was computed. Empty is "no scope".
+func agent24NoteScope(c *gin.Context, scope []string) {
+	if len(scope) == 0 {
+		return
+	}
+	copied := append([]string(nil), scope...)
+	agent24NoteAudit(c, func(f *agent24AuditFacts) { f.EffectiveScope = copied })
+}
+
+// agent24CollectedKBIDs is E's ids in resolver order.
+func agent24CollectedKBIDs(kbs []*types.KnowledgeBase) []string {
+	ids := make([]string, len(kbs))
+	for i, kb := range kbs {
+		ids[i] = kb.ID
+	}
+	return ids
+}
+
+// agent24SearchAuditResource is the search whitelist: chunk ids and per-hit revision, without content_tag.
+func agent24SearchAuditResource(hits []agent24SearchHit) (any, any) {
+	ids := make([]string, 0, len(hits))
+	revs := make([]map[string]any, 0, len(hits))
+	for _, hit := range hits {
+		ids = append(ids, hit.ChunkID)
+		revs = append(revs, map[string]any{
+			"chunk_id":        hit.ChunkID,
+			"source_revision": hit.Revision.SourceRevision,
+			"index_build_id":  hit.Revision.IndexBuildID,
+			"chunk_revision":  hit.Revision.ChunkRevision,
+		})
+	}
+	return map[string]any{"chunk_ids": ids, "count": len(hits)}, revs
+}
+
+// agent24ReadAuditResource is the read whitelist: the document id, its two revision fields, and each
+// segment's chunk revision. Text and content_tag stay out.
+func agent24ReadAuditResource(knowledgeID string, rev agent24DocRevision, segs []agent24ReadSegment) (any, any) {
+	ids := make([]string, 0, len(segs))
+	parts := make([]map[string]any, 0, len(segs))
+	for _, seg := range segs {
+		ids = append(ids, seg.ChunkID)
+		parts = append(parts, map[string]any{
+			"chunk_id":       seg.ChunkID,
+			"chunk_revision": seg.ChunkRevision,
+		})
+	}
+	resource := map[string]any{"knowledge_id": knowledgeID, "chunk_ids": ids}
+	revision := map[string]any{
+		"source_revision": rev.SourceRevision,
+		"index_build_id":  rev.IndexBuildID,
+		"segments":        parts,
+	}
+	return resource, revision
+}
+
+// Agent24KnowledgeAudit writes one audit row for the three knowledge endpoints. A nil service, and every
+// other request, is passed through. Mount it outside Auth: Log runs after the handler chain, on a context
+// that ignores client cancellation, and Log's own error is ignored. A panic further down is recorded as
+// internal and then re-raised for Recovery.
+func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if svc == nil || !agent24KnowledgeAuditPath(c) {
+			c.Next()
+			return
+		}
+		started := time.Now()
+		defer func() {
+			rec := recover()
+			entry := agent24KnowledgeAuditEntry(c, started, rec != nil)
+			_ = svc.Log(context.WithoutCancel(c.Request.Context()), entry)
+			if rec != nil {
+				panic(rec)
+			}
+		}()
+		c.Next()
+	}
+}
+
+func agent24KnowledgeAuditPath(c *gin.Context) bool {
+	if c.Request.Method != http.MethodPost {
+		return false
+	}
+	switch c.Request.URL.Path {
+	case agent24AuditPathReady, agent24AuditPathSearch, agent24AuditPathRead:
+		return true
+	default:
+		return false
+	}
+}
+
+func agent24AuditAction(path string) types.AuditAction {
+	switch path {
+	case agent24AuditPathSearch:
+		return agent24AuditActionSearch
+	case agent24AuditPathRead:
+		return agent24AuditActionRead
+	default:
+		return agent24AuditActionReady
+	}
+}
+
+func agent24AuditColumnOutcome(outcome string) types.AuditOutcome {
+	switch outcome {
+	case agent24AuditOK:
+		return types.AuditOutcomeSuccess
+	case agent24AuditPartial:
+		return types.AuditOutcomePartial
+	case agent24AuditCancelled:
+		return types.AuditOutcomeCanceled
+	case string(agent24CodeUnauthorized), string(agent24CodeForbidden):
+		return types.AuditOutcomeDenied
+	default:
+		return types.AuditOutcomeFailed
+	}
+}
+
+// agent24AuditInfer classifies a request that recorded no facts. A 401 with no reason is credential_invalid.
+func agent24AuditInfer(c *gin.Context) (outcome, reason string) {
+	if c.Writer.Status() == http.StatusUnauthorized {
+		return string(agent24CodeUnauthorized), "credential_invalid"
+	}
+	if errors.Is(c.Request.Context().Err(), context.Canceled) {
+		return agent24AuditCancelled, ""
+	}
+	return string(agent24CodeInternal), ""
+}
+
+func agent24GinPrincipal(c *gin.Context) (types.Principal, bool) {
+	v, ok := c.Get(types.PrincipalContextKey.String())
+	if !ok {
+		return types.Principal{}, false
+	}
+	p, ok := v.(types.Principal)
+	return p, ok
+}
+
+// agent24AuditAnonymous: R10.2 records principal, credential_id and tenant_id as null for credential_missing
+// and credential_invalid, even when Auth had already bound them (the integration credential gate rejects
+// platform keys and direct-mode tenant keys after Auth).
+func agent24AuditAnonymous(outcome, reason string) bool {
+	return outcome == string(agent24CodeUnauthorized) &&
+		(reason == "" || reason == "credential_missing" || reason == "credential_invalid")
+}
+
+func agent24KnowledgeAuditEntry(c *gin.Context, started time.Time, panicked bool) *types.AuditLog {
+	var facts *agent24AuditFacts
+	if v, ok := c.Get(agent24AuditFactsKey); ok {
+		facts, _ = v.(*agent24AuditFacts)
+	}
+	outcome, reason := "", ""
+	switch {
+	case panicked:
+		outcome = string(agent24CodeInternal)
+	case facts != nil && facts.Outcome != "":
+		outcome, reason = facts.Outcome, facts.Reason
+	default:
+		outcome, reason = agent24AuditInfer(c)
+	}
+	path := c.FullPath()
+	if path == "" {
+		path = c.Request.URL.Path
+	}
+	anonymous := agent24AuditAnonymous(outcome, reason)
+	raw, err := json.Marshal(agent24AuditDetail(c, facts, outcome, reason, started, anonymous))
+	if err != nil {
+		raw = []byte("{}")
+	}
+	var tenant uint64
+	if !anonymous {
+		tenant = agent24AuditTenantColumn(c)
+	}
+	return &types.AuditLog{
+		TenantID:      tenant,
+		ActorUserID:   "", // R10.4: not a user row, and not a synthesized one
+		Action:        agent24AuditAction(c.Request.URL.Path),
+		ScopeType:     agent24AuditScopeType,
+		RequestPath:   path,
+		RequestMethod: c.Request.Method,
+		Outcome:       agent24AuditColumnOutcome(outcome),
+		Details:       types.JSON(raw),
+	}
+}
+
+// agent24AuditTenantColumn is the caller's tenant after authentication, otherwise 0 (the column is NOT NULL;
+// Details carries null for that case).
+func agent24AuditTenantColumn(c *gin.Context) uint64 {
+	if _, ok := c.Request.Context().Value(types.CallerContextKey).(types.Caller); !ok {
+		return 0
+	}
+	return types.CallerFromContext(c.Request.Context()).TenantID
+}
+
+func agent24AuditDetail(
+	c *gin.Context, facts *agent24AuditFacts, outcome, reason string, started time.Time, anonymous bool,
+) agent24AuditDetails {
+	var echo agent24KnowledgeEcho
+	var resource, revision any
+	var scope []string
+	count := 0
+	if facts != nil {
+		echo = facts.Echo
+		resource, revision = facts.Resource, facts.Revision
+		if len(facts.EffectiveScope) > 0 {
+			scope = facts.EffectiveScope
+		}
+		count = facts.ResultCount
+	}
+	n := c.Writer.Size()
+	if n < 0 {
+		n = 0
+	}
+	d := agent24AuditDetails{
+		OccurredAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		RequestID:      echo.RequestID,
+		Generation:     echo.Generation,
+		EffectiveScope: scope,
+		Resource:       resource,
+		Revision:       revision,
+		Outcome:        outcome,
+		Reason:         reason,
+		Metering: agent24AuditMetering{
+			LatencyMS: time.Since(started).Milliseconds(), ResultCount: count, BytesReturned: n,
+		},
+	}
+	if !anonymous {
+		d.Principal = agent24AuditPrincipalOf(c)
+		d.CredentialID = agent24AuditCredentialID(c)
+		d.TenantID = agent24AuditTenantDetail(c)
+	}
+	return d
+}
+
+func agent24AuditPrincipalOf(c *gin.Context) *agent24AuditPrincipal {
+	p, ok := agent24GinPrincipal(c)
+	if !ok {
+		return nil
+	}
+	return &agent24AuditPrincipal{Type: p.Type, ID: p.ID}
+}
+
+// agent24AuditCredentialID is "key:<id>" for a tenant API key. JWT jti is filled by a later slice, so every
+// other credential is null here.
+func agent24AuditCredentialID(c *gin.Context) *string {
+	scope, ok := types.TenantAPIKeyScopeFromContext(c.Request.Context())
+	if !ok || scope.KeyID == 0 {
+		return nil
+	}
+	id := fmt.Sprintf("key:%d", scope.KeyID)
+	return &id
+}
+
+func agent24AuditTenantDetail(c *gin.Context) *uint64 {
+	if _, ok := c.Request.Context().Value(types.CallerContextKey).(types.Caller); !ok {
+		return nil
+	}
+	id := types.CallerFromContext(c.Request.Context()).TenantID
+	return &id
+}
