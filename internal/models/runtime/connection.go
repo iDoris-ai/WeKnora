@@ -55,24 +55,44 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 		BaseURL: r.BaseURL, Model: r.RemoteModel, ModelID: c.ModelID,
 		Auth: v.AuthFunc(protocol, creds), Headers: headers, Client: c.Client,
 	}
-	if v.Endpoint != nil {
-		req := providers.EndpointRequest{
-			BaseURL:   r.BaseURL,
-			Model:     r.RemoteModel,
-			ModelType: kind,
-			API:       protocol,
-			Extra:     c.Extra,
-		}
-		if kind == types.ModelTypeEmbedding {
-			req.EmbeddingAPI = r.EmbeddingAPI
-		}
-		// Preserve historical rerank hook input; its routing uses ModelType.
-		if kind == types.ModelTypeRerank {
-			req.API = ""
-		}
-		if url, query := v.Endpoint(req); url != "" {
-			ep.URL, ep.Query = url, query
-		}
+	if url, query := r.vendorEndpoint(kind, protocol, c.Extra); url != "" {
+		ep.URL, ep.Query = url, query
 	}
 	return ep, nil
+}
+
+// vendorEndpoint runs the vendor's Endpoint hook, if any; an empty url means the client builds its URL from
+// BaseURL.
+func (r *Resolved) vendorEndpoint(kind types.ModelType, protocol api.API, extra map[string]string) (
+	string, map[string]string,
+) {
+	if r.Vendor.Endpoint == nil {
+		return "", nil
+	}
+	req := providers.EndpointRequest{
+		BaseURL:   r.BaseURL,
+		Model:     r.RemoteModel,
+		ModelType: kind,
+		API:       protocol,
+		Extra:     extra,
+	}
+	if kind == types.ModelTypeEmbedding {
+		req.EmbeddingAPI = r.EmbeddingAPI
+	}
+	// Preserve historical rerank hook input; its routing uses ModelType.
+	if kind == types.ModelTypeRerank {
+		req.API = ""
+	}
+	return r.Vendor.Endpoint(req)
+}
+
+// EmbeddingDialTarget is what an embedding client built by Endpoint sends to, computed without credentials or
+// network access (Agent24 A24-KB-17): the vendor hook's URL when it gives one, otherwise BaseURL, and the
+// remote model name.
+func (r *Resolved) EmbeddingDialTarget(extra map[string]string) (url, model string) {
+	url, _ = r.vendorEndpoint(types.ModelTypeEmbedding, r.Vendor.API, extra)
+	if url == "" {
+		url = r.BaseURL
+	}
+	return url, r.RemoteModel
 }
