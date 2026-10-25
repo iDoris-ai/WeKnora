@@ -1102,7 +1102,7 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: error_len=%d error_type=%T, "+
-			"falling back to fixed response", len(err.Error()), err)
+			"falling back to fixed response", len(fmt.Sprint(err)), err)
 		s.handleFixedFallback(ctx, chatManage)
 		return
 	}

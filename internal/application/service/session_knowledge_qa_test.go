@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -190,6 +191,24 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
 }
 
+// lockedLogBuffer is a log sink that can be read while another goroutine writes to it.
+type lockedLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // streamFailChat fails ChatStream with err.
 type streamFailChat struct {
 	captureChatModel
@@ -205,8 +224,9 @@ func (m *streamFailChat) ChatStream(
 // A vendor's error reply can echo the question; the fallback's start-failure log keeps its length and type.
 func TestHandleModelFallback_StreamFailureLogOmitsErrorText(t *testing.T) {
 	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
+	// A fallback stream from an earlier test may still log; the lock keeps its write apart from the read below.
+	buf := &lockedLogBuffer{}
+	logger.SetOutput(buf)
 	logger.SetLogLevel(logger.LevelDebug)
 	t.Cleanup(logger.ConfigureFromEnv)
 
