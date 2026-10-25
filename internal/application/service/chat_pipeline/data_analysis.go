@@ -95,7 +95,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	// Load data into DuckDB
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get data schema: %v", err)
+		logger.Errorf(ctx, "Failed to get data schema: error_len=%d error_type=%T", len(err.Error()), err)
 		return next()
 	}
 
@@ -112,6 +112,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		pipelineWarn(ctx, "DataAnalysis", "analysis_failed", map[string]interface{}{
 			"knowledge_id": knowledge.ID,
 			"error_len":    len(err.Error()),
+			"error_type":   fmt.Sprintf("%T", err),
 		})
 		return next()
 	}

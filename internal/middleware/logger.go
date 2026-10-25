@@ -3,12 +3,14 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -276,7 +278,11 @@ func Logger() gin.HandlerFunc {
 			logMsg = logMsg.WithField("response_body", secutils.SanitizeForLog(responseBodyStr))
 		}
 		if last := c.Errors.Last(); last != nil && last.Err != nil {
-			logMsg = logMsg.WithField("error", secutils.SanitizeForLog(last.Err.Error()))
+			logMsg = logMsg.WithField("error_type", fmt.Sprintf("%T", last.Err))
+			logMsg = logMsg.WithField("error_len", len(last.Err.Error()))
+			if appErr, ok := errors.IsAppError(last.Err); ok {
+				logMsg = logMsg.WithField("error_code", appErr.Code)
+			}
 		}
 		switch {
 		case statusCode >= 500:
