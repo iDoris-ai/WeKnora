@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -85,4 +86,29 @@ func TestEmptyVectorIsAnError(t *testing.T) {
 
 	_, err := newClient(server.URL+endpoint, 0).Embed(context.Background(), []string{"a"}, api.EmbedDocument)
 	require.Error(t, err)
+}
+
+type allowGuard struct{}
+
+func (allowGuard) Allow(context.Context, types.ProcessingDestination) error { return nil }
+
+// Under a processing guard the in-body error's code and message stay out of the error text (Agent24
+// A24-KB-21); without a guard both are kept.
+func TestInBodyErrorOmittedUnderGuard(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"error":{"code":"C0DE-S3NT1NEL","message":"S3NT1NEL quota"}}`))
+	}))
+	defer server.Close()
+	client := newClient(server.URL+endpoint, 0)
+	approved, err := types.NormalizeProcessingEndpoint(server.URL)
+	require.NoError(t, err)
+	ctx := types.WithProcessingApprovedEndpoint(types.WithProcessingGuard(context.Background(), allowGuard{}), approved)
+
+	_, err = client.Embed(ctx, []string{"a"}, api.EmbedDocument)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "S3NT1NEL")
+	assert.Contains(t, err.Error(), "code_len=13 message_len=")
+	_, err = client.Embed(context.Background(), []string{"a"}, api.EmbedDocument)
+	require.ErrorContains(t, err, "S3NT1NEL")
 }
