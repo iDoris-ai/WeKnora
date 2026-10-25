@@ -151,7 +151,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if folderPath != "" {
 		safeFolderPath, folderValid := secutils.ValidateInput(folderPath)
 		if !folderValid {
-			logger.Errorf(ctx, "Invalid folder path: %s", folderPath)
+			logger.Errorf(ctx, "Invalid folder path: folder_path_len=%d", len(folderPath))
 			return nil, werrors.NewValidationError("文件夹路径包含非法字符")
 		}
 		folderPath = types.NormalizeKnowledgeFolderPath(safeFolderPath)

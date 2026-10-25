@@ -564,8 +564,9 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
 		if enumErr != nil {
 			logger.Warnf(ctx,
-				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
-				filename, t.sessionID, enumErr,
+				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): "+
+					"error_len=%d error_type=%T. Falling back to first sheet only.",
+				filename, t.sessionID, len(enumErr.Error()), enumErr,
 			)
 		}
 		if enumErr == nil && len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {

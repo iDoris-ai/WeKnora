@@ -893,8 +893,8 @@ func (s *DataSourceService) applyFetchedItem(
 			ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
 		)
 		if lookupErr != nil {
-			logger.Errorf(ctx, "failed to find deleted knowledge for external_id=%s (ds=%s, kb=%s): %v",
-				item.ExternalID, ds.ID, ds.KnowledgeBaseID, lookupErr)
+			logger.Errorf(ctx, "failed to find deleted knowledge for external_id_len=%d (ds=%s, kb=%s): %v",
+				len(item.ExternalID), ds.ID, ds.KnowledgeBaseID, lookupErr)
 			result.Failed++
 			result.DeletionFailed++
 			recordSyncError(result, types.SyncItemError{
@@ -916,8 +916,8 @@ func (s *DataSourceService) applyFetchedItem(
 			// sync-log message can warn the operator about this gap.
 			result.Failed++
 			result.DeletionFailed++
-			logger.Errorf(ctx, "failed to delete knowledge %s for external_id=%s (ds=%s): %v",
-				existing.ID, item.ExternalID, ds.ID, deleteErr)
+			logger.Errorf(ctx, "failed to delete knowledge %s for external_id_len=%d (ds=%s): %v",
+				existing.ID, len(item.ExternalID), ds.ID, deleteErr)
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_failed",
@@ -928,8 +928,8 @@ func (s *DataSourceService) applyFetchedItem(
 		if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
 			result.Failed++
 			result.DeletionFailed++
-			logger.Errorf(ctx, "failed to hard-delete knowledge %s for external_id=%s (ds=%s): %v",
-				existing.ID, item.ExternalID, ds.ID, herr)
+			logger.Errorf(ctx, "failed to hard-delete knowledge %s for external_id_len=%d (ds=%s): %v",
+				existing.ID, len(item.ExternalID), ds.ID, herr)
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_failed",
@@ -944,13 +944,13 @@ func (s *DataSourceService) applyFetchedItem(
 	if len(item.Content) == 0 && item.URL == "" {
 		// Check if this is an error item from the connector (failed to fetch content)
 		if errMsg, hasErr := item.Metadata["error"]; hasErr {
-			logger.Warnf(ctx, "item title_len=%d (external_id=%s) fetch failed: error_len=%d",
-				len(item.Title), item.ExternalID, len(errMsg))
+			logger.Warnf(ctx, "item title_len=%d (external_id_len=%d) fetch failed: error_len=%d",
+				len(item.Title), len(item.ExternalID), len(errMsg))
 			result.Failed++
 			recordSyncError(result, fetchFailureSyncError(item, errMsg))
 		} else {
-			logger.Infof(ctx, "skipping item title_len=%d (external_id=%s): no content or URL",
-				len(item.Title), item.ExternalID)
+			logger.Infof(ctx, "skipping item title_len=%d (external_id_len=%d): no content or URL",
+				len(item.Title), len(item.ExternalID))
 			result.Skipped++
 		}
 		return
@@ -962,8 +962,8 @@ func (s *DataSourceService) applyFetchedItem(
 		switch {
 		case errors.As(err, &dupErr):
 			// Duplicate file/URL is not a failure — count as skipped.
-			logger.Infof(ctx, "item title_len=%d (external_id=%s) already exists, skipping",
-				len(item.Title), item.ExternalID)
+			logger.Infof(ctx, "item title_len=%d (external_id_len=%d) already exists, skipping",
+				len(item.Title), len(item.ExternalID))
 			result.Skipped++
 		case item.Metadata["embedded_image"] == "true":
 			// An image extracted from a document for OCR is a best-effort
@@ -973,12 +973,12 @@ func (s *DataSourceService) applyFetchedItem(
 			// synced, and the image stays in SubtreeKeep for a later retry once the
 			// KB is configured.
 			logger.Infof(ctx,
-				"skipping embedded image title_len=%d (external_id=%s), not ingested: error_len=%d error_type=%T",
-				len(item.Title), item.ExternalID, len(err.Error()), err)
+				"skipping embedded image title_len=%d (external_id_len=%d), not ingested: error_len=%d error_type=%T",
+				len(item.Title), len(item.ExternalID), len(err.Error()), err)
 			result.Skipped++
 		default:
-			logger.Warnf(ctx, "failed to ingest item title_len=%d (external_id=%s): error_len=%d error_type=%T",
-				len(item.Title), item.ExternalID, len(err.Error()), err)
+			logger.Warnf(ctx, "failed to ingest item title_len=%d (external_id_len=%d): error_len=%d error_type=%T",
+				len(item.Title), len(item.ExternalID), len(err.Error()), err)
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
@@ -1335,10 +1335,12 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		// other during updates.
 		existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
 		if err != nil {
-			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
+			logger.Warnf(ctx, "failed to check existing knowledge for external_id_len=%d: %v",
+				len(item.ExternalID), err)
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
-			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
+			logger.Infof(ctx, "found existing knowledge %s for external_id_len=%d, deleting for update",
+				existing.ID, len(item.ExternalID))
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
 			} else {
@@ -1464,7 +1466,7 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 	repo := s.knowledgeService.GetRepository()
 	children, err := repo.FindByMetadataKeyPrefix(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", types.SubtreeChildPrefix(item.ExternalID))
 	if err != nil {
-		logger.Warnf(ctx, "failed to list subtree of external_id=%s: %v", item.ExternalID, err)
+		logger.Warnf(ctx, "failed to list subtree of external_id_len=%d: %v", len(item.ExternalID), err)
 		return
 	}
 	if len(children) == 0 {
@@ -1496,11 +1498,11 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 	// Batch the deletion so a node whose attachment set shrank from N pays one
 	// round of the delete fan-out rather than N sequential ones.
 	if derr := s.knowledgeService.DeleteKnowledgeList(ctx, ids); derr != nil {
-		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id=%s: %v",
-			len(ids), item.ExternalID, derr)
+		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id_len=%d: %v",
+			len(ids), len(item.ExternalID), derr)
 	} else if herr := repo.HardDeleteKnowledgeList(ctx, ds.TenantID, ids); herr != nil {
-		logger.Warnf(ctx, "failed to hard-delete %d stale sub-item(s) of external_id=%s: %v",
-			len(ids), item.ExternalID, herr)
+		logger.Warnf(ctx, "failed to hard-delete %d stale sub-item(s) of external_id_len=%d: %v",
+			len(ids), len(item.ExternalID), herr)
 	}
 }
 
