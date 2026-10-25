@@ -231,7 +231,7 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 	modelCtx := types.WithLLMCallMetadata(ctx, "entity_extraction", "")
 	chatResponse, err := e.chat.Chat(modelCtx, generator.Render(ctx, content), e.chatOpt)
 	if err != nil {
-		logger.Errorf(ctx, "failed to chat: %v", err)
+		logger.Errorf(ctx, "failed to chat: error_len=%d error_type=%T", len(err.Error()), err)
 		return nil, err
 	}
 

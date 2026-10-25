@@ -1028,8 +1028,8 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 		}
 
 		if err != nil {
-			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
-				event, err.ErrorType, err.Description, err.Err)
+			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, "+
+				"error_len=%d error_type=%T", event, err.ErrorType, err.Description, len(fmt.Sprint(err.Err)), err.Err)
 			return nil, err.Err
 		}
 		logger.Infof(ctx, "Event %v triggered successfully", event)
@@ -1101,7 +1101,8 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)
+		logger.Errorf(ctx, "Failed to start streaming fallback response: error_len=%d error_type=%T, "+
+			"falling back to fixed response", len(err.Error()), err)
 		s.handleFixedFallback(ctx, chatManage)
 		return
 	}

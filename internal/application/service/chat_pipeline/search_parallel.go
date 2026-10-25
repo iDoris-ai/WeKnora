@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -157,7 +158,8 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 
 	for name, err := range errs {
-		logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)
+		logger.Warnf(ctx, "[SearchParallel] %s error: error_len=%d error_type=%T",
+			name, len(fmt.Sprint(err.Err)), err.Err)
 	}
 
 	pipelineInfo(ctx, "SearchParallel", "complete", map[string]interface{}{

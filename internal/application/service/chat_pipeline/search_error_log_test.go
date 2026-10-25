@@ -61,3 +61,40 @@ func TestSearchErrorLogOmitsBackendErrorText(t *testing.T) {
 		})
 	}
 }
+
+// SearchParallel logs each branch's error again after the branches finish; the chunk branch's error is the
+// search backend's, which can echo the query.
+func TestSearchParallelErrorLogOmitsBackendErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	plugin := &PluginSearchParallel{
+		searchPlugin: &PluginSearch{
+			knowledgeBaseService: &failingSearchKnowledgeBaseService{err: errors.New("backend echoed " + sentinel)},
+		},
+		searchEntityPlugin: &PluginSearchEntity{},
+	}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SearchTargets: types.SearchTargets{
+				&types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1"},
+			},
+			EmbeddingTopK: 10,
+		},
+		PipelineState: types.PipelineState{RewriteQuery: "q"},
+	}
+
+	noop := func() *PluginError { return nil }
+	_ = plugin.OnEvent(context.Background(), types.CHUNK_SEARCH_PARALLEL, chatManage, noop)
+
+	out := buf.String()
+	if !strings.Contains(out, "[SearchParallel] chunk_search error: error_len=") {
+		t.Fatalf("expected the chunk_search error line with error_len, got: %s", out)
+	}
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log carries the backend error text: %s", out)
+	}
+}
