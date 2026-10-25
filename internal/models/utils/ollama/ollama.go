@@ -3,6 +3,7 @@ package ollama
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/ollama/ollama/api"
 )
 
@@ -29,11 +31,7 @@ type OllamaService struct {
 func GetOllamaService() (*OllamaService, error) {
 	// Get Ollama base URL from environment variable, if not set use provided baseURL or default value
 	logger.GetLogger(context.Background()).Infof("Ollama base URL: %s", os.Getenv("OLLAMA_BASE_URL"))
-	baseURL := "http://localhost:11434"
-	envURL := os.Getenv("OLLAMA_BASE_URL")
-	if envURL != "" {
-		baseURL = envURL
-	}
+	baseURL := BaseURLFromEnv()
 
 	// Create URL object
 	parsedURL, err := url.Parse(baseURL)
@@ -51,6 +49,7 @@ func GetOllamaService() (*OllamaService, error) {
 			IdleConnTimeout:     90 * time.Second,
 			MaxIdleConns:        10,
 		},
+		CheckRedirect: guardedRedirect,
 	}
 	client := api.NewClient(parsedURL, ollamaHTTPClient)
 
@@ -76,7 +75,7 @@ func (s *OllamaService) StartService(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	// Check if service is available
-	err := s.client.Heartbeat(ctx)
+	err := processingSafeErr(ctx, s.client.Heartbeat(ctx))
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("ollama service unavailable: %v", err)
 		s.isAvailable = false
@@ -116,7 +115,7 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 	// Get model list
 	listResp, err := s.client.List(ctx)
 	if err != nil {
-		return false, fmt.Errorf("failed to get model list: %w", err)
+		return false, fmt.Errorf("failed to get model list: %w", processingSafeErr(ctx, err))
 	}
 
 	// If no version is specified for the model, add ":latest" by default
@@ -134,8 +133,79 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 	return false, nil
 }
 
-// PullModel pulls a model
+// BaseURLFromEnv is the Ollama base URL: OLLAMA_BASE_URL, otherwise http://localhost:11434.
+func BaseURLFromEnv() string {
+	if envURL := os.Getenv("OLLAMA_BASE_URL"); envURL != "" {
+		return envURL
+	}
+	return "http://localhost:11434"
+}
+
+// guardedRedirect (Agent24 A24-KB-17): the processing guard judged the base URL, so a request that carries a
+// guard may not follow a redirect to another origin (Go would replay the POST body there). Without a guard
+// (standalone) the default policy of at most 10 redirects is kept.
+func guardedRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if types.ProcessingGuardFromContext(req.Context()) == nil {
+		return nil
+	}
+	// Same origin as the guard judged it: both sides normalized (default ports filled in, ASCII hosts only, no
+	// IPv6 zone); anything that does not normalize is refused.
+	from, errFrom := types.NormalizeProcessingEndpoint(via[0].URL.String())
+	to, errTo := types.NormalizeProcessingEndpoint(req.URL.String())
+	if errFrom != nil || errTo != nil || from != to {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	return nil
+}
+
+// processingSafeErr (Agent24 A24-KB-17): under a processing guard, net/http errors come back as a *url.Error that
+// quotes the full URL, path and query included (a redirect Location too, and again in the cause when it does not
+// parse), and a StatusError carries the reply body. A refusal becomes the bare sentinel; any other error keeps its
+// operation and the cause's type only. Neither the error nor a log line carries it. Without a guard the error is
+// returned as it was.
+func processingSafeErr(ctx context.Context, err error) error {
+	if err == nil || types.ProcessingGuardFromContext(ctx) == nil {
+		return err
+	}
+	if errors.Is(err, types.ErrProcessingDenied) {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	// The text quotes nothing from the request or the reply (a *url.Error's URL and its cause, a StatusError's
+	// body); Unwrap keeps the original for errors.Is and errors.As.
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return &processingRedactedError{msg: fmt.Sprintf("ollama %s: request failed (%T)", ue.Op, ue.Err), err: err}
+	}
+	return &processingRedactedError{msg: fmt.Sprintf("ollama request failed (%T)", err), err: err}
+}
+
+// processingRedactedError: see processingSafeErr.
+type processingRedactedError struct {
+	msg string
+	err error
+}
+
+func (e *processingRedactedError) Error() string { return e.msg }
+func (e *processingRedactedError) Unwrap() error { return e.err }
+
+// BaseURL returns the base URL this service sends requests to
+// (OLLAMA_BASE_URL, otherwise the default). A nil service returns "".
+func (s *OllamaService) BaseURL() string {
+	if s == nil {
+		return ""
+	}
+	return s.baseURL
+}
+
+// PullModel pulls a model. A processing guard on ctx is asked before any
+// request, including the availability check that precedes the pull.
 func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
+	if err := s.allowModelDownload(ctx, modelName); err != nil {
+		return err
+	}
 	// First check if the service is available
 	if err := s.StartService(ctx); err != nil {
 		return err
@@ -180,10 +250,27 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to pull model: %w", err)
+		return fmt.Errorf("failed to pull model: %w", processingSafeErr(ctx, err))
 	}
 
 	return nil
+}
+
+// allowModelDownload asks the context guard before a pull. No guard means
+// standalone mode: the pull proceeds. A destination that cannot be normalized
+// is refused. The list-only path of EnsureModelAvailable does not call this.
+func (s *OllamaService) allowModelDownload(ctx context.Context, modelName string) error {
+	guard := types.ProcessingGuardFromContext(ctx)
+	if guard == nil {
+		return nil
+	}
+	endpoint, err := types.NormalizeProcessingEndpoint(s.BaseURL())
+	if err != nil {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	return guard.Allow(ctx, types.ProcessingDestination{
+		Category: types.ProcessingModelDownload, Endpoint: endpoint, Model: modelName,
+	})
 }
 
 // EnsureModelAvailable ensures the model is available, pulls it if not available
@@ -271,7 +358,7 @@ type OllamaModelInfo struct {
 func (s *OllamaService) ListModels(ctx context.Context) ([]string, error) {
 	listResp, err := s.client.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get model list: %w", err)
+		return nil, fmt.Errorf("failed to get model list: %w", processingSafeErr(ctx, err))
 	}
 
 	modelNames := make([]string, len(listResp.Models))
@@ -286,7 +373,7 @@ func (s *OllamaService) ListModels(ctx context.Context) ([]string, error) {
 func (s *OllamaService) ListModelsDetailed(ctx context.Context) ([]OllamaModelInfo, error) {
 	listResp, err := s.client.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get model list: %w", err)
+		return nil, fmt.Errorf("failed to get model list: %w", processingSafeErr(ctx, err))
 	}
 	jsonData, err := json.Marshal(listResp.Models)
 	if err != nil {
@@ -335,7 +422,7 @@ func (s *OllamaService) Chat(ctx context.Context, req *api.ChatRequest, fn api.C
 	}
 
 	// Use official client Chat method
-	return s.client.Chat(ctx, req, fn)
+	return processingSafeErr(ctx, s.client.Chat(ctx, req, fn))
 }
 
 // Embeddings gets text embedding vectors
@@ -345,7 +432,8 @@ func (s *OllamaService) Embeddings(ctx context.Context, req *api.EmbedRequest) (
 		return nil, err
 	}
 	// Use official client Embed method
-	return s.client.Embed(ctx, req)
+	resp, err := s.client.Embed(ctx, req)
+	return resp, processingSafeErr(ctx, err)
 }
 
 // Generate generates text (used for Rerank)
@@ -356,7 +444,7 @@ func (s *OllamaService) Generate(ctx context.Context, req *api.GenerateRequest, 
 	}
 
 	// Use official client Generate method
-	return s.client.Generate(ctx, req, fn)
+	return processingSafeErr(ctx, s.client.Generate(ctx, req, fn))
 }
 
 // GetClient returns the underlying ollama client for advanced operations
