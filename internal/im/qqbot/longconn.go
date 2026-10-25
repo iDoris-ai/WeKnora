@@ -113,7 +113,8 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 			}
 			if msg != nil {
 				if err := c.handler(ctx, msg); err != nil {
-					logger.Errorf(ctx, "[QQBot] handle message failed: %v", err)
+					logger.Errorf(ctx, "[QQBot] handle message failed: error_len=%d error_type=%T",
+						len(err.Error()), err)
 				}
 			}
 		case opReconnect, opInvalidSession:

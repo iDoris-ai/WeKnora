@@ -195,7 +195,8 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 
 	prep, err := s.backend.Prepare(runCtx, policy)
 	if err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] prepare session=%s: %v", req.SessionID, err)
+		logger.Errorf(ctx, "[LocalSandbox] prepare session=%s: error_len=%d error_type=%T",
+			req.SessionID, len(err.Error()), err)
 		return nil, fmt.Errorf("prepare sandbox: %w", err)
 	}
 	defer func() { _ = prep.Close() }()

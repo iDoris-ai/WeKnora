@@ -484,7 +484,8 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	// Process message asynchronously
 	go func() {
 		if err := h.imService.HandleMessage(asyncCtx, msg, channelID); err != nil {
-			logger.Errorf(asyncCtx, "[IM] Handle message error for channel %s: %v", channelID, err)
+			logger.Errorf(asyncCtx, "[IM] Handle message error for channel %s: error_len=%d error_type=%T",
+				channelID, len(err.Error()), err)
 		}
 	}()
 }

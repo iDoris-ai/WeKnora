@@ -7,6 +7,7 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -197,5 +198,46 @@ func TestLongConnCallbackDebugLogOmitsFileURLs(t *testing.T) {
 	}
 	if !strings.Contains(logs, "image_url_len=") || !strings.Contains(logs, "file_url_len=") {
 		t.Fatalf("log missing url length fields: %s", logs)
+	}
+
+	buf.Reset()
+	got = nil
+	fileURL := "https://example.com/f?sig=" + sentinel
+	fileBody := `{"msgid":"m2","msgtype":"file","chattype":"single","from":{"userid":"u1"},` +
+		`"file":{"url":"` + fileURL + `"}}`
+	c.handleCallback(context.Background(), nil, wsFrame{Body: []byte(fileBody)})
+	if got == nil || got.FileKey != fileURL {
+		t.Fatalf("file incoming = %+v, want FileKey %q", got, fileURL)
+	}
+	logs = buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("file log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "msgtype=file") || !strings.Contains(logs, "file_url_len=") {
+		t.Fatalf("file log missing length fields: %s", logs)
+	}
+}
+
+// The error HandleMessage returns can carry user text (a slash command's arguments, a QA failure); the
+// long-connection loop logs only its length and type.
+func TestLongConnHandleErrorLogOmitsErrorText(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	c := &LongConnClient{handler: func(context.Context, *im.IncomingMessage) error {
+		return errors.New("search knowledge: " + sentinel)
+	}}
+	body := `{"msgid":"m1","msgtype":"text","chattype":"single","from":{"userid":"u1"},"text":{"content":"hi"}}`
+	c.handleCallback(context.Background(), nil, wsFrame{Body: []byte(body)})
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "Handle message error: error_len=") {
+		t.Fatalf("log missing the handle error line: %s", logs)
 	}
 }

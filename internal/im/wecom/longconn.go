@@ -641,7 +641,7 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 	}
 
 	if err := c.handler(ctx, incoming); err != nil {
-		logger.Errorf(ctx, "[WeCom] Handle message error: %v", err)
+		logger.Errorf(ctx, "[WeCom] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
 	}
 }
 

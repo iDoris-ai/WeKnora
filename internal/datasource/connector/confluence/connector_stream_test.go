@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -1045,6 +1046,53 @@ func TestResolveResourceAncestorsSkipsUnresolvableSelections(t *testing.T) {
 	want := []string{"1", "page:1:parent"}
 	if len(ancestors) != len(want) || ancestors[0] != want[0] || ancestors[1] != want[1] {
 		t.Fatalf("ancestors = %#v; want %#v", ancestors, want)
+	}
+}
+
+func TestResolveResourceAncestorsLogOmitsAPIErrorExcerpt(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	api := &streamAPI{}
+	connector := &Connector{newClient: func(cfg config) (*client, error) {
+		return &client{
+			cfg: cfg,
+			http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Path {
+				case "/wiki/rest/api/space":
+					return api.jsonResponse(map[string]any{"results": []any{map[string]any{
+						"id": 1, "key": "ENG", "name": "Engineering",
+					}}})
+				case "/wiki/rest/api/content/gone":
+					return &http.Response{
+						StatusCode: http.StatusNotFound,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader("missing " + sentinel)),
+					}, nil
+				default:
+					return nil, errors.New("unexpected endpoint: " + req.URL.String())
+				}
+			})},
+		}, nil
+	}}
+	ancestors, err := connector.ResolveResourceAncestors(
+		context.Background(), streamConfig(), []string{"page:1:gone"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ancestors) != 0 {
+		t.Fatalf("ancestors = %#v; want none", ancestors)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "during ancestor resolution: error_len=") {
+		t.Fatalf("log missing ancestor error_len: %s", logs)
 	}
 }
 

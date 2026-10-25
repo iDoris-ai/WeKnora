@@ -73,7 +73,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 			}
 
 			if err := c.handler(ctx, msg); err != nil {
-				logger.Errorf(ctx, "[Telegram] Handle message error: %v", err)
+				logger.Errorf(ctx, "[Telegram] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
 			}
 		}
 	}
