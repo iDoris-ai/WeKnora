@@ -326,9 +326,12 @@ func TestAttachmentDownloadFailureLogOmitsFileName(t *testing.T) {
 				`"properties":{"title":{"type":"title","title":[{"plain_text":"Notes"}]}}}`)
 		case "/v1/blocks/page/children":
 			w.Header().Set("Content-Type", "application/json")
+			// file-2's URL fails to parse; the parse error quotes the URL, sentinel included.
 			_, _ = fmt.Fprintf(w, `{"results":[{"id":"file-1","type":"file","file":{"type":"external",`+
-				`"name":"%s.pdf","external":{"url":"%s/download"}}}],"has_more":false}`,
-				sentinel, serverURL)
+				`"name":"%s.pdf","external":{"url":"%s/download"}}},`+
+				`{"id":"file-2","type":"file","file":{"type":"external",`+
+				`"name":"b.pdf","external":{"url":"%s/%%zz%s"}}}],"has_more":false}`,
+				sentinel, serverURL, serverURL, sentinel)
 		case "/download":
 			w.WriteHeader(http.StatusBadRequest)
 		default:

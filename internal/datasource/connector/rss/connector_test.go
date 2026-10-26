@@ -488,18 +488,47 @@ func TestListAndSyncFetchFailureLogsOmitFeedURL(t *testing.T) {
 }
 
 // A transport failure wraps *url.Error, whose text carries the full feed URL.
-// The sync log must keep only the error length.
-func TestSyncTransportFailureLogOmitsFeedURL(t *testing.T) {
+// The list and sync logs must keep only the error length.
+func TestListAndSyncTransportFailureLogsOmitFeedURL(t *testing.T) {
 	const sentinel = "S3NT1NEL"
 	buf := captureRSSLogs(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	feedURL := srv.URL + "/feed.xml?token=" + sentinel
 	srv.Close()
+	cfg := makeConfig(feedURL, "")
 
-	if _, err := NewConnector().FetchAll(context.Background(), makeConfig(feedURL, ""), nil); err == nil {
+	if _, err := NewConnector().ListResources(context.Background(), cfg, ""); err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if _, err := NewConnector().FetchAll(context.Background(), cfg, nil); err == nil {
 		t.Fatal("FetchAll succeeded, want a transport failure")
 	}
-	assertLogOmitsSentinel(t, buf.String(), sentinel, "[RSS] sync: fetch url_len=")
+	assertLogOmitsSentinel(t, buf.String(), sentinel,
+		"[RSS] list: fetch url_len=",
+		"[RSS] sync: fetch url_len=",
+	)
+}
+
+// A full-text transport failure wraps *url.Error with the article link.
+func TestFullTextTransportFailureLogOmitsArticleURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	buf := captureRSSLogs(t)
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	articleURL := dead.URL + "/article?x=" + sentinel
+	dead.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Feed</title>
+<item><title>One</title><link>%s</link><guid>guid-1</guid><description>summary</description></item>
+</channel></rss>`, articleURL)
+	}))
+	t.Cleanup(srv.Close)
+
+	if _, err := NewConnector().FetchAll(context.Background(), makeConfig(srv.URL+"/feed.xml", ""), nil); err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+	assertLogOmitsSentinel(t, buf.String(), sentinel, "[RSS] full-text fetch failed for url_len=")
 }
 
 // A non-feed body can be echoed by the parser. Parse failures must not log the
