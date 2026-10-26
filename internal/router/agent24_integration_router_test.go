@@ -629,7 +629,8 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
 	t.Run("valid token with jti", func(t *testing.T) {
-		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(validAt, "tok-jti")), &agent24RevocationList{})
+		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(validAt, "tok-jti")),
+			&agent24RevocationList{})
 		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "invalid_request", "", true)
 	})
