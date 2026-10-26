@@ -586,7 +586,10 @@ func TestFeishuLoggerAdapterOmitsSDKText(t *testing.T) {
 	// an optional "[conn_id=...]"; the status-code warning passes its int unformatted.
 	l.Info(ctx, "disconnected to wss://open.feishu.cn/ws?ticket="+sentinel, "[conn_id=c1]")
 	l.Info(ctx, "trying to reconnect: 3", "[conn_id=c1]")
-	l.Debug(ctx, `receive message, message_type: event, payload: {"text":"`+sentinel+`"}`)
+	// The receive-message Debug call passes fmtLog's slice unexpanded.
+	l.Debug(ctx, []interface{}{
+		`receive message, message_type: event, payload: {"text":"` + sentinel + `"}`, "[conn_id=c1]",
+	})
 	l.Warn(ctx, "response status code %d", 401)
 	l.Error(ctx, "connect failed, err: dial wss://open.feishu.cn/ws?ticket="+sentinel)
 	l.Error(ctx, errors.New("read: "+sentinel))
@@ -598,7 +601,7 @@ func TestFeishuLoggerAdapterOmitsSDKText(t *testing.T) {
 	for _, want := range []string{
 		"WebSocket disconnected (app_id=cli_1)",
 		`sdk info: event="trying to reconnect" attempt=3 arg_types=[string,string]`,
-		`sdk debug: event="receive message" arg_types=[string]`,
+		`sdk debug: event="receive message" arg_types=[string,string]`,
 		`sdk warn: event="response status code" int_args=[401] arg_types=[string,int]`,
 		`sdk error: event="connect failed" arg_types=[string]`,
 		`sdk error: event="unknown" arg_types=[*errors.errorString]`,

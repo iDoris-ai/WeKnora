@@ -129,6 +129,12 @@ var feishuSDKLogEvents = []string{
 // (longest known prefix of the first argument), the reconnect attempt, integer
 // arguments such as an HTTP status code, the argument types and the message length.
 func feishuSDKLogShape(args []interface{}) string {
+	// One call passes fmtLog's slice without "...": Debug(ctx, c.fmtLog(...)).
+	if len(args) == 1 {
+		if inner, ok := args[0].([]interface{}); ok {
+			args = inner
+		}
+	}
 	event, first := "unknown", ""
 	if len(args) > 0 {
 		first, _ = args[0].(string)
