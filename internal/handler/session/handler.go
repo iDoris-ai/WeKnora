@@ -2,6 +2,7 @@ package session
 
 import (
 	stderrors "errors"
+	"fmt"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -171,7 +172,8 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	// Parse and validate the request body
 	var request CreateSessionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		logger.Error(ctx, "Failed to validate session creation parameters", err)
+		logger.Errorf(ctx, "Failed to validate session creation parameters: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
@@ -299,7 +301,8 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	// Parse pagination parameters from query
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
-		logger.Error(ctx, "Failed to parse pagination parameters", err)
+		logger.Errorf(ctx, "Failed to parse pagination parameters: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
@@ -364,7 +367,8 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	// Parse request body to session object
 	var session types.Session
 	if err := c.ShouldBindJSON(&session); err != nil {
-		logger.Error(ctx, "Failed to parse session data", err)
+		logger.Errorf(ctx, "Failed to parse session data: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
@@ -510,7 +514,8 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 
 	var req batchDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Errorf(ctx, "Invalid batch delete request: %v", err)
+		logger.Errorf(ctx, "Invalid batch delete request: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		c.Error(errors.NewBadRequestError("invalid request"))
 		return
 	}

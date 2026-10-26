@@ -2,6 +2,7 @@ package session
 
 import (
 	stderrors "errors"
+	"fmt"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -38,7 +39,8 @@ func (h *Handler) GenerateTitle(c *gin.Context) {
 	// Parse request body
 	var request GenerateTitleRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		logger.Error(ctx, "Failed to parse request data", err)
+		logger.Errorf(ctx, "Failed to parse request data: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}

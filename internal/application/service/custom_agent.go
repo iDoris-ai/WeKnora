@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"strings"
 	"time"
@@ -115,8 +116,8 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 		return nil, err
 	}
 
-	logger.Infof(ctx, "Creating custom agent, ID: %s, tenant ID: %d, name: %s, agent_mode: %s",
-		agent.ID, agent.TenantID, agent.Name, agent.Config.AgentMode)
+	logger.Infof(ctx, "Creating custom agent, ID: %s, tenant ID: %d, name_len=%d, agent_mode: %s",
+		agent.ID, agent.TenantID, len(agent.Name), agentModeLogValue(agent.Config.AgentMode))
 
 	if err := s.repo.CreateAgent(ctx, agent); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -126,7 +127,7 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 		return nil, err
 	}
 
-	logger.Infof(ctx, "Custom agent created successfully, ID: %s, name: %s", agent.ID, agent.Name)
+	logger.Infof(ctx, "Custom agent created successfully, ID: %s, name_len=%d", agent.ID, len(agent.Name))
 	return agent, nil
 }
 
@@ -319,7 +320,7 @@ func (s *customAgentService) UpdateAgent(
 		return nil, err
 	}
 
-	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s", agent.ID, agent.Name)
+	logger.Infof(ctx, "Updating custom agent, ID: %s, name_len=%d", agent.ID, len(agent.Name))
 
 	if err := s.repo.UpdateAgent(ctx, existingAgent); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -1179,7 +1180,8 @@ func (s *customAgentService) sharedSuggestionKnowledgeBases(
 	}
 	shared, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, types.TenantRoleFromContext(ctx))
 	if err != nil {
-		logger.Warnf(ctx, "Failed to list shared knowledge bases for suggestions: %v", err)
+		logger.Warnf(ctx, "Failed to list shared knowledge bases for suggestions: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return nil
 	}
 	kbs := make([]*types.KnowledgeBase, 0, len(shared))
@@ -1242,6 +1244,19 @@ func (s *customAgentService) groupKBIDsByEffectiveTenant(
 		out[kb.TenantID] = append(out[kb.TenantID], kbID)
 	}
 	return out
+}
+
+// agentModeLogValue keeps a known agent mode and records anything else as a
+// length. The field is stored without an enum check, so an arbitrary string
+// must not be copied into the log. Empty is kept so a missing mode stays
+// distinguishable from an unknown one.
+func agentModeLogValue(mode string) string {
+	switch mode {
+	case types.AgentModeQuickAnswer, types.AgentModeSmartReasoning, "":
+		return mode
+	default:
+		return fmt.Sprintf("(unknown len=%d)", len(mode))
+	}
 }
 
 // isEnglishLocale reports whether the locale string is an English variant.
