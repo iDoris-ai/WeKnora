@@ -2,6 +2,7 @@ package session
 
 import (
 	stderrors "errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -114,8 +115,8 @@ func (h *Handler) deleteArtifact(c *gin.Context, req *types.ArtifactDeleteReques
 			_ = c.Error(appErr)
 			return
 		}
-		logger.Errorf(ctx, "delete artifact failed: session=%s message=%s idx=%d err=%v",
-			req.SessionID, req.MessageID, req.Index, err)
+		logger.Errorf(ctx, "delete artifact failed: session=%s message=%s idx=%d error_len=%d error_type=%T",
+			req.SessionID, req.MessageID, req.Index, len(fmt.Sprint(err)), err)
 		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}

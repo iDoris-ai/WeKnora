@@ -1,14 +1,17 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -302,5 +305,89 @@ func TestDeleteMessageArtifactRejectsBadIndex(t *testing.T) {
 		httptest.NewRequest(http.MethodDelete, "/sessions/sess-1/messages/msg-1/artifacts/-1", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestDeleteMessageArtifact_ReleaseFailureLogOmitsURLAndError(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	h := &Handler{
+		messageService: &stubMessageServiceForDelete{result: &types.ArtifactDeleteResult{
+			Deleted: 1,
+			Reclaim: []types.ArtifactBlobRef{{URL: "resource://" + sentinel, MessageIDs: []string{"msg-1"}}},
+		}},
+		resourceCatalog: &deleteCatalogStub{releaseErr: stderrors.New("release " + sentinel)},
+		fileService:     &deletingFileService{},
+	}
+	w := httptest.NewRecorder()
+	newArtifactDeleteRouter(h).ServeHTTP(w,
+		httptest.NewRequest(http.MethodDelete, "/sessions/sess-1/messages/msg-1/artifacts/0", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	out := buf.String()
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log carries the url or error text: %s", out)
+	}
+	if !strings.Contains(out, "failed to release") || !strings.Contains(out, "url_len=19") ||
+		!strings.Contains(out, "error_len=") {
+		t.Fatalf("expected redacted release log, got %s", out)
+	}
+}
+
+func TestDeleteMessageArtifact_KeepLogOmitsURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	h := &Handler{
+		messageService: &stubMessageServiceForDelete{result: &types.ArtifactDeleteResult{
+			Deleted: 1,
+			Reclaim: []types.ArtifactBlobRef{{URL: "resource://" + sentinel, MessageIDs: []string{"msg-1"}}},
+		}},
+		resourceCatalog: &deleteCatalogStub{remaining: 1},
+		fileService:     &deletingFileService{},
+	}
+	w := httptest.NewRecorder()
+	newArtifactDeleteRouter(h).ServeHTTP(w,
+		httptest.NewRequest(http.MethodDelete, "/sessions/sess-1/messages/msg-1/artifacts/0", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	out := buf.String()
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log carries the url: %s", out)
+	}
+	if !strings.Contains(out, "keeping url_len=19") {
+		t.Fatalf("expected redacted keep log, got %s", out)
+	}
+}
+
+func TestDeleteArtifact_ErrorLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	h := &Handler{messageService: &stubMessageServiceForDelete{err: stderrors.New("db " + sentinel)}}
+	w := httptest.NewRecorder()
+	newArtifactDeleteRouter(h).ServeHTTP(w,
+		httptest.NewRequest(http.MethodDelete, "/sessions/sess-1/messages/msg-1/artifacts/0", nil))
+
+	out := buf.String()
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log carries the error text: %s", out)
+	}
+	if !strings.Contains(out, "delete artifact failed") || !strings.Contains(out, "error_len=") {
+		t.Fatalf("expected redacted delete log, got %s", out)
 	}
 }

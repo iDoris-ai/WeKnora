@@ -251,15 +251,15 @@ func (s *steerSink) PersistSteerMessage(
 			steerDataUserMessageID: msg.ID,
 		})
 	if err != nil {
-		logger.Warnf(ctx, "steer consume flag failed for session %s steer %s: %v",
-			sessionID, steerID, err)
+		logger.Warnf(ctx, "steer consume flag failed for session %s steer %s: error_len=%d error_type=%T",
+			sessionID, steerID, len(fmt.Sprint(err)), err)
 	}
 	if !updated {
 		// Deleted concurrently, or the CAS gave up. The user row must not
 		// stay around for a retry to insert a second copy of the same steer.
 		if delErr := s.messageService.DeleteMessage(ctx, sessionID, msg.ID); delErr != nil {
-			logger.Warnf(ctx, "steer persist rollback failed for session %s message %s: %v",
-				sessionID, msg.ID, delErr)
+			logger.Warnf(ctx, "steer persist rollback failed for session %s message %s: error_len=%d error_type=%T",
+				sessionID, msg.ID, len(fmt.Sprint(delErr)), delErr)
 		}
 		if existing := s.persistedUserMessageID(ctx, sessionID, messageID, steerID); existing != "" {
 			s.markInjected(steerID)
@@ -297,7 +297,8 @@ func (s *steerSink) recordPersistFailure(ctx context.Context, sessionID, message
 	}
 	if _, err := s.streamManager.UpdateSteerEventData(ctx, sessionID, messageID, steerID,
 		map[string]interface{}{steerDataConsumed: true, steerDataDropped: true}); err != nil {
-		logger.Warnf(ctx, "steer drop flag failed for session %s steer %s: %v", sessionID, steerID, err)
+		logger.Warnf(ctx, "steer drop flag failed for session %s steer %s: error_len=%d error_type=%T",
+			sessionID, steerID, len(fmt.Sprint(err)), err)
 	}
 	s.markInjected(steerID)
 	logger.Errorf(ctx, "steer %s dropped after %d failed persist attempts, session=%s message=%s",
@@ -359,7 +360,8 @@ func (h *Handler) liveAgentRun(ctx context.Context, sessionID string) (string, e
 	}
 	if msg == nil || msg.IsCompleted {
 		if err := h.streamManager.ClearLiveRun(ctx, sessionID, assistantID); err != nil {
-			logger.Warnf(ctx, "stale live run cleanup failed for session %s: %v", sessionID, err)
+			logger.Warnf(ctx, "stale live run cleanup failed for session %s: error_len=%d error_type=%T",
+				sessionID, len(fmt.Sprint(err)), err)
 		}
 		return "", nil
 	}
@@ -853,7 +855,8 @@ func (h *Handler) discardSteerBacklog(
 ) {
 	all, _, err := h.streamManager.GetSteerEvents(ctx, sessionID, assistantMessageID, 0)
 	if err != nil {
-		logger.Warnf(ctx, "steer backlog read failed for session %s: %v", sessionID, err)
+		logger.Warnf(ctx, "steer backlog read failed for session %s: error_len=%d error_type=%T",
+			sessionID, len(fmt.Sprint(err)), err)
 		return
 	}
 	backlog := selectSteerBacklog(all, injected)
@@ -862,7 +865,8 @@ func (h *Handler) discardSteerBacklog(
 	}
 	h.markSteerEventsConsumed(ctx, sessionID, assistantMessageID, backlog)
 	if lateAll, _, err := h.streamManager.GetSteerEvents(ctx, sessionID, assistantMessageID, 0); err != nil {
-		logger.Warnf(ctx, "steer discard sweep failed for session %s: %v", sessionID, err)
+		logger.Warnf(ctx, "steer discard sweep failed for session %s: error_len=%d error_type=%T",
+			sessionID, len(fmt.Sprint(err)), err)
 	} else if late := selectSteerBacklog(lateAll, injected); len(late) > 0 {
 		h.markSteerEventsConsumed(ctx, sessionID, assistantMessageID, late)
 		backlog = append(backlog, late...)
@@ -921,7 +925,8 @@ func (h *Handler) claimNextSteerFollowUp(
 
 	all, _, err := h.streamManager.GetSteerEvents(ctx, prevReqCtx.sessionID, prevMessageID, 0)
 	if err != nil {
-		logger.Warnf(ctx, "steer backlog read failed for session %s: %v", prevReqCtx.sessionID, err)
+		logger.Warnf(ctx, "steer backlog read failed for session %s: error_len=%d error_type=%T",
+			prevReqCtx.sessionID, len(fmt.Sprint(err)), err)
 		return nil, false
 	}
 	injected := map[string]struct{}{}
@@ -999,7 +1004,8 @@ func (h *Handler) claimNextSteerFollowUp(
 	// A send that landed on A while we persisted still sits on A's list.
 	// Sweep it onto B now that B is the live run.
 	if lateAll, _, err := h.streamManager.GetSteerEvents(ctx, prevReqCtx.sessionID, prevMessageID, 0); err != nil {
-		logger.Warnf(ctx, "steer late-handoff read failed for session %s: %v", prevReqCtx.sessionID, err)
+		logger.Warnf(ctx, "steer late-handoff read failed for session %s: error_len=%d error_type=%T",
+			prevReqCtx.sessionID, len(fmt.Sprint(err)), err)
 	} else if late := selectSteerBacklog(lateAll, injected); len(late) > 0 {
 		h.markSteerEventsConsumed(ctx, prevReqCtx.sessionID, prevMessageID, late)
 		followUp.steerCarryOver = append(followUp.steerCarryOver, late...)
@@ -1009,7 +1015,8 @@ func (h *Handler) claimNextSteerFollowUp(
 		if err := h.streamManager.AppendSteerEvents(
 			ctx, followUp.sessionID, followUp.assistantMessage.ID, followUp.steerCarryOver,
 		); err != nil {
-			logger.Warnf(ctx, "steer carry-over append failed for session %s: %v", followUp.sessionID, err)
+			logger.Warnf(ctx, "steer carry-over append failed for session %s: error_len=%d error_type=%T",
+				followUp.sessionID, len(fmt.Sprint(err)), err)
 		} else {
 			followUp.steerCarryOver = nil
 		}
@@ -1023,8 +1030,8 @@ func (h *Handler) markSteerEventsConsumed(
 	for _, evt := range events {
 		if _, err := h.streamManager.UpdateSteerEventData(ctx, sessionID, assistantID, evt.ID,
 			map[string]interface{}{steerDataConsumed: true}); err != nil {
-			logger.Warnf(ctx, "steer consume flag failed for session %s steer %s: %v",
-				sessionID, evt.ID, err)
+			logger.Warnf(ctx, "steer consume flag failed for session %s steer %s: error_len=%d error_type=%T",
+				sessionID, evt.ID, len(fmt.Sprint(err)), err)
 		}
 	}
 }
@@ -1096,7 +1103,8 @@ func (h *Handler) applyFollowUpMentions(ctx context.Context, followUp *qaRequest
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(
 		ctx, followUp.knowledgeBaseIDs, followUp.knowledgeIDs,
 	); err != nil {
-		logger.Warnf(ctx, "dropping follow-up mentions outside API key KB scope: %v", err)
+		logger.Warnf(ctx, "dropping follow-up mentions outside API key KB scope: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		restoreFollowUpMentions(followUp, snapshot)
 		return
 	}
@@ -1104,7 +1112,8 @@ func (h *Handler) applyFollowUpMentions(ctx context.Context, followUp *qaRequest
 		orphanTagIDsForScope(followUp.tagIDs, tagScopesFromMentionedItems(reqs)),
 		followUp.knowledgeBaseIDs,
 	); err != nil {
-		logger.Warnf(ctx, "dropping follow-up mentions with unscoped tags: %v", err)
+		logger.Warnf(ctx, "dropping follow-up mentions with unscoped tags: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		restoreFollowUpMentions(followUp, snapshot)
 	}
 }
