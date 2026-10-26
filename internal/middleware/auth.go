@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -30,6 +32,7 @@ var (
 	errMissingDirectHeader      = errors.New("missing external user id header")
 	errInvalidExternalUserID    = errors.New("invalid external user id")
 	errInvalidExternalUserToken = errors.New("invalid external user token")
+	errExternalUserTokenExpired = errors.New("external user token expired")
 )
 
 // 无需认证的API列表
@@ -390,6 +393,19 @@ func authenticateAPIKeyRequest(
 	// BackfillMissingKeyHashes for migration 000065 placeholder rows).
 	key, err := apiKeyService.AuthenticateAPIKey(ctx, apiKey)
 	if err != nil || key == nil {
+		var unusable *apprepo.APIKeyUnusableError
+		if err != nil && errors.As(err, &unusable) && unusable.Key != nil &&
+			!unusable.Key.IsPlatform() && unusable.Key.TenantIDValue() != 0 {
+			reason := "credential_expired"
+			if unusable.Revoked {
+				reason = "credential_revoked"
+			}
+			noteAgent24CredentialRejection(c, types.Agent24CredentialRejection{
+				Reason:       reason,
+				CredentialID: fmt.Sprintf("key:%d", unusable.Key.ID),
+				TenantID:     unusable.Key.TenantIDValue(),
+			})
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key"})
 		c.Abort()
 		return false
@@ -515,6 +531,7 @@ func attachAPIKeyAuthContext(
 
 	var user *types.User
 	var principal types.Principal
+	var jti string
 	if key != nil && key.IsPlatform() {
 		// A platform key keeps one stable machine identity while selecting the
 		// target workspace through X-Tenant-ID. Tenant API-principal modes and
@@ -536,8 +553,24 @@ func attachAPIKeyAuthContext(
 		}
 
 		var principalErr error
-		principal, principalErr = resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
+		principal, jti, principalErr = resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
 		if principalErr != nil {
+			if errors.Is(principalErr, errExternalUserTokenExpired) {
+				credentialID := ""
+				if key != nil {
+					credentialID = fmt.Sprintf("key:%d", key.ID)
+				}
+				if jti != "" {
+					credentialID = "jti:" + jti
+				}
+				noteAgent24CredentialRejection(c, types.Agent24CredentialRejection{
+					Reason:       "credential_expired",
+					Principal:    principal,
+					CredentialID: credentialID,
+					TenantID:     tenantID,
+					JTI:          jti,
+				})
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{"error": apiPrincipalAuthErrorMessage(principalErr)})
 			c.Abort()
 			return
@@ -570,9 +603,12 @@ func attachAPIKeyAuthContext(
 		}
 	}
 	applyAuthSession(c, session)
+	if jti != "" {
+		c.Request = c.Request.WithContext(types.WithAgent24TokenJTI(c.Request.Context(), jti))
+	}
 }
 
-func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.Header) (types.Principal, error) {
+func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.Header) (types.Principal, string, error) {
 	tenantID := uint64(0)
 	if tenant != nil {
 		tenantID = tenant.ID
@@ -582,56 +618,72 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 		ID:   strconv.FormatUint(tenantID, 10),
 	}
 	if tenant == nil || tenantID == 0 {
-		return fallback, nil
+		return fallback, "", nil
 	}
 	cfg := tenant.APIPrincipalConfig
 	if cfg == nil || cfg.Mode == "" || cfg.Mode == types.APIPrincipalModeTenant {
-		return fallback, nil
+		return fallback, "", nil
 	}
 	switch cfg.Mode {
 	case types.APIPrincipalModeDirect:
 		externalUserID := strings.TrimSpace(header.Get(defaultExternalUserIDHeader))
 		if externalUserID == "" {
 			if cfg.RequireDirectHeader {
-				return types.Principal{}, errMissingDirectHeader
+				return types.Principal{}, "", errMissingDirectHeader
 			}
-			return fallback, nil
+			return fallback, "", nil
 		}
 		if err := validateExternalUserID(externalUserID); err != nil {
-			return types.Principal{}, fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
+			return types.Principal{}, "", fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
 		}
 		return types.Principal{
 			Type: types.PrincipalAPIExternalUser,
 			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
-		}, nil
+		}, "", nil
 	case types.APIPrincipalModeSignedToken:
-		externalUserID, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
-		if err != nil || externalUserID == "" {
+		tok, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
+		if errors.Is(err, errExternalUserTokenExpired) {
+			if vErr := validateExternalUserID(tok.Subject); vErr != nil {
+				return types.Principal{}, "", fmt.Errorf("%w: %v", errInvalidExternalUserID, vErr)
+			}
+			return types.Principal{
+				Type: types.PrincipalAPIExternalUser,
+				ID:   strconv.FormatUint(tenantID, 10) + ":" + tok.Subject,
+			}, tok.JTI, fmt.Errorf("%w: %w", errInvalidExternalUserToken, errExternalUserTokenExpired)
+		}
+		if err != nil || tok.Subject == "" {
 			logger.Warnf(ctx,
 				"invalid external user token for tenant=%d: error_len=%d error_type=%T",
 				tenantID, len(fmt.Sprint(err)), err)
-			return types.Principal{}, fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
+			return types.Principal{}, "", fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
 		}
-		if err := validateExternalUserID(externalUserID); err != nil {
-			return types.Principal{}, fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
+		if err := validateExternalUserID(tok.Subject); err != nil {
+			return types.Principal{}, "", fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
 		}
 		return types.Principal{
 			Type: types.PrincipalAPIExternalUser,
-			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
-		}, nil
+			ID:   strconv.FormatUint(tenantID, 10) + ":" + tok.Subject,
+		}, tok.JTI, nil
 	default:
-		return fallback, nil
+		return fallback, "", nil
 	}
 }
 
-func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (string, error) {
+// externalUserToken is a signature-checked X-External-User-Token. JTI is empty when the claim is absent
+// or not a usable string; a bad jti does not by itself reject the token.
+type externalUserToken struct {
+	Subject string
+	JTI     string // "" when absent or not a usable string
+}
+
+func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (externalUserToken, error) {
 	tokenString = strings.TrimSpace(tokenString)
 	secret = strings.TrimSpace(secret)
 	if tokenString == "" {
-		return "", errors.New("missing external user token")
+		return externalUserToken{}, errors.New("missing external user token")
 	}
 	if secret == "" {
-		return "", errors.New("external user token secret is not configured")
+		return externalUserToken{}, errors.New("external user token secret is not configured")
 	}
 	claims := jwt.MapClaims{}
 	parser := jwt.NewParser(
@@ -646,30 +698,80 @@ func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (
 		return []byte(secret), nil
 	})
 	if err != nil {
-		return "", err
+		// An expired token whose signature verified still has to match tenant_id and carry a sub;
+		// anything else keeps the original error.
+		if externalUserTokenOnlyExpired(err) {
+			if got := principalTenantIDFromClaims(claims); got != tenantID {
+				return externalUserToken{}, err
+			}
+			sub, _ := claims["sub"].(string)
+			sub = strings.TrimSpace(sub)
+			if sub == "" {
+				return externalUserToken{}, err
+			}
+			return externalUserToken{Subject: sub, JTI: externalUserJTI(claims)}, errExternalUserTokenExpired
+		}
+		return externalUserToken{}, err
 	}
 	if token == nil || !token.Valid {
-		return "", errors.New("invalid external user token")
+		return externalUserToken{}, errors.New("invalid external user token")
 	}
 	exp, err := claims.GetExpirationTime()
 	if err != nil || exp == nil {
-		return "", errors.New("missing expiration")
+		return externalUserToken{}, errors.New("missing expiration")
 	}
 	if time.Until(exp.Time) > maxExternalUserTokenTTL {
-		return "", fmt.Errorf("token lifetime exceeds %s", maxExternalUserTokenTTL)
+		return externalUserToken{}, fmt.Errorf("token lifetime exceeds %s", maxExternalUserTokenTTL)
 	}
 	if nbf, nbfErr := claims.GetNotBefore(); nbfErr == nil && nbf != nil && time.Now().Before(nbf.Time) {
-		return "", errors.New("token not yet valid")
+		return externalUserToken{}, errors.New("token not yet valid")
 	}
 	if got := principalTenantIDFromClaims(claims); got != tenantID {
-		return "", fmt.Errorf("workspace mismatch: got %d want %d", got, tenantID)
+		return externalUserToken{}, fmt.Errorf("workspace mismatch: got %d want %d", got, tenantID)
 	}
 	sub, _ := claims["sub"].(string)
 	sub = strings.TrimSpace(sub)
 	if sub == "" {
-		return "", errors.New("missing subject")
+		return externalUserToken{}, errors.New("missing subject")
 	}
-	return sub, nil
+	return externalUserToken{Subject: sub, JTI: externalUserJTI(claims)}, nil
+}
+
+// externalUserTokenOnlyExpired reports whether expiry is the only failure: v5 checks the signature before the
+// claims and joins every claim failure into the error, so any other sentinel means the token is invalid.
+func externalUserTokenOnlyExpired(err error) bool {
+	if !errors.Is(err, jwt.ErrTokenExpired) {
+		return false
+	}
+	for _, other := range []error{
+		jwt.ErrTokenMalformed, jwt.ErrTokenUnverifiable, jwt.ErrTokenSignatureInvalid, jwt.ErrTokenRequiredClaimMissing,
+		jwt.ErrTokenInvalidAudience, jwt.ErrTokenUsedBeforeIssued, jwt.ErrTokenInvalidIssuer, jwt.ErrTokenInvalidSubject,
+		jwt.ErrTokenNotValidYet, jwt.ErrTokenInvalidId, jwt.ErrInvalidType,
+	} {
+		if errors.Is(err, other) {
+			return false
+		}
+	}
+	return true
+}
+
+// externalUserJTI keeps claims["jti"] only when it is a string, trimmed, non-empty, at most 128 runes,
+// and free of control characters. Anything else is treated as absent.
+func externalUserJTI(claims jwt.MapClaims) string {
+	raw, ok := claims["jti"].(string)
+	if !ok {
+		return ""
+	}
+	jti := strings.TrimSpace(raw)
+	if jti == "" || utf8.RuneCountInString(jti) > 128 {
+		return ""
+	}
+	for _, r := range jti {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	return jti
 }
 
 func validateExternalUserID(id string) error {

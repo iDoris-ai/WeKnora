@@ -12,6 +12,22 @@ import (
 
 var ErrTenantAPIKeyNotFound = errors.New("tenant api key not found")
 
+// APIKeyUnusableError is returned for a key that matched by hash but is revoked or expired. It unwraps to
+// ErrTenantAPIKeyNotFound, so callers that only check for "not found" keep treating it the same way.
+type APIKeyUnusableError struct {
+	Key     *types.TenantAPIKey
+	Revoked bool // false: expired
+}
+
+func (e *APIKeyUnusableError) Error() string {
+	if e.Revoked {
+		return "tenant api key revoked"
+	}
+	return "tenant api key expired"
+}
+
+func (e *APIKeyUnusableError) Unwrap() error { return ErrTenantAPIKeyNotFound }
+
 type tenantAPIKeyRepository struct {
 	db *gorm.DB
 }

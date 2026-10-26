@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
@@ -22,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -78,8 +80,12 @@ type agent24AuditMetering struct {
 
 // agent24AuditDetails is the R10.1 whitelist. Absent values are JSON null; an empty reason is omitted.
 type agent24AuditDetails struct {
-	OccurredAt     string                 `json:"occurred_at"`
-	RequestID      *string                `json:"request_id"`
+	OccurredAt string  `json:"occurred_at"`
+	RequestID  *string `json:"request_id"`
+	// HTTPRequestID is the access log's request_id, character for character (the RequestID middleware value
+	// after secutils.SanitizeForLog). Longer than agent24RequestIDMaxRunes is null rather than truncated, so
+	// the two cannot disagree. Anonymous rows carry it too: it is not an identity field.
+	HTTPRequestID  *string                `json:"http_request_id"`
 	Generation     *int64                 `json:"generation"`
 	Principal      *agent24AuditPrincipal `json:"principal"`
 	CredentialID   *string                `json:"credential_id"`
@@ -299,6 +305,11 @@ func agent24AuditColumnOutcome(outcome string) types.AuditOutcome {
 func agent24AuditInfer(c *gin.Context) (outcome, reason string) {
 	switch c.Writer.Status() {
 	case http.StatusUnauthorized:
+		// The envelope normally records the reason through agent24NoteAudit. This is the fallback for a 401
+		// that noted a verified-but-unusable credential and wrote no facts.
+		if r, ok := agent24CredentialRejectionOf(c); ok {
+			return string(agent24CodeUnauthorized), r.Reason
+		}
 		return string(agent24CodeUnauthorized), "credential_invalid"
 	case http.StatusForbidden:
 		return string(agent24CodeForbidden), ""
@@ -365,7 +376,11 @@ func agent24KnowledgeAuditEntry(
 	}
 	var tenant uint64
 	if !anonymous {
-		tenant = agent24AuditTenantColumn(c)
+		if r, ok := agent24CredentialRejectionOf(c); ok {
+			tenant = r.TenantID
+		} else {
+			tenant = agent24AuditTenantColumn(c)
+		}
 	}
 	return &types.AuditLog{
 		TenantID:      tenant,
@@ -410,6 +425,7 @@ func agent24AuditDetail(
 	d := agent24AuditDetails{
 		OccurredAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		RequestID:      echo.RequestID,
+		HTTPRequestID:  agent24AuditHTTPRequestID(c),
 		Generation:     echo.Generation,
 		EffectiveScope: scope,
 		Resource:       resource,
@@ -421,11 +437,33 @@ func agent24AuditDetail(
 		},
 	}
 	if !anonymous {
-		d.Principal = agent24AuditPrincipalOf(c)
-		d.CredentialID = agent24AuditCredentialID(c)
-		d.TenantID = agent24AuditTenantDetail(c)
+		if r, ok := agent24CredentialRejectionOf(c); ok {
+			if r.Principal != (types.Principal{}) {
+				d.Principal = &agent24AuditPrincipal{Type: r.Principal.Type, ID: r.Principal.ID}
+			}
+			credentialID := r.CredentialID
+			d.CredentialID = &credentialID
+			if r.TenantID != 0 {
+				tenantID := r.TenantID
+				d.TenantID = &tenantID
+			}
+		} else {
+			d.Principal = agent24AuditPrincipalOf(c)
+			d.CredentialID = agent24AuditCredentialID(c)
+			d.TenantID = agent24AuditTenantDetail(c)
+		}
 	}
 	return d
+}
+
+// agent24AuditHTTPRequestID is the access log's request_id field. Empty after sanitizing, or longer than
+// agent24RequestIDMaxRunes, is null: the value is not truncated, so it stays identical to that field or is absent.
+func agent24AuditHTTPRequestID(c *gin.Context) *string {
+	id := secutils.SanitizeForLog(c.GetString(types.RequestIDContextKey.String()))
+	if id == "" || utf8.RuneCountInString(id) > agent24RequestIDMaxRunes {
+		return nil
+	}
+	return &id
 }
 
 func agent24AuditPrincipalOf(c *gin.Context) *agent24AuditPrincipal {
@@ -436,8 +474,8 @@ func agent24AuditPrincipalOf(c *gin.Context) *agent24AuditPrincipal {
 	return &agent24AuditPrincipal{Type: p.Type, ID: p.ID}
 }
 
-// agent24AuditCredentialID is "key:<id>" for a tenant API key. JWT jti is filled by a later slice, so every
-// other credential is null here.
+// agent24AuditCredentialID is "jti:<jti>" when the signed_token carries a jti, otherwise "key:<id>" for a
+// tenant API key. Anything else is null.
 func agent24AuditCredentialID(c *gin.Context) *string {
 	id, ok := types.CredentialIDFromContext(c.Request.Context())
 	if !ok {

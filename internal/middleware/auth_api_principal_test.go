@@ -23,7 +23,7 @@ func signedExternalUserToken(t *testing.T, secret string, claims jwt.MapClaims) 
 }
 
 func TestResolveAPIPrincipalDefaultsToTenant(t *testing.T) {
-	p, err := resolveAPIPrincipal(context.Background(), &types.Tenant{ID: 7}, http.Header{})
+	p, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{ID: 7}, http.Header{})
 	if err != nil {
 		t.Fatalf("resolveAPIPrincipal error = %v", err)
 	}
@@ -37,7 +37,7 @@ func TestResolveAPIPrincipalDirectHeader(t *testing.T) {
 	header := http.Header{}
 	header.Set("X-External-User-ID", "external-u1")
 
-	p, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	p, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode: types.APIPrincipalModeDirect,
@@ -62,7 +62,7 @@ func TestResolveAPIPrincipalSignedToken(t *testing.T) {
 		"exp":       time.Now().Add(time.Minute).Unix(),
 	}))
 
-	p, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	p, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:       types.APIPrincipalModeSignedToken,
@@ -88,7 +88,7 @@ func TestResolveAPIPrincipalSignedTokenRejectsWrongTenant(t *testing.T) {
 		"exp":       time.Now().Add(time.Minute).Unix(),
 	}))
 
-	p, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	p, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:       types.APIPrincipalModeSignedToken,
@@ -111,7 +111,7 @@ func TestResolveAPIPrincipalSignedTokenRejectsExpired(t *testing.T) {
 		"exp":       time.Now().Add(-time.Minute).Unix(),
 	}))
 
-	p, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	p, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:       types.APIPrincipalModeSignedToken,
@@ -125,7 +125,7 @@ func TestResolveAPIPrincipalSignedTokenRejectsExpired(t *testing.T) {
 }
 
 func TestResolveAPIPrincipalDirectHeaderRequired(t *testing.T) {
-	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:                types.APIPrincipalModeDirect,
@@ -141,7 +141,7 @@ func TestResolveAPIPrincipalDirectHeaderRejectsInvalidUserID(t *testing.T) {
 	header := http.Header{}
 	header.Set("X-External-User-ID", strings.Repeat("a", maxExternalUserIDLen+1))
 
-	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode: types.APIPrincipalModeDirect,
@@ -162,7 +162,7 @@ func TestResolveAPIPrincipalSignedTokenRejectsLongLifetime(t *testing.T) {
 		"exp":       time.Now().Add(48 * time.Hour).Unix(),
 	}))
 
-	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:       types.APIPrincipalModeSignedToken,
@@ -188,7 +188,7 @@ func TestResolveAPIPrincipalSignedTokenRejectionLogOmitsErrorText(t *testing.T) 
 		"exp":       time.Now().Add(time.Minute).Unix(),
 	}))
 
-	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:       types.APIPrincipalModeSignedToken,
@@ -204,5 +204,165 @@ func TestResolveAPIPrincipalSignedTokenRejectionLogOmitsErrorText(t *testing.T) 
 	}
 	if !strings.Contains(logs, "invalid external user token for tenant=7: error_len=") {
 		t.Fatalf("log missing the rejection line:\n%s", logs)
+	}
+}
+
+func TestResolveAPIPrincipalSignedTokenJTI(t *testing.T) {
+	secret := "test-secret"
+	tenant := &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:       types.APIPrincipalModeSignedToken,
+			HMACSecret: secret,
+		},
+	}
+	base := func() jwt.MapClaims {
+		return jwt.MapClaims{
+			"sub":       "external-u1",
+			"tenant_id": float64(7),
+			"aud":       "weknora",
+			"exp":       time.Now().Add(time.Minute).Unix(),
+		}
+	}
+	cases := []struct {
+		name string
+		set  func(jwt.MapClaims)
+		want string
+	}{
+		{name: "present", set: func(c jwt.MapClaims) { c["jti"] = "token-jti-1" }, want: "token-jti-1"},
+		{name: "absent"},
+		{name: "not a string", set: func(c jwt.MapClaims) { c["jti"] = float64(12) }},
+		{name: "too long", set: func(c jwt.MapClaims) { c["jti"] = strings.Repeat("j", 129) }},
+		{name: "max runes", set: func(c jwt.MapClaims) { c["jti"] = strings.Repeat("j", 128) }, want: strings.Repeat("j", 128)},
+		{name: "blank", set: func(c jwt.MapClaims) { c["jti"] = "   " }},
+		{name: "trimmed", set: func(c jwt.MapClaims) { c["jti"] = "  kept  " }, want: "kept"},
+		{name: "control", set: func(c jwt.MapClaims) { c["jti"] = "bad\njti" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := base()
+			if tc.set != nil {
+				tc.set(claims)
+			}
+			header := http.Header{}
+			header.Set("X-External-User-Token", signedExternalUserToken(t, secret, claims))
+			p, jti, err := resolveAPIPrincipal(context.Background(), tenant, header)
+			if err != nil {
+				t.Fatalf("resolveAPIPrincipal error = %v", err)
+			}
+			if jti != tc.want {
+				t.Fatalf("jti = %q, want %q", jti, tc.want)
+			}
+			if p.Type != types.PrincipalAPIExternalUser || p.ID != "7:external-u1" {
+				t.Fatalf("principal = %#v", p)
+			}
+		})
+	}
+}
+
+func TestResolveAPIPrincipalSignedTokenExpiredKeepsPrincipalAndJTI(t *testing.T) {
+	secret := "test-secret"
+	header := http.Header{}
+	header.Set("X-External-User-Token", signedExternalUserToken(t, secret, jwt.MapClaims{
+		"sub":       "external-u1",
+		"tenant_id": float64(7),
+		"aud":       "weknora",
+		"exp":       time.Now().Add(-time.Minute).Unix(),
+		"jti":       "expired-jti",
+	}))
+
+	p, jti, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:       types.APIPrincipalModeSignedToken,
+			HMACSecret: secret,
+		},
+	}, header)
+	if !errors.Is(err, errExternalUserTokenExpired) || !errors.Is(err, errInvalidExternalUserToken) {
+		t.Fatalf("resolveAPIPrincipal error = %v, want expired and invalid token", err)
+	}
+	if jti != "expired-jti" {
+		t.Fatalf("jti = %q, want expired-jti", jti)
+	}
+	if p.Type != types.PrincipalAPIExternalUser || p.ID != "7:external-u1" {
+		t.Fatalf("principal = %#v", p)
+	}
+}
+
+func TestResolveAPIPrincipalSignedTokenExpiredBadSignature(t *testing.T) {
+	header := http.Header{}
+	header.Set("X-External-User-Token", signedExternalUserToken(t, "other-secret", jwt.MapClaims{
+		"sub":       "external-u1",
+		"tenant_id": float64(7),
+		"aud":       "weknora",
+		"exp":       time.Now().Add(-time.Minute).Unix(),
+		"jti":       "expired-jti",
+	}))
+
+	_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:       types.APIPrincipalModeSignedToken,
+			HMACSecret: "test-secret",
+		},
+	}, header)
+	if err == nil {
+		t.Fatal("resolveAPIPrincipal error = nil, want error")
+	}
+	if errors.Is(err, errExternalUserTokenExpired) {
+		t.Fatalf("resolveAPIPrincipal error = %v, want it not to be expired", err)
+	}
+}
+
+func TestResolveAPIPrincipalSignedTokenExpiredWrongTenant(t *testing.T) {
+	secret := "test-secret"
+	header := http.Header{}
+	header.Set("X-External-User-Token", signedExternalUserToken(t, secret, jwt.MapClaims{
+		"sub":       "external-u1",
+		"tenant_id": float64(8),
+		"aud":       "weknora",
+		"exp":       time.Now().Add(-time.Minute).Unix(),
+		"jti":       "expired-jti",
+	}))
+
+	_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:       types.APIPrincipalModeSignedToken,
+			HMACSecret: secret,
+		},
+	}, header)
+	if err == nil {
+		t.Fatal("resolveAPIPrincipal error = nil, want error")
+	}
+	if errors.Is(err, errExternalUserTokenExpired) {
+		t.Fatalf("resolveAPIPrincipal error = %v, want it not to be expired", err)
+	}
+}
+
+// Expiry is the only claim allowed to fail for credential_expired: an expired token for another audience, or one
+// not yet valid, stays invalid.
+func TestResolveAPIPrincipalSignedTokenExpiredOtherClaimFails(t *testing.T) {
+	secret := "test-secret"
+	for name, claims := range map[string]jwt.MapClaims{
+		"audience": {"aud": "elsewhere"},
+		"nbf":      {"aud": "weknora", "nbf": time.Now().Add(time.Hour).Unix()},
+	} {
+		claims["sub"] = "external-u1"
+		claims["tenant_id"] = float64(7)
+		claims["exp"] = time.Now().Add(-time.Minute).Unix()
+		claims["jti"] = "expired-jti"
+		header := http.Header{}
+		header.Set("X-External-User-Token", signedExternalUserToken(t, secret, claims))
+		_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+			ID: 7,
+			APIPrincipalConfig: &types.APIPrincipalConfig{
+				Mode:       types.APIPrincipalModeSignedToken,
+				HMACSecret: secret,
+			},
+		}, header)
+		if err == nil || errors.Is(err, errExternalUserTokenExpired) {
+			t.Fatalf("%s: err = %v, want an invalid token that is not credential_expired", name, err)
+		}
 	}
 }

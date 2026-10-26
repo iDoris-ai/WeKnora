@@ -1061,3 +1061,186 @@ func TestAgent24KnowledgeAuditStalledRequestBodyStillWritesRow(t *testing.T) {
 		t.Fatal("the row was not written")
 	}
 }
+
+type agent24AuditIdentityView struct {
+	HTTPRequestID *string `json:"http_request_id"`
+	Principal     *struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	} `json:"principal"`
+	CredentialID *string `json:"credential_id"`
+	TenantID     *uint64 `json:"tenant_id"`
+	Reason       string  `json:"reason"`
+}
+
+func agent24AuditReadIdentity(t *testing.T, entry *types.AuditLog) agent24AuditIdentityView {
+	t.Helper()
+	var details agent24AuditIdentityView
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	return details
+}
+
+// agent24AuditWithRequestID mounts RequestID and the audit middleware and returns the one row the request wrote.
+func agent24AuditWithRequestID(
+	t *testing.T, requestID string, identity bool, handler gin.HandlerFunc,
+) *types.AuditLog {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	stub := &agent24AuditStub{}
+	r := gin.New()
+	r.Use(middleware.RequestID())
+	r.Use(Agent24KnowledgeAudit(stub))
+	if identity {
+		r.Use(agent24AuditIdentity)
+	}
+	r.POST("/api/v1/agent24/knowledge/search", handler)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	if requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Len(t, stub.entries, 1)
+	return stub.entries[0]
+}
+
+func TestAgent24KnowledgeAuditRejectionCarriesIdentity(t *testing.T) {
+	cases := []struct {
+		reason string
+		rej    types.Agent24CredentialRejection
+	}{
+		{
+			reason: "credential_expired",
+			rej: types.Agent24CredentialRejection{
+				Reason:       "credential_expired",
+				Principal:    types.Principal{Type: types.PrincipalAPIExternalUser, ID: "9:user-1"},
+				CredentialID: "jti:tok-1",
+				TenantID:     9,
+				JTI:          "tok-1",
+			},
+		},
+		{
+			reason: "credential_revoked",
+			rej: types.Agent24CredentialRejection{
+				Reason:       "credential_revoked",
+				Principal:    types.Principal{Type: types.PrincipalAPITenant, ID: "9"},
+				CredentialID: "key:8",
+				TenantID:     9,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.reason, func(t *testing.T) {
+			entry := agent24AuditWithRequestID(t, "req-"+tc.reason, false, func(c *gin.Context) {
+				c.Set(types.Agent24CredentialRejectionKey, tc.rej)
+				writeAgent24KnowledgeError(c, agent24Unauthorized(tc.reason), agent24KnowledgeEcho{})
+			})
+			require.Equal(t, tc.rej.TenantID, entry.TenantID)
+			details := agent24AuditReadIdentity(t, entry)
+			require.Equal(t, tc.reason, details.Reason)
+			require.NotNil(t, details.Principal)
+			require.Equal(t, tc.rej.Principal.Type, details.Principal.Type)
+			require.Equal(t, tc.rej.Principal.ID, details.Principal.ID)
+			require.NotNil(t, details.CredentialID)
+			require.Equal(t, tc.rej.CredentialID, *details.CredentialID)
+			require.NotNil(t, details.TenantID)
+			require.Equal(t, tc.rej.TenantID, *details.TenantID)
+			require.NotNil(t, details.HTTPRequestID)
+			require.Equal(t, "req-"+tc.reason, *details.HTTPRequestID)
+		})
+	}
+}
+
+func TestAgent24KnowledgeAuditInvalidCredentialIsAnonymous(t *testing.T) {
+	entry := agent24AuditWithRequestID(t, "req-invalid", true, func(c *gin.Context) {
+		writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), agent24KnowledgeEcho{})
+	})
+	require.Equal(t, uint64(0), entry.TenantID)
+	details := agent24AuditReadIdentity(t, entry)
+	require.Equal(t, "credential_invalid", details.Reason)
+	require.Nil(t, details.Principal)
+	require.Nil(t, details.CredentialID)
+	require.Nil(t, details.TenantID)
+	require.NotNil(t, details.HTTPRequestID)
+	require.Equal(t, "req-invalid", *details.HTTPRequestID)
+}
+
+func TestAgent24KnowledgeAuditHTTPRequestID(t *testing.T) {
+	t.Run("anonymous row", func(t *testing.T) {
+		entry := agent24AuditWithRequestID(t, "req-anon", false, func(c *gin.Context) {
+			c.AbortWithStatus(http.StatusUnauthorized)
+		})
+		details := agent24AuditReadIdentity(t, entry)
+		require.NotNil(t, details.HTTPRequestID)
+		require.Equal(t, "req-anon", *details.HTTPRequestID)
+		require.Nil(t, details.Principal)
+		require.Nil(t, details.CredentialID)
+		require.Nil(t, details.TenantID)
+	})
+	t.Run("over 128 runes", func(t *testing.T) {
+		longID := strings.Repeat("a", agent24RequestIDMaxRunes+1)
+		entry := agent24AuditWithRequestID(t, longID, false, func(c *gin.Context) {
+			c.AbortWithStatus(http.StatusUnauthorized)
+		})
+		details := agent24AuditReadIdentity(t, entry)
+		require.Nil(t, details.HTTPRequestID)
+		require.NotContains(t, string(entry.Details), longID)
+	})
+	t.Run("100 multibyte runes", func(t *testing.T) {
+		id := strings.Repeat("你", 100)
+		entry := agent24AuditWithRequestID(t, id, false, func(c *gin.Context) {
+			c.AbortWithStatus(http.StatusUnauthorized)
+		})
+		details := agent24AuditReadIdentity(t, entry)
+		require.NotNil(t, details.HTTPRequestID)
+		require.Equal(t, id, *details.HTTPRequestID)
+	})
+}
+
+func TestAgent24KnowledgeAuditJTICredentialID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24AuditStub{}
+	r := gin.New()
+	r.Use(middleware.RequestID())
+	r.Use(Agent24KnowledgeAudit(stub))
+	r.POST("/api/v1/agent24/knowledge/ready", func(c *gin.Context) {
+		ctx := types.WithCaller(c.Request.Context(), types.Caller{TenantID: 9})
+		ctx = types.WithAgent24TokenJTI(ctx, "abc")
+		ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KeyID: 7})
+		c.Request = c.Request.WithContext(ctx)
+		agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Outcome = agent24AuditOK })
+		c.Status(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", strings.NewReader("{}"))
+	req.Header.Set("X-Request-ID", "req-jti")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, stub.entries, 1)
+	require.Equal(t, uint64(9), stub.entries[0].TenantID)
+	details := agent24AuditReadIdentity(t, stub.entries[0])
+	require.NotNil(t, details.CredentialID)
+	require.Equal(t, "jti:abc", *details.CredentialID)
+	require.NotNil(t, details.HTTPRequestID)
+	require.Equal(t, "req-jti", *details.HTTPRequestID)
+}
+
+// A 401 that noted a verified-but-unusable credential and wrote no facts still records that reason.
+func TestAgent24KnowledgeAuditInfersCredentialRejection(t *testing.T) {
+	entry := agent24AuditWithRequestID(t, "req-infer", false, func(c *gin.Context) {
+		c.Set(types.Agent24CredentialRejectionKey, types.Agent24CredentialRejection{
+			Reason:       "credential_expired",
+			Principal:    types.Principal{Type: types.PrincipalAPIExternalUser, ID: "9:user-1"},
+			CredentialID: "jti:tok-1",
+			TenantID:     9,
+			JTI:          "tok-1",
+		})
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	require.Equal(t, uint64(9), entry.TenantID)
+	details := agent24AuditReadIdentity(t, entry)
+	require.Equal(t, "credential_expired", details.Reason)
+	require.NotNil(t, details.Principal)
+	require.Equal(t, "jti:tok-1", *details.CredentialID)
+}

@@ -25,15 +25,18 @@ func TestAgent24IntegrationCredentialGate(t *testing.T) {
 		scope      *types.TenantAPIKeyScope
 		tenant     *types.Tenant
 		externalID string
+		jti        string
 		allowed    bool
 	}{
-		{"platform key", platformKey, &types.Tenant{ID: 1}, "", false},
-		{"direct without header", tenantKey, withMode(types.APIPrincipalModeDirect), "", false},
-		{"direct with header", tenantKey, withMode(types.APIPrincipalModeDirect), "u1", false},
-		{"signed token", tenantKey, withMode(types.APIPrincipalModeSignedToken), "", true},
-		{"default mode", tenantKey, &types.Tenant{ID: 1}, "", true},
-		{"tenant key without tenant", tenantKey, nil, "", false},
-		{"jwt user", nil, &types.Tenant{ID: 1}, "", true},
+		{"platform key", platformKey, &types.Tenant{ID: 1}, "", "", false},
+		{"direct without header", tenantKey, withMode(types.APIPrincipalModeDirect), "", "", false},
+		{"direct with header", tenantKey, withMode(types.APIPrincipalModeDirect), "u1", "", false},
+		{"signed token", tenantKey, withMode(types.APIPrincipalModeSignedToken), "", "j-1", true},
+		// R1.6: integration mode requires a jti on a signed_token credential.
+		{"signed token without jti", tenantKey, withMode(types.APIPrincipalModeSignedToken), "", "", false},
+		{"default mode", tenantKey, &types.Tenant{ID: 1}, "", "", true},
+		{"tenant key without tenant", tenantKey, nil, "", "", false},
+		{"jwt user", nil, &types.Tenant{ID: 1}, "", "", true},
 	}
 	for _, tc := range cases {
 		for _, path := range []string{"/api/v1/agent24/knowledge/ready", "/api/v1/system/capabilities"} {
@@ -47,6 +50,9 @@ func TestAgent24IntegrationCredentialGate(t *testing.T) {
 					}
 					if tc.tenant != nil {
 						ctx = context.WithValue(ctx, types.TenantInfoContextKey, tc.tenant)
+					}
+					if tc.jti != "" {
+						ctx = types.WithAgent24TokenJTI(ctx, tc.jti)
 					}
 					c.Request = c.Request.WithContext(ctx)
 				}, Agent24IntegrationCredentialGate())

@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // agent24HeldWriter keeps the status and body written through it and sends nothing. Header() is the real
@@ -99,10 +101,37 @@ func agent24AuthRejection(c *gin.Context, status int) *agent24KnowledgeError {
 	case http.StatusBadRequest:
 		return agent24InvalidRequest()
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict:
+		if status == http.StatusUnauthorized {
+			if r, ok := agent24CredentialRejectionOf(c); ok {
+				return agent24Unauthorized(r.Reason)
+			}
+		}
 		if c.GetHeader("Authorization") == "" && c.GetHeader("X-API-Key") == "" {
 			return agent24Unauthorized("credential_missing")
 		}
 		return agent24Unauthorized("credential_invalid")
 	}
 	return agent24Internal()
+}
+
+// agent24CredentialRejectionOf returns a rejection Auth noted for a credential whose signature or hash
+// verified but that is expired or revoked. Any other reason is ignored. A signed_token principal with no
+// jti is ignored too: integration mode requires a jti, so that token is credential_invalid whether or not
+// it has expired.
+func agent24CredentialRejectionOf(c *gin.Context) (types.Agent24CredentialRejection, bool) {
+	v, ok := c.Get(types.Agent24CredentialRejectionKey)
+	if !ok {
+		return types.Agent24CredentialRejection{}, false
+	}
+	r, ok := v.(types.Agent24CredentialRejection)
+	if !ok {
+		return types.Agent24CredentialRejection{}, false
+	}
+	if r.Reason != "credential_expired" && r.Reason != "credential_revoked" {
+		return types.Agent24CredentialRejection{}, false
+	}
+	if r.Principal.Type == types.PrincipalAPIExternalUser && r.JTI == "" {
+		return types.Agent24CredentialRejection{}, false
+	}
+	return r, true
 }
