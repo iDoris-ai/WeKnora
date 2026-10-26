@@ -8,6 +8,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -144,6 +145,18 @@ func mimeToExt(mime string) string {
 	}
 }
 
+// storageProviderForLog returns an allowlisted provider name. Agent config is
+// not validated, so a URL or other free-form value is logged as a length only.
+func storageProviderForLog(p string) string {
+	name := strings.ToLower(strings.TrimSpace(p))
+	for _, supported := range storageallowlist.Supported() {
+		if name == supported {
+			return name
+		}
+	}
+	return fmt.Sprintf("(unsupported len=%d)", len(p))
+}
+
 func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider string) interfaces.FileService {
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant == nil {
@@ -158,7 +171,7 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 		if err != nil {
 			logger.Warnf(ctx,
 				"[image-storage] failed to resolve storage instance for provider=%s: error_len=%d error_type=%T",
-				storageProvider, len(fmt.Sprint(err)), err)
+				storageProviderForLog(storageProvider), len(fmt.Sprint(err)), err)
 		}
 	}
 	if strings.TrimSpace(storageProvider) == "" || tenant.StorageEngineConfig == nil {
@@ -169,7 +182,7 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 	if err != nil {
 		logger.Warnf(ctx,
 			"[image-storage] failed to create %s file service: error_len=%d error_type=%T, fallback to default",
-			storageProvider, len(fmt.Sprint(err)), err)
+			storageProviderForLog(storageProvider), len(fmt.Sprint(err)), err)
 		return h.fileService
 	}
 	logger.Infof(ctx, "[image-storage] using provider=%s for image uploads", resolvedProvider)
