@@ -68,7 +68,8 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 
 	vlmModel, err := h.modelService.GetVLMModel(ctx, vlmModelID)
 	if err != nil {
-		logger.Warnf(ctx, "No VLM model available for image analysis, skipping: %v", err)
+		logger.Warnf(ctx, "No VLM model available for image analysis, skipping: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return
 	}
 
@@ -79,13 +80,16 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 		}
 		imgBytes, _, decErr := decodeDataURI(img.Data)
 		if decErr != nil {
-			logger.Warnf(ctx, "Failed to decode image %d for VLM analysis: %v", i, decErr)
+			logger.Warnf(ctx, "Failed to decode image %d for VLM analysis: error_len=%d error_type=%T",
+				i, len(fmt.Sprint(decErr)), decErr)
 			continue
 		}
 		prompt := buildImageAnalysisPrompt(userQuery)
 		analysis, analysisErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if analysisErr != nil {
-			logger.Warnf(ctx, "VLM analysis failed for image %d: %v", i, analysisErr)
+			logger.Warnf(ctx,
+				"VLM analysis failed for image %d: error_len=%d error_type=%T",
+				i, len(fmt.Sprint(analysisErr)), analysisErr)
 		} else {
 			img.Caption = analysis
 		}

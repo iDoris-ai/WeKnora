@@ -608,3 +608,50 @@ func TestErrorWithFieldsOmitsErrorText(t *testing.T) {
 		t.Fatalf("log = %s, want session_id=sess-1", logs)
 	}
 }
+
+func TestErrorWithFieldsDropsCallerErrorKey(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	SetOutput(&buf)
+	SetLogLevel(LevelDebug)
+	t.Cleanup(ConfigureFromEnv)
+
+	fields := logrus.Fields{
+		"error":      sentinel,
+		"session_id": "sess-1",
+	}
+	ErrorWithFields(context.Background(), errors.New("boom"), fields)
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("ErrorWithFields leaked caller error text: %s", logs)
+	}
+	if !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log = %s, want error_len=", logs)
+	}
+	if got, ok := fields["error"].(string); !ok || got != sentinel {
+		t.Fatalf("caller map error = %#v, want %q", fields["error"], sentinel)
+	}
+}
+
+// typedNilErr's Error dereferences its receiver, so a nil *typedNilErr inside an error panics on Error().
+type typedNilErr struct{ msg string }
+
+func (e *typedNilErr) Error() string { return e.msg }
+
+// A nil pointer inside a non-nil error must not make the log call panic; fmt.Sprint recovers from it.
+func TestErrorWithFieldsTypedNilErrorDoesNotPanic(t *testing.T) {
+	var buf bytes.Buffer
+	SetOutput(&buf)
+	SetLogLevel(LevelDebug)
+	t.Cleanup(ConfigureFromEnv)
+
+	var p *typedNilErr
+	var err error = p
+	ErrorWithFields(context.Background(), err, logrus.Fields{"session_id": "sess-1"})
+
+	logs := buf.String()
+	if !strings.Contains(logs, "error_type=*logger.typedNilErr") || !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log = %s, want error_len and error_type", logs)
+	}
+}

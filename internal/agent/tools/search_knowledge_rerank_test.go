@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -223,10 +225,89 @@ func TestRerankResults_keywordModeOrdersWithoutFiltering(t *testing.T) {
 	}
 }
 
+// A knowledge-scoped target (not a whole knowledge base) fails in HybridSearch and
+// logs at the per-KB search site. The tool result still carries the error text.
+func TestExecuteKnowledgeTargetSearchFailureLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	tool := NewSearchKnowledgeTool(
+		&failingSearchKBService{err: errors.New(sentinel)}, nil, nil,
+		types.SearchTargets{{
+			Type:            types.SearchTargetTypeKnowledge,
+			KnowledgeBaseID: "kb-1",
+			KnowledgeIDs:    []string{"doc-1"},
+			TenantID:        1,
+		}},
+		nil, &config.Config{Conversation: &config.ConversationConfig{}},
+	)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"refund policy"}`))
+	if err != nil || res == nil {
+		t.Fatalf("Execute: res=%+v err=%v", res, err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log leaked error text: %s", logs)
+	}
+	if !strings.Contains(logs, "Failed to search KB kb-1: error_len=") {
+		t.Fatalf("log = %s, want the per-KB search failure", logs)
+	}
+}
+
 func TestEmptySearchStatementDoesNotSendKeywordModeBackToKeyword(t *testing.T) {
 	t.Parallel()
 	msg := emptySearchStatement("ERR_4012", map[string]interface{}{"mode": SearchModeKeyword}, 1)
 	if strings.Contains(msg, "retry with mode=keyword") {
 		t.Fatalf("keyword-mode statement suggests keyword mode: %q", msg)
+	}
+}
+
+// A whole-knowledge-base target fails at the combined search site; the log keeps the KB ids only.
+func TestExecuteCombinedSearchFailureLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	tool := NewSearchKnowledgeTool(
+		&failingSearchKBService{err: errors.New(sentinel)}, nil, nil,
+		types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1}},
+		nil, &config.Config{Conversation: &config.ConversationConfig{}},
+	)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"refund policy"}`))
+	if err != nil || res == nil {
+		t.Fatalf("Execute: res=%+v err=%v", res, err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log leaked error text: %s", logs)
+	}
+	if !strings.Contains(logs, "Combined search failed for KBs [kb-1]: error_len=") {
+		t.Fatalf("log = %s, want the combined search failure", logs)
+	}
+}
+
+// The rerank vendor's error can echo the query or the passages; the log keeps its length.
+func TestRerankResults_modelErrorLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	tool := newRerankTestTool(&stubReranker{err: errors.New("upstream echoed " + sentinel)})
+	if _, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false); err != nil {
+		t.Fatalf("rerankResults returned error: %v", err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log leaked error text: %s", logs)
+	}
+	if !strings.Contains(logs, "Rerank model failed, using raw retrieval results: error_len=") {
+		t.Fatalf("log = %s, want the rerank model failure", logs)
 	}
 }

@@ -72,7 +72,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 			return nil, fmt.Errorf("LLM stream stalled: no output for %s", stallTimeout)
 		}
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: error_len=%d error_type=%T",
-			len(err.Error()), err)
+			len(fmt.Sprint(err)), err)
 		return nil, err
 	}
 
@@ -463,7 +463,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: error_len=%d error_type=%T",
-			iteration+1, len(err.Error()), err)
+			iteration+1, len(fmt.Sprint(err)), err)
 		return nil, err
 	}
 
@@ -559,7 +559,7 @@ func (e *AgentEngine) callLLMWithRetry(
 	if err != nil && !e.overflowRecovered && compaction.IsOverflowError(err) {
 		e.overflowRecovered = true
 		logger.Warnf(ctx, "[Agent][Round-%d] Provider rejected the request as too large; "+
-			"compacting and retrying once: %v", round, err)
+			"compacting and retrying once: error_len=%d error_type=%T", round, len(fmt.Sprint(err)), err)
 		// The engine's copy stays unsanitized. Sanitizing merges consecutive
 		// same-role messages, and the summary is a `user` message that can end
 		// up adjacent to a real one — merging them folds live conversation
@@ -579,7 +579,7 @@ func (e *AgentEngine) callLLMWithRetry(
 			retryDelay := llmRetryDelay(err, retry)
 			logger.Warnf(ctx,
 				"[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: error_len=%d error_type=%T",
-				round, retry, maxLLMRetries, retryDelay, len(err.Error()), err)
+				round, retry, maxLLMRetries, retryDelay, len(fmt.Sprint(err)), err)
 			// A stop pressed during the backoff ends the turn now rather than
 			// after the delay and one more doomed request.
 			select {
@@ -598,7 +598,7 @@ func (e *AgentEngine) callLLMWithRetry(
 	}
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: error_len=%d error_type=%T",
-			round, len(err.Error()), err)
+			round, len(fmt.Sprint(err)), err)
 		common.PipelineError(ctx, "Agent", "think_failed", map[string]interface{}{
 			"iteration": iteration,
 			"error":     err.Error(),
@@ -616,7 +616,7 @@ func (e *AgentEngine) callLLMWithRetry(
 			})
 			if synthErr := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, messages); synthErr != nil {
 				logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: error_len=%d error_type=%T",
-					len(synthErr.Error()), synthErr)
+					len(fmt.Sprint(synthErr)), synthErr)
 				return nil, fmt.Errorf("LLM call failed: %w (synthesis also failed: %v)", err, synthErr)
 			}
 			state.IsComplete = true

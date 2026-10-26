@@ -418,7 +418,7 @@ func (e *AgentEngine) Execute(
 
 	_, err := e.executeLoop(ctx, state, query, messages, tools, sessionID, messageID)
 	if err != nil {
-		logger.Errorf(ctx, "[Agent] Execution failed: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "[Agent] Execution failed: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("error"),
 			Type:      event.EventError,
@@ -1150,7 +1150,7 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs, prompts
 			if err != nil {
 				logger.Warnf(ctx,
 					"[Agent] VLM analysis failed for tool result image %d: error_len=%d error_type=%T",
-					i, len(err.Error()), err)
+					i, len(fmt.Sprint(err)), err)
 				return
 			}
 			descriptions[i] = strings.TrimSpace(desc)

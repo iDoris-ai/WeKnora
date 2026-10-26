@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 func TestSearchErrorLogOmitsBackendErrorText(t *testing.T) {
@@ -96,5 +97,63 @@ func TestSearchParallelErrorLogOmitsBackendErrorText(t *testing.T) {
 	}
 	if strings.Contains(out, sentinel) {
 		t.Fatalf("log carries the backend error text: %s", out)
+	}
+}
+
+type failingEntityGraphRepo struct {
+	interfaces.RetrieveGraphRepository
+	err error
+}
+
+func (r *failingEntityGraphRepo) SearchNode(context.Context, types.NameSpace, []string) (*types.GraphData, error) {
+	return nil, r.err
+}
+
+func TestSearchEntityFailureLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	cases := []struct {
+		name    string
+		manage  *types.ChatManage
+		wantLog string
+	}{
+		{
+			name: "knowledge file",
+			manage: &types.ChatManage{PipelineState: types.PipelineState{
+				Entity:          []string{"Docker"},
+				EntityKnowledge: map[string]string{"doc-1": "kb-1"},
+			}},
+			wantLog: "Failed to search entity in Knowledge doc-1: error_len=",
+		},
+		{
+			name: "knowledge base",
+			manage: &types.ChatManage{PipelineState: types.PipelineState{
+				Entity:      []string{"Docker"},
+				EntityKBIDs: []string{"kb-1"},
+			}},
+			wantLog: "Failed to search entity in KB kb-1: error_len=",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger.SetOutput(&buf)
+			logger.SetLogLevel(logger.LevelDebug)
+			t.Cleanup(logger.ConfigureFromEnv)
+
+			plugin := &PluginSearchEntity{graphRepo: &failingEntityGraphRepo{err: errors.New(sentinel)}}
+			err := plugin.OnEvent(
+				context.Background(), types.ENTITY_SEARCH, tc.manage, func() *PluginError { return nil },
+			)
+			if err != nil {
+				t.Fatalf("OnEvent: %v", err)
+			}
+			out := buf.String()
+			if strings.Contains(out, sentinel) {
+				t.Fatalf("log carries the graph error text: %s", out)
+			}
+			if !strings.Contains(out, tc.wantLog) {
+				t.Fatalf("log = %s, want %s", out, tc.wantLog)
+			}
+		})
 	}
 }

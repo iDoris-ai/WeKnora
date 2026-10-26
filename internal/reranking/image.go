@@ -3,6 +3,7 @@ package reranking
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"sync"
 	"unicode/utf8"
@@ -86,7 +87,9 @@ func imageCandidates(
 		group.Go(func() error {
 			data, err := opts.LoadImage(groupCtx, r)
 			if err != nil {
-				logger.Warnf(groupCtx, "[Rerank] Image of %s unreadable, scoring its text: %v", r.ID, err)
+				// The reader's error quotes the image URL.
+				logger.Warnf(groupCtx, "[Rerank] Image of %s unreadable, scoring its text: error_len=%d error_type=%T",
+					r.ID, len(fmt.Sprint(err)), err)
 				return nil
 			}
 			img, err := imageprep.Prepare(data, limits)

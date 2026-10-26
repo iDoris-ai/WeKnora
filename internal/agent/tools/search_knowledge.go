@@ -273,7 +273,9 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	if t.rerankModel != nil && len(deduplicated) > 0 {
 		reranked, err := t.rerankResults(ctx, query, deduplicated, mode == SearchModeKeyword)
 		if err != nil {
-			logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank failed, using retrieval order: %v", err)
+			logger.Warnf(ctx,
+				"[Tool][SearchKnowledge] Rerank failed, using retrieval order: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		} else {
 			ranked = reranked
 			if len(reranked) == 0 {
@@ -694,8 +696,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			if modelKey != "" && needsEmbedding {
 				emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, query)
 				if err != nil {
-					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding for model %s: %v",
-						modelKey, err)
+					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding for model %s: "+
+						"error_len=%d error_type=%T", modelKey, len(fmt.Sprint(err)), err)
 					embedErr = err
 				} else {
 					queryEmbedding = emb
@@ -764,8 +766,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						SkipContextEnrichment: true,
 					})
 					if err != nil {
-						logger.Warnf(ctx, "[Tool][SearchKnowledge] Combined search failed for KBs %v: %v",
-							fullKBIDs, err)
+						logger.Warnf(ctx, "[Tool][SearchKnowledge] Combined search failed for KBs %v: "+
+							"error_len=%d error_type=%T", fullKBIDs, len(fmt.Sprint(err)), err)
 						fail(fullKBIDs, err)
 						return
 					}
@@ -802,7 +804,9 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						SkipContextEnrichment: true,
 					})
 					if err != nil {
-						logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
+						logger.Warnf(ctx,
+							"[Tool][SearchKnowledge] Failed to search KB %s: error_len=%d error_type=%T",
+							st.KnowledgeBaseID, len(fmt.Sprint(err)), err)
 						fail([]string{st.KnowledgeBaseID}, err)
 						return
 					}
@@ -858,8 +862,8 @@ func (t *SearchKnowledgeTool) rerankResults(
 	}
 	res := reranking.Rerank(ctx, t.rerankModel, query, rows, opts)
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",
-			res.Diagnostics.Error)
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: error_len=%d",
+			len(res.Diagnostics.Error))
 		return results, nil
 	}
 
