@@ -41,7 +41,9 @@ func NewFactory() im.AdapterFactory {
 			wsCtx, wsCancel := context.WithCancel(context.Background())
 			go func() {
 				if err := client.Start(wsCtx); err != nil && wsCtx.Err() == nil {
-					logger.Errorf(context.Background(), "[IM] Slack long connection stopped for channel %s: %v", channel.ID, err)
+					logger.Errorf(context.Background(),
+						"[IM] Slack long connection stopped for channel %s: error_len=%d error_type=%T",
+						channel.ID, len(fmt.Sprint(err)), err)
 				}
 			}()
 

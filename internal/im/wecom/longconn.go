@@ -205,7 +205,9 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 		}
 
 		delay := reconnectDelay(attempts)
-		logger.Warnf(ctx, "[WeCom] Connection lost (%v), reconnecting in %v (attempt %d)...", err, delay, attempts)
+		logger.Warnf(ctx,
+			"[WeCom] Connection lost (error_len=%d error_type=%T), reconnecting in %v (attempt %d)...",
+			len(fmt.Sprint(err)), err, delay, attempts)
 
 		select {
 		case <-time.After(delay):
@@ -418,7 +420,8 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 
 		var frame wsFrame
 		if err := json.Unmarshal(message, &frame); err != nil {
-			logger.Warnf(ctx, "[WeCom] Failed to unmarshal frame: %v", err)
+			logger.Warnf(ctx, "[WeCom] Failed to unmarshal frame: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			continue
 		}
 
@@ -491,7 +494,9 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn) {
 				Headers: map[string]string{"req_id": reqID},
 			}
 			if err := c.writeJSON(frame); err != nil {
-				logger.Warnf(ctx, "[WeCom] Heartbeat failed: %v, closing connection to trigger reconnect", err)
+				logger.Warnf(ctx,
+					"[WeCom] Heartbeat failed: error_len=%d error_type=%T, closing connection to trigger reconnect",
+					len(fmt.Sprint(err)), err)
 				c.closeConnIf(conn)
 				return
 			}
@@ -504,7 +509,8 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 
 	var msg botMessage
 	if err := json.Unmarshal(frame.Body, &msg); err != nil {
-		logger.Warnf(ctx, "[WeCom] Failed to unmarshal callback body: %v", err)
+		logger.Warnf(ctx, "[WeCom] Failed to unmarshal callback body: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return
 	}
 

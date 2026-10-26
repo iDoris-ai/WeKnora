@@ -18,6 +18,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -442,6 +443,25 @@ func TestDownloadFromURLUnparseableURLRedactsAccessToken(t *testing.T) {
 	}
 }
 
+// A host that starts with a digit, has a port, and has no scheme passes the SSRF
+// check (it is parsed as https://host:port/...) and fails only in NewRequest.
+func TestDownloadFromURLDigitHostPortWithoutSchemeRedactsAccessToken(t *testing.T) {
+	secutils.SetSSRFWhitelistFromRaw("1password.com")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	const sentinel = "S3NT1NEL"
+	_, _, err := downloadFromURL(context.Background(),
+		"1password.com:443/file?access_token="+sentinel, "f", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create request:") {
+		t.Fatalf("error = %v, want create request failure", err)
+	}
+}
+
 func TestSendReplyAppChatFailureLogOmitsAccessToken(t *testing.T) {
 	var buf bytes.Buffer
 	logger.SetOutput(&buf)
@@ -497,5 +517,19 @@ func TestSendReplyAppChatFailureLogOmitsAccessToken(t *testing.T) {
 	}
 	if strings.Contains(logs, "error_type=<nil>") {
 		t.Fatalf("log error_type is nil: %s", logs)
+	}
+}
+
+func TestValidateEndpointURLParseErrorOmitsURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	err := validateEndpointURL("https://qyapi.example.com/%zz?sig="+sentinel, "https://qyapi.weixin.qq.com", "https")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains endpoint secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid endpoint URL:") {
+		t.Fatalf("error = %v, want invalid endpoint URL", err)
 	}
 }

@@ -1,12 +1,18 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestFeishuThreadID_ThreadedReply(t *testing.T) {
@@ -499,5 +505,123 @@ func assertStreamingClosed(t *testing.T, raw, wantSummary string) {
 	}
 	if settings.Config.Summary == nil || settings.Config.Summary.Content != wantSummary {
 		t.Fatalf("summary = %v, want %q in %s", settings.Config.Summary, wantSummary, raw)
+	}
+}
+
+type imageDownloadRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f imageDownloadRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestUploadImageFromURLDoRedactsSignedURL(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("cdn.example.com")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	saved := feishuImageDownloadClient
+	feishuImageDownloadClient = &http.Client{
+		Transport: imageDownloadRoundTrip(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { feishuImageDownloadClient = saved })
+
+	const sentinel = "S3NT1NEL"
+	rawURL := "https://cdn.example.com/a.png?X-Amz-Signature=" + sentinel
+	_, err := (&Adapter{}).uploadImageFromURL(context.Background(), "token", rawURL)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signature: %v", err)
+	}
+	if !strings.Contains(err.Error(), "download image:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want download failure", err)
+	}
+}
+
+func TestUploadImageFromURLCreateRequestRedactsUnparseableSignedURL(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("1password.com")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	const sentinel = "S3NT1NEL"
+	rawURL := "1password.com:443/a.png?X-Amz-Signature=" + sentinel
+	_, err := (&Adapter{}).uploadImageFromURL(context.Background(), "token", rawURL)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signature: %v", err)
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("error = %v, want parse failure", err)
+	}
+}
+
+func TestUploadImageFromURLSSRFRejectionRedactsSignedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	// A control character makes the SSRF check's url.Parse fail; its error quotes the URL.
+	rawURL := "https://img.example.com/a.png?X-Amz-Signature=" + sentinel + "\n"
+	_, err := (&Adapter{}).uploadImageFromURL(context.Background(), "token", rawURL)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signature: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssrf validation:") {
+		t.Fatalf("error = %v, want ssrf validation failure", err)
+	}
+}
+
+// The SDK logs the wss URL with its query, message payloads and raw errors.
+func TestFeishuLoggerAdapterOmitsSDKText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	l := &feishuLoggerAdapter{region: Region{Label: "Feishu"}, appID: "cli_1"}
+	ctx := context.Background()
+	// Shapes follow oapi-sdk-go v3 ws/client.go: fmtLog yields the formatted text plus
+	// an optional "[conn_id=...]"; the status-code warning passes its int unformatted.
+	l.Info(ctx, "disconnected to wss://open.feishu.cn/ws?ticket="+sentinel, "[conn_id=c1]")
+	l.Info(ctx, "trying to reconnect: 3", "[conn_id=c1]")
+	// The receive-message Debug call passes fmtLog's slice unexpanded.
+	l.Debug(ctx, []interface{}{
+		`receive message, message_type: event, payload: {"text":"` + sentinel + `"}`, "[conn_id=c1]",
+	})
+	l.Warn(ctx, "response status code %d", 401)
+	l.Error(ctx, "connect failed, err: dial wss://open.feishu.cn/ws?ticket="+sentinel)
+	l.Error(ctx, errors.New("read: "+sentinel))
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains SDK text: %s", logs)
+	}
+	for _, want := range []string{
+		"WebSocket disconnected (app_id=cli_1)",
+		`sdk info: event="trying to reconnect" attempt=3 arg_types=[string,string]`,
+		`sdk debug: event="receive message" arg_types=[string,string]`,
+		`sdk warn: event="response status code" int_args=[401] arg_types=[string,int]`,
+		`sdk error: event="connect failed" arg_types=[string]`,
+		`sdk error: event="unknown" arg_types=[*errors.errorString]`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("log missing %q: %s", want, logs)
+		}
+	}
+}
+
+func TestValidateAPIBaseURLParseErrorOmitsURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	err := validateAPIBaseURL("https://open.example.com/%zz?sig="+sentinel, "https://open.feishu.cn")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains base URL secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid api_base_url:") {
+		t.Fatalf("error = %v, want invalid api_base_url", err)
 	}
 }

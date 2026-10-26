@@ -6,10 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/im"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 func useTestHTTPClient(t *testing.T) {
@@ -170,5 +172,113 @@ func TestIsAllowedDingTalkDownloadHost(t *testing.T) {
 		if got := isAllowedDingTalkDownloadHost(tc.url); got != tc.allow {
 			t.Errorf("isAllowedDingTalkDownloadHost(%q) = %v, want %v", tc.url, got, tc.allow)
 		}
+	}
+}
+
+func jsonOK(req *http.Request, body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}
+}
+
+func TestDownloadFileDoRedactsSignedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	previous := httpClient
+	t.Cleanup(func() { httpClient = previous })
+	signed := "https://wukong-abc.oss-cn-hangzhou.aliyuncs.com/file?sig=" + sentinel
+	httpClient = &http.Client{Transport: sessionReplyTransport(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			return jsonOK(req, `{"accessToken":"tok","expireIn":7200}`), nil
+		case "/v1.0/robot/messageFiles/download":
+			return jsonOK(req, `{"downloadUrl":"`+signed+`"}`), nil
+		default:
+			return nil, context.DeadlineExceeded
+		}
+	})}
+
+	a := &Adapter{clientID: "cid", clientSecret: "sec"}
+	_, _, err := a.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signed URL secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "download file:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want download failure", err)
+	}
+}
+
+func TestDownloadFileCreateRequestRedactsUnparseableSignedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	secutils.SetSSRFWhitelistFromRaw("1password.com")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	previous := httpClient
+	t.Cleanup(func() { httpClient = previous })
+	rawURL := "1password.com:443/file?sig=" + sentinel
+	httpClient = &http.Client{Transport: sessionReplyTransport(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			return jsonOK(req, `{"accessToken":"tok","expireIn":7200}`), nil
+		case "/v1.0/robot/messageFiles/download":
+			return jsonOK(req, `{"downloadUrl":"`+rawURL+`"}`), nil
+		default:
+			t.Errorf("unexpected request %s", req.URL.Path)
+			return nil, context.DeadlineExceeded
+		}
+	})}
+
+	a := &Adapter{clientID: "cid", clientSecret: "sec"}
+	_, _, err := a.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signed URL secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create download request:") {
+		t.Fatalf("error = %v, want create request failure", err)
+	}
+}
+
+func TestDownloadFileRejectedURLRedactsSignedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	previous := httpClient
+	t.Cleanup(func() { httpClient = previous })
+	// The escaped newline decodes to a control character, so the SSRF check's url.Parse
+	// fails and its error quotes the signed URL.
+	rawURL := "https://files.example.com/file?sig=" + sentinel + "\\n"
+	httpClient = &http.Client{Transport: sessionReplyTransport(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			return jsonOK(req, `{"accessToken":"tok","expireIn":7200}`), nil
+		case "/v1.0/robot/messageFiles/download":
+			return jsonOK(req, `{"downloadUrl":"`+rawURL+`"}`), nil
+		default:
+			t.Errorf("unexpected request %s", req.URL.Path)
+			return nil, context.DeadlineExceeded
+		}
+	})}
+
+	a := &Adapter{clientID: "cid", clientSecret: "sec"}
+	_, _, err := a.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signed URL secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "download url rejected:") {
+		t.Fatalf("error = %v, want download url rejected", err)
 	}
 }

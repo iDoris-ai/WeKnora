@@ -302,16 +302,18 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", err
 	}
 	if err := validateFileDownloadURL(downloadURL); err != nil {
-		return nil, "", fmt.Errorf("download url rejected: %w", err)
+		// Agent24 KB-OBS-01: a parse failure quotes the signed temporary download URL.
+		return nil, "", fmt.Errorf("download url rejected: %w", im.RedactURLErrorInChain(err))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create download request: %w", err)
+		return nil, "", fmt.Errorf("create download request: %w", im.RedactRequestError(err))
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("download file: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes the signed temporary download URL.
+		return nil, "", fmt.Errorf("download file: %w", im.RedactRequestError(err))
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -544,13 +546,14 @@ func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, conten
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(jsonBody))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send reply: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes the session credential in the query.
+		return fmt.Errorf("send reply: %w", im.RedactRequestError(err))
 	}
 	defer resp.Body.Close()
 
