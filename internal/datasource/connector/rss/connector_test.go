@@ -648,6 +648,10 @@ func TestConnector_ParseFailureOmitsFeedURL(t *testing.T) {
 	if !strings.Contains(detail, "feed #2 (http://"+host+")") || strings.Contains(detail, sentinel) {
 		t.Fatalf("detail = %q, want feed #2 (http://%s) and no sentinel", detail, host)
 	}
+	// The fetch branch uses the same detail format; the gofeed error pins the parse branch.
+	if !strings.Contains(detail, gofeed.ErrFeedTypeNotDetected.Error()) {
+		t.Fatalf("detail = %q, want the parse error %q", detail, gofeed.ErrFeedTypeNotDetected)
+	}
 
 	err = NewConnector().Validate(context.Background(), makeConfig(badURL, ""))
 	if err == nil {
