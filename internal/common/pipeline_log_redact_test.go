@@ -2,6 +2,7 @@ package common
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -34,6 +35,7 @@ func agent24PipelineContentKeyList() []string {
 		"title",
 		"question",
 		"sql",
+		"error",
 	}
 }
 
@@ -67,6 +69,12 @@ func TestPipelineLogRedactsContentKeyBytesAndRawMessage(t *testing.T) {
 			assertPipelineLogRedacted(t, got, key, len(raw))
 		})
 	}
+}
+
+func TestPipelineLogRedactsErrorValue(t *testing.T) {
+	err := errors.New(pipelineLogSentinel)
+	got := PipelineLog("Stage", "act", map[string]interface{}{"error": err})
+	assertPipelineLogRedacted(t, got, "error", len(err.Error()))
 }
 
 func TestPipelineLogKeepsIntegerOnContentKey(t *testing.T) {

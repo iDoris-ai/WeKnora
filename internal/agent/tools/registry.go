@@ -181,8 +181,8 @@ func (r *ToolRegistry) ExecuteTool(
 	if err != nil {
 		if retiredMsg != "" {
 			common.PipelineWarn(ctx, "AgentTool", "retired_tool", map[string]interface{}{
-				"tool":  name,
-				"error": retiredMsg,
+				"tool":   name,
+				"reason": retiredMsg,
 			})
 			return &types.ToolResult{Success: false, Error: retiredMsg}, nil
 		}

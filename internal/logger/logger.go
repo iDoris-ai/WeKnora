@@ -568,12 +568,16 @@ func Errorf(c context.Context, format string, args ...interface{}) {
 }
 
 // ErrorWithFields 输出带有额外字段的错误级别日志
+//
+// Agent24 KB-OBS-01: the error text can quote a user question, a vendor reply or a user path, so the
+// fields carry error_len and error_type instead of err.Error().
 func ErrorWithFields(c context.Context, err error, fields logrus.Fields) {
 	if fields == nil {
 		fields = logrus.Fields{}
 	}
 	if err != nil {
-		fields["error"] = err.Error()
+		fields["error_len"] = len(err.Error())
+		fields["error_type"] = fmt.Sprintf("%T", err)
 	}
 	addCaller(GetLogger(c), 2).WithFields(fields).Error("发生错误")
 }
