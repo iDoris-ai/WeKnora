@@ -219,7 +219,9 @@ func (c *Connector) ResolveResourceAncestors(
 	for _, id := range resourceIDs {
 		ref, err := parseResourceID(id)
 		if err != nil {
-			logger.Warnf(ctx, "skip malformed Confluence resource %q during ancestor resolution: %v", id, err)
+			logger.Warnf(ctx, "skip malformed Confluence resource %q during ancestor resolution: "+
+				"error_len=%d error_type=%T",
+				id, len(fmt.Sprint(err)), err)
 			continue
 		}
 		if ref.Kind == resourceSpace {

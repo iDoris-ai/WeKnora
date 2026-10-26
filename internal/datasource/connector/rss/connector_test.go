@@ -1,6 +1,7 @@
 package rss
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/mmcdole/gofeed"
@@ -437,4 +439,124 @@ func TestResolveItem_FileNamePolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+func captureRSSLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+	return &buf
+}
+
+func assertLogOmitsSentinel(t *testing.T, logs, sentinel string, needles ...string) {
+	t.Helper()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel:\n%s", logs)
+	}
+	for _, needle := range needles {
+		if !strings.Contains(logs, needle) {
+			t.Fatalf("log missing %q:\n%s", needle, logs)
+		}
+	}
+}
+
+// A feed URL query can carry a token. Fetch failures must not log that URL or the
+// response text.
+func TestListAndSyncFetchFailureLogsOmitFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	buf := captureRSSLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, sentinel, http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	feedURL := srv.URL + "/feed.xml?token=" + sentinel
+	cfg := makeConfig(feedURL, "")
+
+	if _, err := NewConnector().ListResources(context.Background(), cfg, ""); err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if _, err := NewConnector().FetchAll(context.Background(), cfg, nil); err == nil {
+		t.Fatal("FetchAll succeeded, want a feed failure")
+	}
+	assertLogOmitsSentinel(t, buf.String(), sentinel,
+		"[RSS] list: fetch url_len=",
+		"[RSS] sync: fetch url_len=",
+		"failed: error_len=",
+	)
+}
+
+// A transport failure wraps *url.Error, whose text carries the full feed URL.
+// The sync log must keep only the error length.
+func TestSyncTransportFailureLogOmitsFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	buf := captureRSSLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	feedURL := srv.URL + "/feed.xml?token=" + sentinel
+	srv.Close()
+
+	if _, err := NewConnector().FetchAll(context.Background(), makeConfig(feedURL, ""), nil); err == nil {
+		t.Fatal("FetchAll succeeded, want a transport failure")
+	}
+	assertLogOmitsSentinel(t, buf.String(), sentinel, "[RSS] sync: fetch url_len=")
+}
+
+// A non-feed body can be echoed by the parser. Parse failures must not log the
+// feed URL or that body.
+func TestListAndSyncParseFailureLogsOmitFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	buf := captureRSSLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("not a feed " + sentinel))
+	}))
+	t.Cleanup(srv.Close)
+	feedURL := srv.URL + "/feed.xml?token=" + sentinel
+	cfg := makeConfig(feedURL, "")
+
+	if _, err := NewConnector().ListResources(context.Background(), cfg, ""); err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if _, err := NewConnector().FetchAll(context.Background(), cfg, nil); err == nil {
+		t.Fatal("FetchAll succeeded, want a parse failure")
+	}
+	assertLogOmitsSentinel(t, buf.String(), sentinel,
+		"[RSS] list: parse url_len=",
+		"[RSS] sync: parse url_len=",
+		"failed: error_len=",
+	)
+}
+
+// The article link is a user URL and may carry a token. A failed full-text fetch
+// must not log it.
+func TestFullTextFetchFailureLogOmitsArticleURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	buf := captureRSSLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/article") {
+			http.Error(w, sentinel, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0"?>
+<rss version="2.0"><channel>
+<title>Feed</title>
+<item>
+  <title>One</title>
+  <link>http://%s/article?x=%s</link>
+  <guid>guid-1</guid>
+  <description>summary</description>
+</item>
+</channel></rss>`, r.Host, sentinel)
+	}))
+	t.Cleanup(srv.Close)
+
+	if _, err := NewConnector().FetchAll(context.Background(), makeConfig(srv.URL+"/feed.xml", ""), nil); err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+	assertLogOmitsSentinel(t, buf.String(), sentinel,
+		"[RSS] full-text fetch failed for url_len=",
+		"error_len=",
+	)
 }

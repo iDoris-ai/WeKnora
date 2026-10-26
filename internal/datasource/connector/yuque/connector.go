@@ -216,14 +216,14 @@ func (c *Connector) walk(
 			if d.Type != "" && d.Type != "Doc" {
 				skippedType++
 				if sampleSkipType == "" {
-					sampleSkipType = fmt.Sprintf("id=%d type=%q title=%q", d.ID, d.Type, d.Title)
+					sampleSkipType = fmt.Sprintf("id=%d type=%q title_len=%d", d.ID, d.Type, len(d.Title))
 				}
 				continue
 			}
 			if d.Status != "" && d.Status != "1" {
 				skippedDraft++
 				if sampleSkipDraft == "" {
-					sampleSkipDraft = fmt.Sprintf("id=%d status=%q title=%q", d.ID, d.Status, d.Title)
+					sampleSkipDraft = fmt.Sprintf("id=%d status=%q title_len=%d", d.ID, d.Status, len(d.Title))
 				}
 				continue
 			}
@@ -244,7 +244,7 @@ func (c *Connector) walk(
 			if settings.TOCOnly && tocOK && !inTOC[d.ID] {
 				skippedNotInTOC++
 				if sampleSkipNotInTOC == "" {
-					sampleSkipNotInTOC = fmt.Sprintf("id=%d title=%q", d.ID, d.Title)
+					sampleSkipNotInTOC = fmt.Sprintf("id=%d title_len=%d", d.ID, len(d.Title))
 				}
 				continue
 			}
@@ -307,8 +307,8 @@ func (c *Connector) walk(
 			// verified against the v2 API. Any other format (e.g. "html") may
 			// put non-Markdown content in `body`, so skip defensively.
 			if detail.Format != "" && detail.Format != "markdown" && detail.Format != "lake" {
-				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): unsupported format %q",
-					d.ID, d.Title, detail.Format)
+				logger.Warnf(ctx, "[Yuque] skip doc %d (title_len=%d): unsupported format %q",
+					d.ID, len(d.Title), detail.Format)
 				out = append(out, types.FetchedItem{
 					ExternalID:       docIDStr,
 					Title:            d.Title,

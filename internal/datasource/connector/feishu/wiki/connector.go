@@ -148,7 +148,8 @@ func (c *Connector) ResolveResourceAncestors(
 			if err != nil {
 				// Best-effort: a broken path just stays collapsed, the rest of
 				// the selections are still revealed.
-				logger.Warnf(ctx, "[Feishu] resolve ancestors: get node %s:%s: %v", spaceID, current, err)
+				logger.Warnf(ctx, "[Feishu] resolve ancestors: get node %s:%s: error_len=%d error_type=%T",
+					spaceID, current, len(fmt.Sprint(err)), err)
 				break
 			}
 			if node.ParentNodeID == "" {
