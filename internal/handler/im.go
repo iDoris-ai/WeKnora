@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -132,7 +133,8 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	if err := h.imService.CreateChannel(channel); err != nil {
-		logger.Errorf(c.Request.Context(), "[IM] Create channel failed: %v", err)
+		logger.Errorf(c.Request.Context(), "[IM] Create channel failed: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
 			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
 			return
@@ -274,7 +276,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		newAgentID := strings.TrimSpace(*req.AgentID)
 		if newAgentID != "" && newAgentID != channel.AgentID {
 			if err := h.imService.SetChannelAgentID(c.Request.Context(), channel, newAgentID); err != nil {
-				logger.Errorf(c.Request.Context(), "[IM] Update channel agent failed: %v", err)
+				logger.Errorf(c.Request.Context(),
+					"[IM] Update channel agent failed: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 				c.JSON(http.StatusBadRequest, gin.H{"error": "agent not found"})
 				return
 			}
@@ -282,7 +286,8 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 
 	if err := h.imService.UpdateChannel(channel); err != nil {
-		logger.Errorf(c.Request.Context(), "[IM] Update channel failed: %v", err)
+		logger.Errorf(c.Request.Context(), "[IM] Update channel failed: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
 			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
 			return
@@ -427,7 +432,8 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel is disabled"})
 			return
 		}
-		logger.Errorf(ctx, "[IM] Channel unavailable for callback %s: %v", channelID, err)
+		logger.Errorf(ctx, "[IM] Channel unavailable for callback %s: error_len=%d error_type=%T",
+			channelID, len(fmt.Sprint(err)), err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "channel not available"})
 		return
 	}
