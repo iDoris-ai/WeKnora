@@ -107,7 +107,7 @@ func newAgent24AnonymousAuditLimiter(every time.Duration, burst int) *agent24Ano
 }
 
 // admit reports whether an anonymous row may be written and, when it may, how many were dropped before it.
-// The count is taken when the row is admitted; a row whose write fails gives it back.
+// The count is taken when the row is admitted; a row whose write returns an error gives it back.
 func (l *agent24AnonymousAuditLimiter) admit() (bool, int64) {
 	if !l.bucket.Allow() {
 		l.suppressed.Add(1)
@@ -238,7 +238,9 @@ func agent24WriteKnowledgeAudit(
 	ctx, cancel := context.WithTimeout(base, agent24AuditWriteTimeout)
 	defer cancel()
 	if err := svc.Log(ctx, entry); err != nil && suppressed > 0 {
-		anonymous.suppressed.Add(suppressed) // the row did not land: the next one carries its count
+		// The row may not have landed: the next one carries its count. When the store committed but the
+		// reply was lost, the count is reported twice; suppressed errs on the high side.
+		anonymous.suppressed.Add(suppressed)
 	}
 }
 
