@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -269,5 +270,232 @@ func TestGetAccessTokenRedactsCorpSecret(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), sentinel) {
 		t.Fatalf("error contains corpsecret: %v", err)
+	}
+}
+
+// url.Parse accepts %zz and spaces in a query. A control character is what makes
+// NewRequest fail while the credential is still in the URL string.
+func TestGetAccessTokenNewRequestRedactsCorpSecret(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	adapter := &WebhookAdapter{
+		corpID:      "ww",
+		agentSecret: sentinel + "\n",
+		apiBaseURL:  "https://qyapi.weixin.qq.com",
+	}
+	_, err := adapter.getAccessToken(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains corpsecret: %v", err)
+	}
+	if strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("Do was reached, want a URL parse error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create request:") {
+		t.Fatalf("error = %v, want create request failure", err)
+	}
+}
+
+func TestSendToAppChatNewRequestRedactsAccessToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	a := &WebhookAdapter{apiBaseURL: "https://qyapi.weixin.qq.com"}
+	err := a.sendToAppChat(context.Background(), sentinel+"\n", "chat-1", &im.ReplyMessage{Content: "hi"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("Do was reached, want a URL parse error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create request:") {
+		t.Fatalf("error = %v, want create request failure", err)
+	}
+}
+
+func TestSendToUserNewRequestRedactsAccessToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	a := &WebhookAdapter{apiBaseURL: "https://qyapi.weixin.qq.com"}
+	err := a.sendToUser(context.Background(), sentinel+"\n", "user-1", &im.ReplyMessage{Content: "hi"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("Do was reached, want a URL parse error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create request:") {
+		t.Fatalf("error = %v, want create request failure", err)
+	}
+}
+
+func TestSendToAppChatDoRedactsAccessToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	a := &WebhookAdapter{apiBaseURL: "https://qyapi.weixin.qq.com"}
+	err := a.sendToAppChat(context.Background(), sentinel, "chat-1", &im.ReplyMessage{Content: "hi"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "send appchat message:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want appchat send failure", err)
+	}
+}
+
+func TestSendToUserDoRedactsAccessToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	a := &WebhookAdapter{apiBaseURL: "https://qyapi.weixin.qq.com"}
+	err := a.sendToUser(context.Background(), sentinel, "user-1", &im.ReplyMessage{Content: "hi"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "send message:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want message send failure", err)
+	}
+}
+
+func TestDownloadFromURLDoRedactsAccessToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	rawURL := "https://qyapi.weixin.qq.com/cgi-bin/media/get?access_token=" + sentinel + "&media_id=m1"
+	_, _, err := downloadFromURL(context.Background(), rawURL, "a.bin", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "download:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want download failure", err)
+	}
+}
+
+// A URL that fails to parse is rejected by the SSRF check before NewRequest runs.
+func TestDownloadFromURLUnparseableURLRedactsAccessToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	rawURL := "https://qyapi.weixin.qq.com/cgi-bin/media/get?access_token=" + sentinel + "&media_id=m1\n"
+	_, _, err := downloadFromURL(context.Background(), rawURL, "a.bin", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "URL rejected for security reasons:") {
+		t.Fatalf("error = %v, want the SSRF rejection", err)
+	}
+}
+
+func TestSendReplyAppChatFailureLogOmitsAccessToken(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			body := `{"errcode":0,"errmsg":"ok"}`
+			if strings.Contains(r.URL.Path, "/cgi-bin/appchat/send") {
+				// The vendor errmsg can echo request content; the fallback log keeps only its length.
+				body = `{"errcode":86003,"errmsg":"chat not found ` + sentinel + `"}`
+			}
+			if strings.Contains(r.URL.Path, "/cgi-bin/appchat/send") ||
+				strings.Contains(r.URL.Path, "/cgi-bin/message/send") {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(body)),
+					Request:    r,
+				}, nil
+			}
+			return nil, errors.New("unexpected request")
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	a := &WebhookAdapter{
+		apiBaseURL:  "https://qyapi.weixin.qq.com",
+		corpAgentID: 1,
+		tokenCache:  sentinel,
+		tokenExpAt:  time.Now().Add(time.Hour),
+	}
+	err := a.SendReply(context.Background(), &im.IncomingMessage{
+		ChatType: im.ChatTypeGroup,
+		ChatID:   "chat-1",
+		UserID:   "user-1",
+	}, &im.ReplyMessage{Content: "hi"})
+	if err != nil {
+		t.Fatalf("SendReply error = %v, want touser fallback success", err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "appchat/send failed for chat=chat-1") {
+		t.Fatalf("log missing appchat failure: %s", logs)
+	}
+	if !strings.Contains(logs, "error_len=") || !strings.Contains(logs, "error_type=*errors.errorString") {
+		t.Fatalf("log missing redacted appchat error: %s", logs)
+	}
+	if strings.Contains(logs, "error_type=<nil>") {
+		t.Fatalf("log error_type is nil: %s", logs)
 	}
 }

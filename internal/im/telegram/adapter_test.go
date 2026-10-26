@@ -3,6 +3,7 @@ package telegram
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -235,5 +236,147 @@ func TestGetUpdatesRedactsBotTokenInRedirectError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), sentinel) {
 		t.Fatalf("error contains bot token: %v", err)
+	}
+}
+
+func TestGetUpdatesNewRequestRedactsBotToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	client := &LongConnClient{
+		botToken: sentinel + "%zz",
+		httpClient: &http.Client{
+			Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, context.DeadlineExceeded
+			}),
+		},
+	}
+
+	_, err := client.getUpdates(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains bot token: %v", err)
+	}
+	if strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("Do was reached, want a URL parse error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("error = %v, want parse failure", err)
+	}
+}
+
+func TestCallAPINewRequestRedactsBotToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	err := (&Adapter{botToken: sentinel + "%zz"}).callAPI(
+		context.Background(), "sendMessage", map[string]string{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains bot token: %v", err)
+	}
+	if strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("Do was reached, want a URL parse error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create request:") {
+		t.Fatalf("error = %v, want create request failure", err)
+	}
+}
+
+func TestCallAPIDoRedactsBotToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	err := (&Adapter{botToken: sentinel}).callAPI(
+		context.Background(), "sendMessage", map[string]string{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains bot token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "do request:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want do request failure", err)
+	}
+}
+
+func TestDownloadFileNewRequestRedactsBotToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if !strings.Contains(r.URL.Path, "/getFile") {
+				return nil, context.DeadlineExceeded
+			}
+			body := `{"ok":true,"result":{"file_path":"x/%zz","file_size":1}}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    r,
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	_, _, err := (&Adapter{botToken: sentinel}).DownloadFile(
+		context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains bot token: %v", err)
+	}
+	if strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("download Do was reached, want a URL parse error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create download request:") {
+		t.Fatalf("error = %v, want create download request failure", err)
+	}
+}
+
+func TestDownloadFileDoRedactsBotToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if !strings.Contains(r.URL.Path, "/getFile") {
+				return nil, context.DeadlineExceeded
+			}
+			body := `{"ok":true,"result":{"file_path":"photos/a.jpg","file_size":1}}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    r,
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	_, _, err := (&Adapter{botToken: sentinel}).DownloadFile(
+		context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains bot token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "download file:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want download failure", err)
 	}
 }
