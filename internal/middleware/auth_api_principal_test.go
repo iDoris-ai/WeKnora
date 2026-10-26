@@ -404,3 +404,32 @@ func TestVerifyExternalUserJWTExpiredWithoutSubject(t *testing.T) {
 		t.Fatalf("err = %v, want the parser's expiry error, not errExternalUserTokenExpired", err)
 	}
 }
+
+// An expired token whose sub fails validateExternalUserID keeps the upstream "invalid external user token"
+// answer: it is neither credential_expired nor an invalid external user id.
+func TestResolveAPIPrincipalSignedTokenExpiredInvalidSubject(t *testing.T) {
+	secret := "test-secret"
+	for name, sub := range map[string]string{
+		"control character": "a\nb",
+		"too long":          strings.Repeat("u", maxExternalUserIDLen+1),
+	} {
+		header := http.Header{}
+		header.Set("X-External-User-Token", signedExternalUserToken(t, secret, jwt.MapClaims{
+			"sub": sub, "tenant_id": float64(7), "aud": "weknora",
+			"exp": time.Now().Add(-time.Minute).Unix(), "jti": "expired-jti",
+		}))
+		_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+			ID: 7,
+			APIPrincipalConfig: &types.APIPrincipalConfig{
+				Mode:       types.APIPrincipalModeSignedToken,
+				HMACSecret: secret,
+			},
+		}, header)
+		if err == nil || errors.Is(err, errExternalUserTokenExpired) || errors.Is(err, errInvalidExternalUserID) {
+			t.Fatalf("%s: err = %v, want a plain invalid external user token", name, err)
+		}
+		if got := apiPrincipalAuthErrorMessage(err); got != "Unauthorized: invalid external user token" {
+			t.Fatalf("%s: message = %q", name, got)
+		}
+	}
+}

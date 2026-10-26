@@ -645,8 +645,14 @@ func resolveAPIPrincipal(
 	case types.APIPrincipalModeSignedToken:
 		tok, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
 		if errors.Is(err, errExternalUserTokenExpired) {
+			logger.Warnf(ctx,
+				"invalid external user token for tenant=%d: error_len=%d error_type=%T",
+				tenantID, len(fmt.Sprint(err)), err)
+			// An expired token answers "invalid external user token", as it did before the expiry was told
+			// apart; a sub that would fail validateExternalUserID must not turn that into "invalid external
+			// user id", so that case is a plain invalid token with no principal.
 			if vErr := validateExternalUserID(tok.Subject); vErr != nil {
-				return types.Principal{}, "", fmt.Errorf("%w: %v", errInvalidExternalUserID, vErr)
+				return types.Principal{}, "", fmt.Errorf("%w: %v", errInvalidExternalUserToken, vErr)
 			}
 			return types.Principal{
 				Type: types.PrincipalAPIExternalUser,
