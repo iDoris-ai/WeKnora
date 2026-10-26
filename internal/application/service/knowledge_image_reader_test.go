@@ -86,13 +86,13 @@ func (imageReaderLogTenant) GetTenantByID(context.Context, uint64) (*types.Tenan
 }
 
 // imageReaderLogCatalog fails Resolve so a resource:// URL hits the reference
-// warning without embedding the URL in the error text.
+// warning. The error text carries the sentinel so the log must omit it too.
 type imageReaderLogCatalog struct {
 	interfaces.ResourceCatalog
 }
 
 func (imageReaderLogCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
-	return nil, errors.New("resource missing")
+	return nil, errors.New("resource missing: S3NT1NEL")
 }
 
 // imageReaderLogResolver reaches the "resolving file service" log and then

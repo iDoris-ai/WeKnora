@@ -141,11 +141,14 @@ func TestLocalCopyFile_LogOmitsPaths(t *testing.T) {
 	srcPath := seedLocalObject(t, base, 0, "S3NT1NEL.txt", []byte("x"))
 	buf := captureFileServiceLog(t)
 
-	_, err := svc.CopyFile(context.Background(), srcPath, 42, "dst-knowledge")
+	got, err := svc.CopyFile(context.Background(), srcPath, 42, "dst-knowledge")
 	require.NoError(t, err)
 
 	logs := buf.String()
 	require.NotContains(t, logs, "S3NT1NEL")
+	// The destination name is regenerated from a timestamp, so the sentinel
+	// cannot catch it; check the returned file name directly.
+	require.NotContains(t, logs, filepath.Base(got))
 	require.Contains(t, logs, "Copied local file")
 }
 
