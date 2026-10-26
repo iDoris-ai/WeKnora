@@ -686,6 +686,24 @@ func TestConnector_FetchAll_SchemelessURLOmitsSentinel(t *testing.T) {
 	}
 }
 
+// "http:" without // passes the scheme check but has no host; ValidateURLForSSRF
+// would prepend https:// and quote the whole URL when the second parse fails.
+func TestConnector_FetchAll_OpaqueHTTPURLOmitsSentinel(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	feedURL := "http:example.com/feed?token=" + sentinel
+	_, err := NewConnector().FetchAll(context.Background(), makeConfig(feedURL, ""), nil)
+	if err == nil {
+		t.Fatal("expected invalid URL error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, sentinel) {
+		t.Fatalf("error contains sentinel: %s", msg)
+	}
+	if !strings.Contains(msg, "invalid URL: missing host") {
+		t.Fatalf("error = %q, want missing host rejection", msg)
+	}
+}
+
 // Validate returns its error to the caller configuring the source: the feed is
 // named by index and host only.
 func TestConnector_Validate_TransportFailureOmitsFeedURL(t *testing.T) {

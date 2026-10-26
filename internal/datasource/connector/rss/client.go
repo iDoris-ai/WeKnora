@@ -61,6 +61,11 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("invalid URL: scheme must be http or https")
 	}
+	// "http:host/feed?token=..." (no //) parses as opaque with an empty host, so
+	// ValidateURLForSSRF would prepend https:// and quote it in a parse error.
+	if u.Opaque != "" || u.Host == "" {
+		return nil, fmt.Errorf("invalid URL: missing host")
+	}
 	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
 		return nil, fmt.Errorf("URL rejected: %w", err)
 	}
