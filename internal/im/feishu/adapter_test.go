@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestFeishuThreadID_ThreadedReply(t *testing.T) {
@@ -499,5 +501,69 @@ func assertStreamingClosed(t *testing.T, raw, wantSummary string) {
 	}
 	if settings.Config.Summary == nil || settings.Config.Summary.Content != wantSummary {
 		t.Fatalf("summary = %v, want %q in %s", settings.Config.Summary, wantSummary, raw)
+	}
+}
+
+type imageDownloadRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f imageDownloadRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestUploadImageFromURLDoRedactsSignedURL(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("cdn.example.com")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	saved := feishuImageDownloadClient
+	feishuImageDownloadClient = &http.Client{
+		Transport: imageDownloadRoundTrip(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { feishuImageDownloadClient = saved })
+
+	const sentinel = "S3NT1NEL"
+	rawURL := "https://cdn.example.com/a.png?X-Amz-Signature=" + sentinel
+	_, err := (&Adapter{}).uploadImageFromURL(context.Background(), "token", rawURL)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signature: %v", err)
+	}
+	if !strings.Contains(err.Error(), "download image:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want download failure", err)
+	}
+}
+
+func TestUploadImageFromURLCreateRequestRedactsUnparseableSignedURL(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("1password.com")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	const sentinel = "S3NT1NEL"
+	rawURL := "1password.com:443/a.png?X-Amz-Signature=" + sentinel
+	_, err := (&Adapter{}).uploadImageFromURL(context.Background(), "token", rawURL)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signature: %v", err)
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("error = %v, want parse failure", err)
+	}
+}
+
+func TestUploadImageFromURLSSRFRejectionRedactsSignedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	// A control character makes the SSRF check's url.Parse fail; its error quotes the URL.
+	rawURL := "https://img.example.com/a.png?X-Amz-Signature=" + sentinel + "\n"
+	_, err := (&Adapter{}).uploadImageFromURL(context.Background(), "token", rawURL)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signature: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssrf validation:") {
+		t.Fatalf("error = %v, want ssrf validation failure", err)
 	}
 }

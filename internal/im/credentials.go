@@ -3,6 +3,7 @@ package im
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -68,6 +69,18 @@ func RedactRequestError(err error) error {
 	cloned.URL = requestURLSchemeHost(uerr.URL)
 	cloned.Err = redactRequestCause(uerr.Err)
 	return &cloned
+}
+
+// RedactURLErrorInChain is for errors from URL validation, which wrap url.Parse's
+// *url.Error and so quote the whole URL. It returns the first *url.Error in the chain
+// redacted, dropping the wrapper text around it (the copy cannot be rewrapped). An
+// error without a *url.Error is returned unchanged.
+func RedactURLErrorInChain(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return RedactRequestError(uerr)
+	}
+	return err
 }
 
 // redactRequestCause keeps a transport cause that is itself a dial or DNS failure (*net.OpError,

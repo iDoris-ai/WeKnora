@@ -501,7 +501,8 @@ func (s *Service) buildIMMCPAuthNotice(ctx context.Context, services []imMCPAuth
 				ctx, tenantID, principal, svc.ID, redirectURI, frontendRedirect,
 			)
 			if err != nil {
-				logger.Warnf(ctx, "[IM] Failed to build MCP OAuth URL for service %s: %v", svc.ID, err)
+				logger.Warnf(ctx, "[IM] Failed to build MCP OAuth URL for service %s: error_len=%d error_type=%T",
+					svc.ID, len(fmt.Sprint(err)), err)
 			} else {
 				authURL = url
 			}
@@ -1006,7 +1007,8 @@ func (s *Service) LoadAndStartChannels() error {
 	for i := range channels {
 		ch := channels[i]
 		if err := s.StartChannel(&ch); err != nil {
-			logger.Warnf(ctx, "[IM] Failed to start channel %s (%s/%s): %v", ch.ID, ch.Platform, ch.Name, err)
+			logger.Warnf(ctx, "[IM] Failed to start channel %s (%s/%s): error_len=%d error_type=%T",
+				ch.ID, ch.Platform, ch.Name, len(fmt.Sprint(err)), err)
 		} else if _, _, active := s.GetChannelAdapter(ch.ID); active {
 			// Adapter initialization can launch an asynchronous connection attempt.
 			// Do not claim network readiness here; platform connection logs report it.
@@ -1050,7 +1052,9 @@ func (s *Service) channelConfigSubscriberLoop() {
 			}
 			var event channelConfigEvent
 			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-				logger.Warnf(context.Background(), "[IM] Ignore invalid channel config event: %v", err)
+				logger.Warnf(context.Background(),
+					"[IM] Ignore invalid channel config event: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 				continue
 			}
 			if event.ChannelID == "" || event.SourceInstance == s.instanceID {
@@ -1075,7 +1079,9 @@ func (s *Service) publishChannelConfigChange(channelID string) {
 	if err := s.redis.Publish(context.Background(), RedisChannelConfig, payload).Err(); err != nil {
 		// The database is the source of truth. Subscribers also verify freshness
 		// on webhook callbacks / leader renewal, so publication is best-effort.
-		logger.Warnf(context.Background(), "[IM] Publish channel config event failed for %s: %v", channelID, err)
+		logger.Warnf(context.Background(),
+			"[IM] Publish channel config event failed for %s: error_len=%d error_type=%T",
+			channelID, len(fmt.Sprint(err)), err)
 	}
 }
 
@@ -1086,7 +1092,9 @@ func (s *Service) reloadChannelFromDB(channelID, reason string) {
 		return
 	}
 	if err != nil {
-		logger.Warnf(context.Background(), "[IM] Reload channel %s after %s failed: %v", channelID, reason, err)
+		logger.Warnf(context.Background(),
+			"[IM] Reload channel %s after %s failed: error_len=%d error_type=%T",
+			channelID, reason, len(fmt.Sprint(err)), err)
 		return
 	}
 	if !fresh.Enabled {
@@ -1099,7 +1107,9 @@ func (s *Service) reloadChannelFromDB(channelID, reason string) {
 
 	logger.Infof(context.Background(), "[IM] Reloading channel %s after %s", channelID, reason)
 	if err := s.StartChannel(fresh); err != nil && !s.stopped.Load() {
-		logger.Warnf(context.Background(), "[IM] Reload channel %s after %s failed: %v", channelID, reason, err)
+		logger.Warnf(context.Background(),
+			"[IM] Reload channel %s after %s failed: error_len=%d error_type=%T",
+			channelID, reason, len(fmt.Sprint(err)), err)
 	}
 }
 
@@ -1250,7 +1260,10 @@ func (s *Service) tryAcquireWSLeader(channelID string) bool {
 	key := RedisKeyLeader + channelID
 	ok, err := s.redis.SetNX(context.Background(), key, s.instanceID, wsLeaderTTL).Result()
 	if err != nil {
-		logger.Warnf(context.Background(), "[IM] Redis leader election failed for %s: %v; connection will retry without taking leadership", channelID, err)
+		logger.Warnf(context.Background(),
+			"[IM] Redis leader election failed for %s: error_len=%d error_type=%T; "+
+				"connection will retry without taking leadership",
+			channelID, len(fmt.Sprint(err)), err)
 		return false
 	}
 	return ok
@@ -1314,7 +1327,9 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				// Transient DB error — don't stop a possibly-healthy channel
 				// on a DB hiccup. Skip this round; the next renewal re-checks.
 				logger.Warnf(context.Background(),
-					"[IM] DB check failed for channel %s during leader renewal: %v (skipping this round)", channelID, err)
+					"[IM] DB check failed for channel %s during leader renewal: "+
+						"error_len=%d error_type=%T (skipping this round)",
+					channelID, len(fmt.Sprint(err)), err)
 				continue
 			}
 			if !ch.Enabled {
@@ -1335,7 +1350,8 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				// because the old renewal context has been cancelled.
 				if err := s.StartChannel(ch); err != nil && !s.stopped.Load() {
 					logger.Warnf(context.Background(),
-						"[IM] Rebuild changed channel %s failed: %v", channelID, err)
+						"[IM] Rebuild changed channel %s failed: error_len=%d error_type=%T",
+						channelID, len(fmt.Sprint(err)), err)
 				}
 				return
 			}
@@ -1419,7 +1435,9 @@ func (s *Service) wsLeaderRetryLoop(ctx context.Context, channel *IMChannel, sta
 					// Release the lock for this round and retry on the next tick.
 					s.releaseWSLeader(channel.ID)
 					logger.Warnf(context.Background(),
-						"[IM] DB check failed for channel %s during leader takeover: %v (will retry)", channel.ID, err)
+						"[IM] DB check failed for channel %s during leader takeover: "+
+							"error_len=%d error_type=%T (will retry)",
+						channel.ID, len(fmt.Sprint(err)), err)
 					continue
 				}
 				if !fresh.Enabled {
@@ -1439,7 +1457,8 @@ func (s *Service) wsLeaderRetryLoop(ctx context.Context, channel *IMChannel, sta
 				}
 				if err := s.startChannelInternal(channel, factory); err != nil {
 					logger.Warnf(context.Background(),
-						"[IM] Failed to start channel %s after acquiring leadership: %v", channel.ID, err)
+						"[IM] Failed to start channel %s after acquiring leadership: error_len=%d error_type=%T",
+						channel.ID, len(fmt.Sprint(err)), err)
 				}
 				return
 			}
@@ -1482,7 +1501,8 @@ func (s *Service) storeInflightMapping(ctx context.Context, userKey, sessionID, 
 	}
 	val := sessionID + ":" + messageID
 	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, 10*time.Minute).Err(); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to store inflight mapping: %v", err)
+		logger.Warnf(ctx, "[IM] Failed to store inflight mapping: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 }
 
@@ -1527,7 +1547,8 @@ func (s *Service) writeStopEvent(ctx context.Context, sessionID, messageID strin
 		},
 	}
 	if err := s.streamManager.AppendEvent(ctx, sessionID, messageID, stopEvt); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to write stop event to StreamManager: %v", err)
+		logger.Warnf(ctx, "[IM] Failed to write stop event to StreamManager: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 }
 
@@ -1671,7 +1692,8 @@ func (s *Service) isDuplicate(ctx context.Context, messageID string) bool {
 		}
 		// Redis is configured but failed — fail-closed to avoid cross-instance
 		// duplicate processing. The user can simply resend the message.
-		logger.Errorf(ctx, "[IM] Redis dedup failed (fail-closed, message dropped): %v", err)
+		logger.Errorf(ctx, "[IM] Redis dedup failed (fail-closed, message dropped): error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return true
 	}
 	// Single-instance mode: local dedup is sufficient.
@@ -1791,7 +1813,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	if agentID != "" {
 		agent, err := s.agentService.GetAgentByID(sessionCtx, agentID)
 		if err != nil {
-			logger.Warnf(ctx, "[IM] Failed to get agent %s: %v, using default", agentID, err)
+			logger.Warnf(ctx, "[IM] Failed to get agent %s: error_len=%d error_type=%T, using default",
+				agentID, len(fmt.Sprint(err)), err)
 		} else {
 			customAgent = agent
 		}
@@ -1823,7 +1846,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			logger.Warnf(ctx, "[IM] Session %s not found (deleted?), recycling stale channel session %s",
 				channelSession.SessionID, channelSession.ID)
 			if delErr := s.db.Delete(&ChannelSession{}, "id = ?", channelSession.ID).Error; delErr != nil {
-				logger.Warnf(ctx, "[IM] Failed to delete stale channel session %s: %v", channelSession.ID, delErr)
+				logger.Warnf(ctx, "[IM] Failed to delete stale channel session %s: error_len=%d error_type=%T",
+					channelSession.ID, len(fmt.Sprint(delErr)), delErr)
 			}
 			channelSession, err = s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)
 			if err != nil {
@@ -1875,7 +1899,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	pos, enqueueErr := s.qaQueue.Enqueue(req)
 	if enqueueErr != nil {
 		qaCancel()
-		logger.Warnf(ctx, "[IM] Queue rejected: user=%s reason=%v", msg.UserID, enqueueErr)
+		logger.Warnf(ctx, "[IM] Queue rejected: user=%s error_len=%d error_type=%T",
+			msg.UserID, len(fmt.Sprint(enqueueErr)), enqueueErr)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 			Content: "当前排队人数较多，请稍后再试。",
 			IsFinal: true,
@@ -1932,7 +1957,8 @@ func emptyIncomingMessageReply(msg *IncomingMessage) (string, bool) {
 func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agentID string, customAgent *types.CustomAgent, kbIDs []string) {
 	state := buildIMLastRequestState(agentID, customAgent, kbIDs)
 	if err := s.sessionService.UpdateSessionLastRequestState(logger.CloneContext(context.WithoutCancel(ctx)), sessionID, state); err != nil {
-		logger.Warnf(ctx, "[IM] persist last_request_state failed for session %s: %v", sessionID, err)
+		logger.Warnf(ctx, "[IM] persist last_request_state failed for session %s: error_len=%d error_type=%T",
+			sessionID, len(fmt.Sprint(err)), err)
 	}
 }
 
@@ -2145,7 +2171,8 @@ func (s *Service) handleCommand(
 		if err := s.db.Model(&ChannelSession{}).
 			Where("id = ?", channelSession.ID).
 			Update("deleted_at", time.Now()).Error; err != nil {
-			logger.Warnf(ctx, "[IM] Failed to soft-delete channel session: %v", err)
+			logger.Warnf(ctx, "[IM] Failed to soft-delete channel session: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		}
 	case ActionStop:
 		stopThreadID := ""
@@ -2361,7 +2388,8 @@ func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, 
 	}
 	if err := s.db.Create(&cs).Error; err != nil {
 		if delErr := s.db.Where("id = ?", createdSession.ID).Delete(createdSession).Error; delErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: %v", createdSession.ID, delErr)
+			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: error_len=%d error_type=%T",
+				createdSession.ID, len(fmt.Sprint(delErr)), delErr)
 		}
 		var existing ChannelSession
 		if findErr := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
@@ -2435,7 +2463,8 @@ func (s *Service) resolveThreadSession(ctx context.Context, msg *IncomingMessage
 	if err := s.db.Create(&cs).Error; err != nil {
 		// Unique constraint fallback for concurrent creation.
 		if delErr := s.db.Where("id = ?", createdSession.ID).Delete(createdSession).Error; delErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: %v", createdSession.ID, delErr)
+			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: error_len=%d error_type=%T",
+				createdSession.ID, len(fmt.Sprint(delErr)), delErr)
 		}
 		var existing ChannelSession
 		if findErr := s.db.Where(
@@ -2954,7 +2983,8 @@ loop:
 	assistantMsg.Content = answer
 	assistantMsg.IsCompleted = true
 	if err := s.messageService.UpdateMessage(outCtx, assistantMsg); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
+		logger.Warnf(ctx, "[IM] Failed to update assistant message: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 
 	if finalizeErr != nil && fallbackErr != nil {
@@ -3145,7 +3175,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		assistantMsg.IsCompleted = true
 		// Use a fresh context since the original is cancelled
 		if updateErr := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); updateErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to update cancelled assistant message: %v", updateErr)
+			logger.Warnf(ctx, "[IM] Failed to update cancelled assistant message: error_len=%d error_type=%T",
+				len(fmt.Sprint(updateErr)), updateErr)
 		}
 		return "", fmt.Errorf("QA cancelled: %w", ctx.Err())
 	}
@@ -3170,7 +3201,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	assistantMsg.Content = answer
 	assistantMsg.IsCompleted = true
 	if err := s.messageService.UpdateMessage(ctx, assistantMsg); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
+		logger.Warnf(ctx, "[IM] Failed to update assistant message: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 
 	// Return raw answer — callers apply cleanIMContent with the appropriate FileService.
@@ -3263,7 +3295,9 @@ func (s *Service) CreateChannel(channel *IMChannel) error {
 	}
 	if channel.Enabled {
 		if err := s.StartChannel(channel); err != nil {
-			logger.Warnf(context.Background(), "[IM] Created channel %s but failed to start: %v", channel.ID, err)
+			logger.Warnf(context.Background(),
+				"[IM] Created channel %s but failed to start: error_len=%d error_type=%T",
+				channel.ID, len(fmt.Sprint(err)), err)
 		}
 	}
 	s.publishChannelConfigChange(channel.ID)
@@ -3327,7 +3361,9 @@ func (s *Service) UpdateChannel(channel *IMChannel) error {
 	s.StopChannel(channel.ID)
 	if channel.Enabled {
 		if err := s.StartChannel(channel); err != nil {
-			logger.Warnf(context.Background(), "[IM] Updated channel %s but failed to restart: %v", channel.ID, err)
+			logger.Warnf(context.Background(),
+				"[IM] Updated channel %s but failed to restart: error_len=%d error_type=%T",
+				channel.ID, len(fmt.Sprint(err)), err)
 		}
 	}
 	s.publishChannelConfigChange(channel.ID)
@@ -3383,7 +3419,9 @@ func (s *Service) ToggleChannel(channelID string, tenantID uint64) (*IMChannel, 
 	}
 	if ch.Enabled {
 		if err := s.StartChannel(&ch); err != nil {
-			logger.Warnf(context.Background(), "[IM] Failed to start channel %s after enable: %v", ch.ID, err)
+			logger.Warnf(context.Background(),
+				"[IM] Failed to start channel %s after enable: error_len=%d error_type=%T",
+				ch.ID, len(fmt.Sprint(err)), err)
 		}
 	} else {
 		s.StopChannel(channelID)
@@ -3459,7 +3497,8 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 	// Build context with tenant info for the knowledge service
 	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] Failed to get tenant %d for file processing: %v", tenantID, err)
+		logger.Errorf(ctx, "[IM] Failed to get tenant %d for file processing: error_len=%d error_type=%T",
+			tenantID, len(fmt.Sprint(err)), err)
 		return
 	}
 	kbCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)

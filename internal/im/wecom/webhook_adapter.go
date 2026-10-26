@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -194,7 +193,8 @@ func (a *WebhookAdapter) HandleURLVerification(c *gin.Context) bool {
 	// Decrypt the echostr and return it
 	decrypted, err := a.decrypt(echoStr)
 	if err != nil {
-		logger.Errorf(c.Request.Context(), "[WeCom] Failed to decrypt echostr: %v", err)
+		logger.Errorf(c.Request.Context(), "[WeCom] Failed to decrypt echostr: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		c.String(http.StatusBadRequest, "decrypt failed")
 		return true
 	}
@@ -588,13 +588,11 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 	// SSRF protection: reject internal/private URLs unless on the WeCom API allowlist.
 	if !isAllowedIMAPIHost(rawURL, extraAllowedHost) {
 		if err := secutils.ValidateURLForSSRF(rawURL); err != nil {
-			// A URL that fails to parse is rejected here, before NewRequest, and the parse
+			// Most parse failures are rejected here, before NewRequest, and the parse
 			// error quotes rawURL with its access_token: keep only the scheme and host.
-			var uerr *url.Error
-			if errors.As(err, &uerr) {
-				err = im.RedactRequestError(uerr)
-			}
-			return nil, "", fmt.Errorf("URL rejected for security reasons: %v", err)
+			// A host that starts with a digit, has a port, and has no scheme can pass
+			// this SSRF check and only fails when NewRequest runs.
+			return nil, "", fmt.Errorf("URL rejected for security reasons: %v", im.RedactURLErrorInChain(err))
 		}
 	}
 

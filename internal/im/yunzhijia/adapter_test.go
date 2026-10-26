@@ -538,6 +538,56 @@ func TestDownloadFileFollowsSingleRedirect(t *testing.T) {
 	}
 }
 
+// After a redirect the request URL is the signed target; a failed Do must not quote it.
+func TestDownloadFileRedirectFailureRedactsSignedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth2_v12/auth/getAppAccessToken":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"accessToken":"token-1","expireIn":7136},` +
+				`"error":null,"errorCode":0,"success":true}`))
+		case "/gateway/docrest/doc/file/downloadfileOpen":
+			http.Redirect(w, r, "/cdn/file-1?sig="+sentinel, http.StatusFound)
+		case "/cdn/file-1":
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+		default:
+			t.Errorf("path = %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	oldAuthURL := yunzhijiaAuthURL
+	oldBaseURL := yunzhijiaDownloadFileBaseURL
+	oldValidator := validateDownloadFileURL
+	yunzhijiaAuthURL = server.URL + "/api/oauth2_v12/auth/getAppAccessToken"
+	yunzhijiaDownloadFileBaseURL = server.URL + "/gateway/docrest/doc/file/downloadfileOpen"
+	validateDownloadFileURL = func(string) error { return nil }
+	defer func() {
+		yunzhijiaAuthURL = oldAuthURL
+		yunzhijiaDownloadFileBaseURL = oldBaseURL
+		validateDownloadFileURL = oldValidator
+	}()
+
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+	client := noRedirectClient(server)
+	client.Timeout = adapter.httpClient.Timeout
+	adapter.httpClient = client
+	_, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains signed redirect URL: %v", err)
+	}
+	if !strings.Contains(err.Error(), "download file:") {
+		t.Fatalf("error = %v, want download failure", err)
+	}
+}
+
 // noRedirectClient returns a client bound to the test server transport that does
 // not auto-follow redirects, mirroring the production adapter's CheckRedirect.
 func noRedirectClient(server *httptest.Server) *http.Client {
@@ -621,5 +671,24 @@ func TestValidateFileIDRejectsURLishValues(t *testing.T) {
 	}
 	if err := validateFileID("6a605afe5dda8e000121fcea"); err != nil {
 		t.Fatalf("validateFileID(valid) error = %v", err)
+	}
+}
+
+func TestSendReplyDoRedactsYZJToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	sendURL := "https://yunzhijia.com/gateway/robot/webhook/send?yzjtoken=" + sentinel
+	adapter := NewAdapter(sendURL, "", "", "", 10, "yunzhijia.com")
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, context.DeadlineExceeded
+	})}
+	err := adapter.SendReply(context.Background(), &im.IncomingMessage{}, &im.ReplyMessage{Content: "hi"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains yzjtoken: %v", err)
+	}
+	if !strings.Contains(err.Error(), "send reply:") || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v, want send failure", err)
 	}
 }
