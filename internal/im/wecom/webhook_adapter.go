@@ -298,10 +298,13 @@ func (a *WebhookAdapter) SendReply(ctx context.Context, incoming *im.IncomingMes
 	// For group chats, try sending to the group via appchat API first.
 	// This works for groups created via /cgi-bin/appchat/create.
 	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
-		if err := a.sendToAppChat(ctx, accessToken, incoming.ChatID, reply); err == nil {
+		appErr := a.sendToAppChat(ctx, accessToken, incoming.ChatID, reply)
+		if appErr == nil {
 			return nil
 		}
-		logger.Debugf(ctx, "[WeCom] appchat/send failed for chat=%s, falling back to touser: %v", incoming.ChatID, err)
+		logger.Debugf(ctx,
+			"[WeCom] appchat/send failed for chat=%s, falling back to touser: error_len=%d error_type=%T",
+			incoming.ChatID, len(fmt.Sprint(appErr)), appErr)
 	}
 
 	// Fallback (or direct message): send to the user directly.
@@ -327,7 +330,7 @@ func (a *WebhookAdapter) sendToAppChat(ctx context.Context, accessToken, chatID 
 	sendURL := fmt.Sprintf("%s/cgi-bin/appchat/send?access_token=%s", a.apiBaseURL, accessToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -372,7 +375,7 @@ func (a *WebhookAdapter) sendToUser(ctx context.Context, accessToken, userID str
 	sendURL := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", a.apiBaseURL, accessToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -412,7 +415,7 @@ func (a *WebhookAdapter) getAccessToken(ctx context.Context) (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return "", fmt.Errorf("create request: %w", im.RedactRequestError(err))
 	}
 
 	resp, err := httpClient.Do(req)
@@ -590,7 +593,7 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create request: %w", err)
+		return nil, "", fmt.Errorf("create request: %w", im.RedactRequestError(err))
 	}
 
 	resp, err := httpClient.Do(req)

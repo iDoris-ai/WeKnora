@@ -278,7 +278,7 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -493,7 +493,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	downloadURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", a.botToken, fileInfo.FilePath)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create download request: %w", err)
+		return nil, "", fmt.Errorf("create download request: %w", im.RedactRequestError(err))
 	}
 
 	resp, err := httpClient.Do(req)

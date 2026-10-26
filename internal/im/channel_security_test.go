@@ -141,3 +141,48 @@ func TestRedactRequestErrorKeepsClientTimeoutClassification(t *testing.T) {
 type redactTestRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f redactTestRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestRedactRequestErrorHidesURLErrorCause(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	cause := &url.Error{
+		Op:  "parse",
+		URL: "https://api.telegram.org/bot" + sentinel + "/%zz",
+		Err: errors.New("invalid URL escape"),
+	}
+	err := &url.Error{
+		Op:  "Get",
+		URL: "https://api.telegram.org/bot" + sentinel + "/getUpdates",
+		Err: cause,
+	}
+	got := RedactRequestError(err)
+	require.Error(t, got)
+	require.NotContains(t, got.Error(), sentinel)
+	require.Contains(t, got.Error(), "api.telegram.org")
+	require.Contains(t, got.Error(), "*url.Error (len=")
+}
+
+// TestRedactRequestErrorForwardsTemporaryForWrappedCause pins the Temporary delegation
+// with a fixed cause. The client-timeout test above can miss it: http.Client.Timeout
+// sometimes leaves context.DeadlineExceeded as the cause, which is kept as itself and
+// implements Temporary on its own.
+func TestRedactRequestErrorForwardsTemporaryForWrappedCause(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	cause := &temporaryCause{text: "dial " + sentinel}
+	err := &url.Error{
+		Op:  "Get",
+		URL: "https://api.telegram.org/bot" + sentinel + "/getUpdates",
+		Err: cause,
+	}
+	got := RedactRequestError(err)
+	require.Error(t, got)
+	require.NotContains(t, got.Error(), sentinel)
+	require.Contains(t, got.Error(), "temporaryCause")
+	var uerr *url.Error
+	require.ErrorAs(t, got, &uerr)
+	require.True(t, uerr.Temporary(), "Temporary: %v", got)
+}
+
+type temporaryCause struct{ text string }
+
+func (e *temporaryCause) Error() string   { return e.text }
+func (e *temporaryCause) Temporary() bool { return true }
