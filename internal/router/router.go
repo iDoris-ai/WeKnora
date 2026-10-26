@@ -99,7 +99,7 @@ type RouterParams struct {
 	Agent24KnowledgeSearchHandler *handler.Agent24KnowledgeSearchHandler // A24-KB-10
 	Agent24KnowledgeReadHandler   *handler.Agent24KnowledgeReadHandler   // A24-KB-15
 
-	Agent24CredentialRevocations interfaces.Agent24CredentialRevocationStore // A24-KB-20
+	Agent24CredentialRevocations interfaces.Agent24CredentialRevocationStore // A24-KB-22
 }
 
 // NewRouter 创建新的路由

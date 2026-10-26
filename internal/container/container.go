@@ -196,7 +196,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
-	must(container.Provide(repository.NewAgent24CredentialRevocationStore)) // A24-KB-20
+	must(container.Provide(repository.NewAgent24CredentialRevocationStore)) // A24-KB-22
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -487,7 +487,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
-	must(container.Invoke(ensureAgent24CredentialRevocations)) // A24-KB-20
+	must(container.Invoke(ensureAgent24CredentialRevocations)) // A24-KB-22
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")

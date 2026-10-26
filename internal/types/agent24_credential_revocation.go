@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-20 (KB-C1-03 C3-b2, WeKnora#41, CONTRACT-READONLY-v1 R1.6).
+// Agent24 fork product patch A24-KB-22 (KB-C1-03 C3-b2, WeKnora#41, CONTRACT-READONLY-v1 R1.6).
 
 package types
 
