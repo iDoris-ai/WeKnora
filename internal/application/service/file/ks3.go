@@ -269,7 +269,7 @@ func (s *ks3FileService) CopyFile(ctx context.Context,
 	}
 
 	newPath := fmt.Sprintf("%s%s/%s", ks3Scheme, s.bucketName, destKey)
-	logger.Infof(ctx, "Copied KS3 object %s to %s", srcPath, newPath)
+	logger.Infof(ctx, "Copied KS3 object src_len=%d dst_len=%d", len(srcPath), len(newPath))
 	return newPath, nil
 }
 
