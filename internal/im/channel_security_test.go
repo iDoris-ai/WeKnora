@@ -3,6 +3,8 @@ package im
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/url"
 	"testing"
 
@@ -66,6 +68,24 @@ func TestRedactRequestError(t *testing.T) {
 		require.NotContains(t, got.Error(), sentinel)
 		require.Contains(t, got.Error(), "qyapi.weixin.qq.com")
 		require.ErrorIs(t, got, context.DeadlineExceeded)
+	})
+
+	t.Run("cause quoting the redirect target", func(t *testing.T) {
+		cause := fmt.Errorf("failed to parse Location header %q: invalid URL escape",
+			"https://api.telegram.org/bot"+sentinel+"/%zz")
+		err := &url.Error{Op: "Get", URL: "https://api.telegram.org/bot" + sentinel + "/getUpdates", Err: cause}
+		got := RedactRequestError(err)
+		require.NotContains(t, got.Error(), sentinel)
+		require.Contains(t, got.Error(), "api.telegram.org")
+		require.ErrorIs(t, got, cause)
+	})
+
+	t.Run("network cause keeps its text", func(t *testing.T) {
+		cause := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+		err := &url.Error{Op: "Post", URL: "https://api.telegram.org/bot" + sentinel + "/x", Err: cause}
+		got := RedactRequestError(err)
+		require.Contains(t, got.Error(), "connection refused")
+		require.NotContains(t, got.Error(), sentinel)
 	})
 
 	t.Run("other error", func(t *testing.T) {

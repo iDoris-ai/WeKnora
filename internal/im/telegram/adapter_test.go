@@ -211,3 +211,29 @@ func TestLongConnStartGetUpdatesLogOmitsBotToken(t *testing.T) {
 		t.Fatalf("log missing redacted getUpdates error: %s", text)
 	}
 }
+
+// net/http reports an unparsable redirect target inside the *url.Error's cause; the token in it is cut too.
+func TestGetUpdatesRedactsBotTokenInRedirectError(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	client := &LongConnClient{
+		botToken: sentinel,
+		httpClient: &http.Client{
+			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusFound,
+					Header:     http.Header{"Location": []string{"https://api.telegram.org/bot" + sentinel + "/%zz"}},
+					Body:       http.NoBody,
+					Request:    req,
+				}, nil
+			}),
+		},
+	}
+
+	_, err := client.getUpdates(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains bot token: %v", err)
+	}
+}

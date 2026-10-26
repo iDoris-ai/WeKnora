@@ -1,7 +1,12 @@
 package im
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -62,7 +67,35 @@ func RedactRequestError(err error) error {
 	// errors.Is and net.Error.Timeout still see that cause.
 	cloned := *uerr
 	cloned.URL = requestURLSchemeHost(uerr.URL)
+	cloned.Err = redactRequestCause(uerr.Err)
 	return &cloned
+}
+
+// redactRequestCause keeps a transport cause whose text names no URL (a net.Error such as a dial, DNS or
+// deadline failure, a cancellation, EOF). Any other cause can quote one: net/http reports an unparsable
+// redirect as "failed to parse Location header %q". Those keep only their type and length.
+func redactRequestCause(cause error) error {
+	var netErr net.Error
+	if cause == nil || errors.As(cause, &netErr) || errors.Is(cause, context.Canceled) ||
+		errors.Is(cause, io.EOF) || errors.Is(cause, io.ErrUnexpectedEOF) {
+		return cause
+	}
+	return redactedRequestCause{cause: cause}
+}
+
+// redactedRequestCause hides its cause's text; errors.Is and errors.As still reach the cause.
+type redactedRequestCause struct{ cause error }
+
+func (e redactedRequestCause) Error() string {
+	return fmt.Sprintf("%T (len=%d)", e.cause, len(e.cause.Error()))
+}
+
+func (e redactedRequestCause) Unwrap() error { return e.cause }
+
+// Timeout lets url.Error.Timeout see through the wrapper.
+func (e redactedRequestCause) Timeout() bool {
+	t, ok := e.cause.(interface{ Timeout() bool })
+	return ok && t.Timeout()
 }
 
 // requestURLSchemeHost returns scheme://host. Parse failure, or a URL with no
