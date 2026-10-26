@@ -348,7 +348,7 @@ func (s *s3FileService) CopyFile(ctx context.Context,
 	}
 
 	newPath := fmt.Sprintf("s3://%s/%s", s.bucketName, destKey)
-	logger.Infof(ctx, "Copied S3 object %s to %s", srcPath, newPath)
+	logger.Infof(ctx, "Copied S3 object src_len=%d dst_len=%d", len(srcPath), len(newPath))
 	return newPath, nil
 }
 

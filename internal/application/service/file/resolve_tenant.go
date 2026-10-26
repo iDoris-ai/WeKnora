@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -45,11 +46,12 @@ func ResolveTenantFileServiceWithFallback(
 		logger.Warnf(
 			ctx,
 			"[Router] %s tenant storage config missing or invalid, fallback to global file "+
-				"service: tenant_id=%d provider=%s err=%v",
+				"service: tenant_id=%d provider=%s error_len=%d error_type=%T",
 
 			logTag,
 			tenant.ID,
 			provider,
+			len(fmt.Sprint(err)),
 			err,
 		)
 		return globalFileService, globalStorageType, true
@@ -57,12 +59,13 @@ func ResolveTenantFileServiceWithFallback(
 	logger.Warnf(
 		ctx,
 		"[Router] %s resolve file service failed without fallback: tenant_id=%d "+
-			"provider=%s global_storage_type=%s err=%v",
+			"provider=%s global_storage_type=%s error_len=%d error_type=%T",
 
 		logTag,
 		tenant.ID,
 		provider,
 		globalStorageType,
+		len(fmt.Sprint(err)),
 		err,
 	)
 	return nil, "", false

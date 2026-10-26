@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -70,4 +73,68 @@ func TestReadChunkImageRefusesWhatItCannotOrShouldNotRead(t *testing.T) {
 
 	_, err = s.ReadChunkImage(context.Background(), imageResult(""))
 	assert.ErrorContains(t, err, "no image URL")
+}
+
+// imageReaderLogTenant returns a tenant so fileService does not stop at the
+// GetTenantByID warning.
+type imageReaderLogTenant struct {
+	interfaces.TenantRepository
+}
+
+func (imageReaderLogTenant) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
+	return &types.Tenant{ID: 7}, nil
+}
+
+// imageReaderLogCatalog fails Resolve so a resource:// URL hits the reference
+// warning. The error text carries the sentinel so the log must omit it too.
+type imageReaderLogCatalog struct {
+	interfaces.ResourceCatalog
+}
+
+func (imageReaderLogCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
+	return nil, errors.New("resource missing: S3NT1NEL")
+}
+
+// imageReaderLogResolver reaches the "resolving file service" log and then
+// serves the read from the in-memory file service.
+type imageReaderLogResolver struct {
+	interfaces.StorageBackendResolver
+	svc interfaces.FileService
+}
+
+func (r imageReaderLogResolver) ResolveFileService(
+	context.Context, *types.Tenant, string, string, string,
+) (interfaces.FileService, string, error) {
+	return r.svc, "local", nil
+}
+
+// TestImageReaderFileServiceLogOmitsURL uses a resource:// URL that carries
+// the sentinel. Resolve fails (line that logs the reference) and the resolver
+// still runs (line that logs the URL length). Neither log may contain the URL.
+func TestImageReaderFileServiceLogOmitsURL(t *testing.T) {
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", "/data/files")
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	handle := "S3NT1NEL" + strings.Repeat("a", types.ResourceHandleLength-len("S3NT1NEL"))
+	imageURL := types.BuildResourcePath(handle)
+	files := &imageReaderFiles{body: []byte("png")}
+	s := &knowledgeBaseService{
+		repo:            &imageReaderKBRepo{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}},
+		tenantRepo:      imageReaderLogTenant{},
+		fileSvc:         files,
+		storageResolver: imageReaderLogResolver{svc: files},
+		resourceCatalog: imageReaderLogCatalog{},
+	}
+	data, err := s.ReadChunkImage(context.Background(), imageResult(imageURL))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("png"), data)
+
+	logs := buf.String()
+	require.NotContains(t, logs, "S3NT1NEL")
+	require.Contains(t, logs, "[ImageReader] resolve resource reference failed:")
+	require.Contains(t, logs, "[ImageReader] resolving file service:")
+	require.Contains(t, logs, "url_len=")
 }

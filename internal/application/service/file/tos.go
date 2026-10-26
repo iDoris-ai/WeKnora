@@ -279,7 +279,7 @@ func (s *tosFileService) CopyFile(ctx context.Context,
 	}
 
 	newPath := fmt.Sprintf("tos://%s/%s", s.bucketName, destKey)
-	logger.Infof(ctx, "Copied TOS object %s to %s", srcPath, newPath)
+	logger.Infof(ctx, "Copied TOS object src_len=%d dst_len=%d", len(srcPath), len(newPath))
 	return newPath, nil
 }
 
