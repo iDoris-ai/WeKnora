@@ -313,3 +313,31 @@ func TestAgent24KnowledgeAuditSystemRouteGuard(t *testing.T) {
 		t.Fatalf("List called %d times", len(stub.calls))
 	}
 }
+
+// NewRouter wires the audit reads when an AuditLogHandler is present and leaves them out otherwise.
+func TestNewRouterRegistersAgent24KnowledgeAuditRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "")
+	want := []string{
+		"GET /api/v1/tenants/:id/agent24/knowledge/audit",
+		"GET /api/v1/system/admin/agent24/knowledge/audit",
+	}
+	for _, withHandler := range []bool{true, false} {
+		params := RouterParams{
+			Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		}
+		if withHandler {
+			params.AuditLogHandler = handler.NewAuditLogHandler(nil)
+		}
+		seen := map[string]bool{}
+		for _, rt := range NewRouter(params).Routes() {
+			seen[rt.Method+" "+rt.Path] = true
+		}
+		for _, route := range want {
+			if seen[route] != withHandler {
+				t.Fatalf("handler=%v: %s registered=%v", withHandler, route, seen[route])
+			}
+		}
+	}
+}
