@@ -75,6 +75,8 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
+		// Defense in depth: rawURL already parsed with an http(s) scheme and a host,
+		// so NewRequest is not expected to fail on the URL here.
 		return nil, im.RedactRequestError(err)
 	}
 

@@ -625,6 +625,40 @@ func TestConnector_Walk_PartialTransportFailureOmitsFeedURL(t *testing.T) {
 	}
 }
 
+// A feed that answers with a non-feed body fails to parse. The sync detail and
+// the Validate error name it by index and scheme://host only. The body carries
+// no sentinel, so a sentinel can only come from the URL.
+func TestConnector_ParseFailureOmitsFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	good := newFakeFeed(t)
+	notFeed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("not a feed"))
+	}))
+	t.Cleanup(notFeed.Close)
+	host := strings.TrimPrefix(notFeed.URL, "http://")
+	badURL := "http://user:" + sentinel + "@" + host + "/" + sentinel + "/feed.xml?token=" + sentinel
+
+	_, err := NewConnector().FetchAll(context.Background(), makeConfig(good.feedURL()+","+badURL, ""), nil)
+	var partial *datasource.PartialFetchError
+	if !errors.As(err, &partial) || len(partial.Details) != 1 {
+		t.Fatalf("expected one PartialFetchError detail, got %v", err)
+	}
+	detail := partial.Details[0]
+	if !strings.Contains(detail, "feed #2 (http://"+host+")") || strings.Contains(detail, sentinel) {
+		t.Fatalf("detail = %q, want feed #2 (http://%s) and no sentinel", detail, host)
+	}
+
+	err = NewConnector().Validate(context.Background(), makeConfig(badURL, ""))
+	if err == nil {
+		t.Fatal("Validate succeeded, want a parse failure")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "parse feed #1 (http://"+host+")") || strings.Contains(msg, sentinel) {
+		t.Fatalf("Validate error = %q, want parse feed #1 (http://%s) and no sentinel", msg, host)
+	}
+}
+
 // When every feed fails, the joined error still uses the feed index and omits
 // the credential-bearing URL.
 func TestConnector_Walk_AllFeedsFailedOmitsFeedURL(t *testing.T) {
