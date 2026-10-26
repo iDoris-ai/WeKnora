@@ -148,7 +148,8 @@ func ContextImages(
 			}
 			img, err := imageprep.Prepare(data, VisionImageLimits)
 			if err != nil {
-				logger.Warnf(ctx, "[ContextImages] Image of %s does not fit a vision model: %v", ref.ChunkID, err)
+				logger.Warnf(ctx, "[ContextImages] Image of %s does not fit a vision model: error_len=%d error_type=%T",
+					ref.ChunkID, len(fmt.Sprint(err)), err)
 				continue
 			}
 			images = append(images, img.DataURI())

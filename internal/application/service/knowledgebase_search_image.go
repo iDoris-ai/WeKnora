@@ -88,7 +88,8 @@ func (s *knowledgeBaseService) embeddingTakesImages(ctx context.Context, kb *typ
 	if err != nil {
 		// The query embedding already resolved this model, so a failure here
 		// is transient; searching as text-only is the safe fallback.
-		logger.Warnf(ctx, "image recall: resolve embedding model %s: %v", kb.EmbeddingModelID, err)
+		logger.Warnf(ctx, "image recall: resolve embedding model %s: error_len=%d error_type=%T",
+			kb.EmbeddingModelID, len(fmt.Sprint(err)), err)
 		types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09: image hits are not searched
 		return false
 	}
@@ -284,7 +285,9 @@ func refillSearch(ctx context.Context, g *storeGroup, p types.RetrieveParams) (*
 			"store_kind": storeKindLabel(g.StoreID),
 			"retriever":  p.RetrieverType,
 			"top_k":      p.TopK,
-		}, fmt.Sprintf("image row refill incomplete, keeping the smaller pool: %v", err))
+			"error_len":  len(fmt.Sprint(err)),
+			"error_type": fmt.Sprintf("%T", err),
+		}, "image row refill incomplete, keeping the smaller pool")
 		types.MarkRetrievalDegraded(ctx) // Agent24 fork patch A24-KB-09
 		return nil, false
 	}

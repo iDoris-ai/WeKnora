@@ -94,7 +94,9 @@ func imageCandidates(
 			}
 			img, err := imageprep.Prepare(data, limits)
 			if err != nil {
-				logger.Warnf(groupCtx, "[Rerank] Image of %s does not fit the model, scoring its text: %v", r.ID, err)
+				logger.Warnf(groupCtx,
+					"[Rerank] Image of %s does not fit the model, scoring its text: error_len=%d error_type=%T",
+					r.ID, len(fmt.Sprint(err)), err)
 				return nil
 			}
 			mu.Lock()
@@ -127,7 +129,7 @@ func scoreCandidates(
 		imageScores, imgErr := imageModel.RerankImages(ctx, query, images)
 		if imgErr != nil {
 			logger.Warnf(ctx, "[Rerank] Image scoring failed, scoring those hits as text: error_len=%d error_type=%T",
-				len(imgErr.Error()), imgErr)
+				len(fmt.Sprint(imgErr)), imgErr)
 		} else {
 			for _, s := range imageScores {
 				if s.Index < 0 || s.Index >= len(imagePositions) {
