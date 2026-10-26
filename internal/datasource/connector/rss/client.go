@@ -10,6 +10,10 @@ import (
 	"time"
 
 	readability "codeberg.org/readeck/go-readability/v2"
+	// RedactRequestError cuts a *url.Error down to scheme://host. Feed tokens
+	// sit in the query and userinfo, and internal/im does not import datasource,
+	// so reusing it here does not cycle.
+	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -46,11 +50,19 @@ func newClient(headers map[string]string) *client {
 // headers are only attached when withAuthHeaders is true (feed fetches); article
 // pages on third-party domains must not receive feed credentials.
 func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAuthHeaders bool) ([]byte, error) {
+	// Parse first so a failure is a top-level *url.Error and can be redacted
+	// before ValidateURLForSSRF wraps it. A URL without http(s):// is rejected here
+	// too: ValidateURLForSSRF prepends https:// and parses again, and that second
+	// parse can fail and quote the whole URL (e.g. "host:abc/feed?token=...").
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", im.RedactRequestError(err))
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("invalid URL: scheme must be http or https")
+	}
 	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
 		return nil, fmt.Errorf("URL rejected: %w", err)
-	}
-	if _, err := url.Parse(rawURL); err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
@@ -58,7 +70,7 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, im.RedactRequestError(err)
 	}
 
 	if withAuthHeaders {
@@ -76,7 +88,7 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch failed: %w", err)
+		return nil, fmt.Errorf("fetch failed: %w", im.RedactRequestError(err))
 	}
 	defer resp.Body.Close()
 

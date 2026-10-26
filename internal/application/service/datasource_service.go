@@ -101,14 +101,16 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 
 	// Create in database
 	if err := s.dsRepo.Create(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to create data source: %v", err)
+		logger.Errorf(ctx, "failed to create data source: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 
 	// Register cron schedule if configured
 	if ds.SyncSchedule != "" && ds.Status == types.DataSourceStatusActive {
 		if err := s.scheduler.AddOrUpdate(ds); err != nil {
-			logger.Warnf(ctx, "failed to register cron for ds=%s: %v", ds.ID, err)
+			logger.Warnf(ctx, "failed to register cron for ds=%s: error_len=%d error_type=%T",
+				ds.ID, len(err.Error()), err)
 		}
 	}
 
@@ -132,7 +134,8 @@ func (s *DataSourceService) GetDataSource(ctx context.Context, id string) (*type
 func (s *DataSourceService) ListDataSources(ctx context.Context, kbID string) ([]*types.DataSource, error) {
 	dataSources, err := s.dsRepo.FindByKnowledgeBase(ctx, kbID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to list data sources: %v", err)
+		logger.Errorf(ctx, "failed to list data sources: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 
@@ -222,13 +225,15 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	}
 
 	if err := s.dsRepo.Update(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to update data source: %v", err)
+		logger.Errorf(ctx, "failed to update data source: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 
 	// Update cron schedule
 	if err := s.scheduler.AddOrUpdate(ds); err != nil {
-		logger.Warnf(ctx, "failed to update cron for ds=%s: %v", ds.ID, err)
+		logger.Warnf(ctx, "failed to update cron for ds=%s: error_len=%d error_type=%T",
+			ds.ID, len(err.Error()), err)
 	}
 
 	logger.Infof(ctx, "data source updated: id=%s", ds.ID)
@@ -335,7 +340,8 @@ func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) err
 	}
 
 	if err := s.dsRepo.Delete(ctx, id); err != nil {
-		logger.Errorf(ctx, "failed to delete data source: %v", err)
+		logger.Errorf(ctx, "failed to delete data source: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return err
 	}
 
@@ -344,7 +350,8 @@ func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) err
 
 	// Cancel any pending/running sync logs so queued asynq tasks won't retry
 	if err := s.syncLogRepo.CancelPendingByDataSource(ctx, id); err != nil {
-		logger.Warnf(ctx, "failed to cancel pending sync logs for ds=%s: %v", id, err)
+		logger.Warnf(ctx, "failed to cancel pending sync logs for ds=%s: error_len=%d error_type=%T",
+			id, len(err.Error()), err)
 	}
 
 	logger.Infof(ctx, "data source deleted: id=%s", id)
@@ -481,7 +488,8 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	}
 
 	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "failed to create sync log: %v", err)
+		logger.Errorf(ctx, "failed to create sync log: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 
@@ -502,7 +510,8 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 
 	info, err := s.taskEnqueuer.Enqueue(task)
 	if err != nil {
-		logger.Errorf(ctx, "failed to enqueue sync task: %v", err)
+		logger.Errorf(ctx, "failed to enqueue sync task: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = err.Error()
@@ -537,7 +546,8 @@ func (s *DataSourceService) PauseDataSource(ctx context.Context, id string) erro
 
 	ds.Status = types.DataSourceStatusPaused
 	if err := s.dsRepo.Update(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to pause data source: %v", err)
+		logger.Errorf(ctx, "failed to pause data source: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return err
 	}
 
@@ -562,13 +572,15 @@ func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) err
 
 	ds.Status = types.DataSourceStatusActive
 	if err := s.dsRepo.Update(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to resume data source: %v", err)
+		logger.Errorf(ctx, "failed to resume data source: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return err
 	}
 
 	// Re-register cron schedule
 	if err := s.scheduler.AddOrUpdate(ds); err != nil {
-		logger.Warnf(ctx, "failed to re-register cron for ds=%s: %v", ds.ID, err)
+		logger.Warnf(ctx, "failed to re-register cron for ds=%s: error_len=%d error_type=%T",
+			ds.ID, len(err.Error()), err)
 	}
 
 	logger.Infof(ctx, "data source resumed: id=%s", id)
@@ -581,7 +593,8 @@ func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) err
 func (s *DataSourceService) GetSyncLogs(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error) {
 	logs, err := s.syncLogRepo.FindByDataSource(ctx, dsID, limit, offset)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get sync logs: %v", err)
+		logger.Errorf(ctx, "failed to get sync logs: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 	return logs, nil
@@ -600,7 +613,8 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
 	var payload types.DataSourceSyncPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
+		logger.Errorf(ctx, "failed to unmarshal sync payload: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
@@ -612,7 +626,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Get data source
 	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
 	if err != nil {
-		logger.Warnf(ctx, "data source not found (likely deleted), cancelling sync: ds=%s err=%v", payload.DataSourceID, err)
+		logger.Warnf(ctx,
+			"data source not found (likely deleted), cancelling sync: ds=%s error_len=%d error_type=%T",
+			payload.DataSourceID, len(err.Error()), err)
 		if syncLog, slErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID); slErr == nil && syncLog != nil {
 			syncLog.Status = types.SyncLogStatusCanceled
 			syncLog.FinishedAt = timePtr(time.Now().UTC())
@@ -625,14 +641,16 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get sync log: %v", err)
+		logger.Errorf(ctx, "failed to get sync log: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil
 	}
 
 	kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
 	if kbErr != nil {
-		logger.Warnf(ctx, "knowledge base not found (likely deleted), cancelling sync: kb=%s ds=%s err=%v",
-			ds.KnowledgeBaseID, payload.DataSourceID, kbErr)
+		logger.Warnf(ctx,
+			"knowledge base not found (likely deleted), cancelling sync: kb=%s ds=%s error_len=%d error_type=%T",
+			ds.KnowledgeBaseID, payload.DataSourceID, len(kbErr.Error()), kbErr)
 		syncLog.Status = types.SyncLogStatusCanceled
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = "knowledge base has been deleted"
@@ -665,7 +683,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Parse configuration
 	config, err := ds.ParseConfig()
 	if err != nil {
-		logger.Errorf(ctx, "failed to parse config: %v", err)
+		logger.Errorf(ctx, "failed to parse config: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
@@ -722,7 +741,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
 				ds.LastSyncCursor = cursorJSON
 				if uerr := s.dsRepo.UpdateSyncState(ctx, ds); uerr != nil {
-					logger.Warnf(ctx, "failed to persist sync cursor after fetch error: %v", uerr)
+					logger.Warnf(ctx,
+						"failed to persist sync cursor after fetch error: error_len=%d error_type=%T",
+						len(uerr.Error()), uerr)
 				}
 			}
 		}
@@ -749,7 +770,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get tenant info: %v", err)
+		logger.Errorf(ctx, "failed to get tenant info: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Failed to get tenant info: %v", err)
@@ -824,7 +846,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 func (s *DataSourceService) resolveAutoTagIDs(ctx context.Context, ds *types.DataSource) []string {
 	autoTagIDs := []string{}
 	if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, ds.Name); tagErr != nil {
-		logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", ds.Name, tagErr)
+		logger.Warnf(ctx, "failed to find/create auto-tag %q: error_len=%d error_type=%T (proceeding without tag)",
+			ds.Name, len(tagErr.Error()), tagErr)
 	} else if autoTag != nil {
 		autoTagIDs = append(autoTagIDs, autoTag.ID)
 		logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", ds.Name, autoTag.ID)
@@ -893,8 +916,9 @@ func (s *DataSourceService) applyFetchedItem(
 			ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
 		)
 		if lookupErr != nil {
-			logger.Errorf(ctx, "failed to find deleted knowledge for external_id_len=%d (ds=%s, kb=%s): %v",
-				len(item.ExternalID), ds.ID, ds.KnowledgeBaseID, lookupErr)
+			logger.Errorf(ctx,
+				"failed to find deleted knowledge for external_id_len=%d (ds=%s, kb=%s): error_len=%d error_type=%T",
+				len(item.ExternalID), ds.ID, ds.KnowledgeBaseID, len(lookupErr.Error()), lookupErr)
 			result.Failed++
 			result.DeletionFailed++
 			recordSyncError(result, types.SyncItemError{
@@ -916,8 +940,9 @@ func (s *DataSourceService) applyFetchedItem(
 			// sync-log message can warn the operator about this gap.
 			result.Failed++
 			result.DeletionFailed++
-			logger.Errorf(ctx, "failed to delete knowledge %s for external_id_len=%d (ds=%s): %v",
-				existing.ID, len(item.ExternalID), ds.ID, deleteErr)
+			logger.Errorf(ctx,
+				"failed to delete knowledge %s for external_id_len=%d (ds=%s): error_len=%d error_type=%T",
+				existing.ID, len(item.ExternalID), ds.ID, len(deleteErr.Error()), deleteErr)
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_failed",
@@ -928,8 +953,9 @@ func (s *DataSourceService) applyFetchedItem(
 		if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
 			result.Failed++
 			result.DeletionFailed++
-			logger.Errorf(ctx, "failed to hard-delete knowledge %s for external_id_len=%d (ds=%s): %v",
-				existing.ID, len(item.ExternalID), ds.ID, herr)
+			logger.Errorf(ctx,
+				"failed to hard-delete knowledge %s for external_id_len=%d (ds=%s): error_len=%d error_type=%T",
+				existing.ID, len(item.ExternalID), ds.ID, len(herr.Error()), herr)
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
 				Code:    "deletion_failed",
@@ -1053,7 +1079,8 @@ func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCu
 	h.syncLog.ItemsSkipped = h.result.Skipped
 	h.syncLog.ItemsFailed = h.result.Failed
 	if err := h.svc.syncLogRepo.UpdateResult(ctx, h.syncLog); err != nil {
-		logger.Warnf(ctx, "failed to persist sync log progress at checkpoint: %v", err)
+		logger.Warnf(ctx, "failed to persist sync log progress at checkpoint: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 	return nil
 }
@@ -1091,7 +1118,8 @@ func (s *DataSourceService) processSyncStreaming(
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, ds.TenantID)
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get tenant info: %v", err)
+		logger.Errorf(ctx, "failed to get tenant info: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
 			types.SyncLogStatusFailed, fmt.Sprintf("Failed to get tenant info: %v", err), wasPaused)
 		return err
@@ -1104,7 +1132,8 @@ func (s *DataSourceService) processSyncStreaming(
 	attempt, _ := asynq.GetRetryCount(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
-		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)
+		logger.Errorf(ctx, "failed to parse sync cursor: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
 			types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", err), wasPaused)
 		return err
@@ -1118,7 +1147,8 @@ func (s *DataSourceService) processSyncStreaming(
 		if _, ok := sc.(datasource.FullStreamingConnector); ok {
 			baseline, cursorErr := ds.ParseSyncCursor()
 			if cursorErr != nil {
-				logger.Errorf(ctx, "failed to parse full-sync cursor: %v", cursorErr)
+				logger.Errorf(ctx, "failed to parse full-sync cursor: error_len=%d error_type=%T",
+					len(cursorErr.Error()), cursorErr)
 				s.updateSyncRunResult(ctx, ds, syncLog, result, nil,
 					types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", cursorErr), wasPaused)
 				return cursorErr
@@ -1197,7 +1227,8 @@ func (s *DataSourceService) updateSyncRunResult(
 	syncLog.ErrorMessage = errorMessage
 	syncLog.Result = resultJSON
 	if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "failed to update sync log: %v", err)
+		logger.Errorf(ctx, "failed to update sync log: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 
 	if status == types.SyncLogStatusFailed {
@@ -1212,7 +1243,8 @@ func (s *DataSourceService) updateSyncRunResult(
 	ds.ErrorMessage = errorMessage
 	ds.LastSyncResult = resultJSON
 	if err := s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to update data source: %v", err)
+		logger.Errorf(ctx, "failed to update data source: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 	action := types.AuditActionDataSourceSyncCompleted
 	outcome := types.AuditOutcomeSuccess
@@ -1335,17 +1367,19 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		// other during updates.
 		existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
 		if err != nil {
-			logger.Warnf(ctx, "failed to check existing knowledge for external_id_len=%d: %v",
-				len(item.ExternalID), err)
+			logger.Warnf(ctx, "failed to check existing knowledge for external_id_len=%d: error_len=%d error_type=%T",
+				len(item.ExternalID), len(err.Error()), err)
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
 			logger.Infof(ctx, "found existing knowledge %s for external_id_len=%d, deleting for update",
 				existing.ID, len(item.ExternalID))
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
-				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
+				logger.Warnf(ctx, "failed to delete existing knowledge %s: error_len=%d error_type=%T",
+					existing.ID, len(err.Error()), err)
 			} else {
 				if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
-					logger.Warnf(ctx, "failed to hard-delete replaced knowledge %s: %v", existing.ID, herr)
+					logger.Warnf(ctx, "failed to hard-delete replaced knowledge %s: error_len=%d error_type=%T",
+						existing.ID, len(herr.Error()), herr)
 				}
 				isUpdate = true
 			}
@@ -1466,7 +1500,8 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 	repo := s.knowledgeService.GetRepository()
 	children, err := repo.FindByMetadataKeyPrefix(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", types.SubtreeChildPrefix(item.ExternalID))
 	if err != nil {
-		logger.Warnf(ctx, "failed to list subtree of external_id_len=%d: %v", len(item.ExternalID), err)
+		logger.Warnf(ctx, "failed to list subtree of external_id_len=%d: error_len=%d error_type=%T",
+			len(item.ExternalID), len(err.Error()), err)
 		return
 	}
 	if len(children) == 0 {
@@ -1498,11 +1533,12 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 	// Batch the deletion so a node whose attachment set shrank from N pays one
 	// round of the delete fan-out rather than N sequential ones.
 	if derr := s.knowledgeService.DeleteKnowledgeList(ctx, ids); derr != nil {
-		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id_len=%d: %v",
-			len(ids), len(item.ExternalID), derr)
+		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id_len=%d: error_len=%d error_type=%T",
+			len(ids), len(item.ExternalID), len(derr.Error()), derr)
 	} else if herr := repo.HardDeleteKnowledgeList(ctx, ds.TenantID, ids); herr != nil {
-		logger.Warnf(ctx, "failed to hard-delete %d stale sub-item(s) of external_id_len=%d: %v",
-			len(ids), len(item.ExternalID), herr)
+		logger.Warnf(ctx,
+			"failed to hard-delete %d stale sub-item(s) of external_id_len=%d: error_len=%d error_type=%T",
+			len(ids), len(item.ExternalID), len(herr.Error()), herr)
 	}
 }
 

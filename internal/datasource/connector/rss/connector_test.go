@@ -589,3 +589,163 @@ func TestFullTextFetchFailureLogOmitsArticleURL(t *testing.T) {
 		"error_len=",
 	)
 }
+
+// A closed server makes the transport fail. The partial-sync detail names the
+// feed by index and scheme://host, and drops the path, query, and userinfo.
+func TestConnector_Walk_PartialTransportFailureOmitsFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	good := newFakeFeed(t)
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	host := strings.TrimPrefix(dead.URL, "http://")
+	dead.Close()
+	path := "/" + sentinel + "/feed.xml"
+	badURL := "http://user:" + sentinel + "@" + host + path + "?token=" + sentinel
+	cfg := makeConfig(good.feedURL()+","+badURL, "")
+
+	items, err := NewConnector().FetchAll(context.Background(), cfg, nil)
+	var partial *datasource.PartialFetchError
+	if !errors.As(err, &partial) {
+		t.Fatalf("expected PartialFetchError, got %v", err)
+	}
+	if len(partial.Details) != 1 {
+		t.Fatalf("expected 1 feed error, got %v", partial.Details)
+	}
+	detail := partial.Details[0]
+	if !strings.Contains(detail, "feed #2 (http://127.0.0.1:") {
+		t.Fatalf("detail = %q, want feed #2 (http://127.0.0.1:...)", detail)
+	}
+	if strings.Contains(detail, sentinel) {
+		t.Fatalf("detail contains sentinel: %s", detail)
+	}
+	if strings.Contains(detail, path) {
+		t.Fatalf("detail contains path: %s", detail)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items from the healthy feed, got %d", len(items))
+	}
+}
+
+// When every feed fails, the joined error still uses the feed index and omits
+// the credential-bearing URL.
+func TestConnector_Walk_AllFeedsFailedOmitsFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	host := strings.TrimPrefix(dead.URL, "http://")
+	dead.Close()
+	badURL := "http://user:" + sentinel + "@" + host + "/" + sentinel + "?token=" + sentinel
+
+	_, err := NewConnector().FetchAll(context.Background(), makeConfig(badURL, ""), nil)
+	if err == nil {
+		t.Fatal("expected all feeds failed")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, sentinel) {
+		t.Fatalf("error contains sentinel: %s", msg)
+	}
+	if !strings.Contains(msg, "all feeds failed:") {
+		t.Fatalf("error = %q, want all feeds failed", msg)
+	}
+	if !strings.Contains(msg, "feed #1") {
+		t.Fatalf("error = %q, want feed #1", msg)
+	}
+}
+
+// A control character makes url.Parse fail before SSRF. The *url.Error quotes
+// the raw URL, so the tenant-visible text must be redacted.
+func TestConnector_FetchAll_InvalidURLOmitsSentinel(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	feedURL := "http://127.0.0.1/" + sentinel + "\x01"
+	_, err := NewConnector().FetchAll(context.Background(), makeConfig(feedURL, ""), nil)
+	if err == nil {
+		t.Fatal("expected invalid URL error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, sentinel) {
+		t.Fatalf("error contains sentinel: %s", msg)
+	}
+	if !strings.Contains(msg, "invalid URL") {
+		t.Fatalf("error = %q, want invalid URL", msg)
+	}
+}
+
+// Without a scheme, url.Parse reads "host:abc" as an opaque URL and succeeds, while
+// ValidateURLForSSRF prepends https:// and its own parse fails, quoting the token.
+func TestConnector_FetchAll_SchemelessURLOmitsSentinel(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	feedURL := "example.com:abc/feed?token=" + sentinel
+	_, err := NewConnector().FetchAll(context.Background(), makeConfig(feedURL, ""), nil)
+	if err == nil {
+		t.Fatal("expected invalid URL error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, sentinel) {
+		t.Fatalf("error contains sentinel: %s", msg)
+	}
+	if !strings.Contains(msg, "scheme must be http or https") {
+		t.Fatalf("error = %q, want scheme rejection", msg)
+	}
+}
+
+// Validate returns its error to the caller configuring the source: the feed is
+// named by index and host only.
+func TestConnector_Validate_TransportFailureOmitsFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	host := strings.TrimPrefix(dead.URL, "http://")
+	dead.Close()
+	feedURL := "http://user:" + sentinel + "@" + host + "/" + sentinel + "?token=" + sentinel
+
+	err := NewConnector().Validate(context.Background(), makeConfig(feedURL, ""))
+	if err == nil {
+		t.Fatal("expected validate error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, sentinel) {
+		t.Fatalf("error contains sentinel: %s", msg)
+	}
+	if !strings.Contains(msg, "fetch feed #1 (http://"+host+")") {
+		t.Fatalf("error = %q, want feed #1 with host only", msg)
+	}
+}
+
+// A private IP literal is rejected by SSRF after the URL parses. The reason
+// must not echo the query, path, or userinfo.
+func TestConnector_FetchAll_SSRFRejectionOmitsSentinel(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	feedURL := "http://user:" + sentinel + "@10.0.0.1/" + sentinel + "?token=" + sentinel
+	_, err := NewConnector().FetchAll(context.Background(), makeConfig(feedURL, ""), nil)
+	if err == nil {
+		t.Fatal("expected SSRF rejection")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, sentinel) {
+		t.Fatalf("error contains sentinel: %s", msg)
+	}
+	if !strings.Contains(msg, "URL rejected") {
+		t.Fatalf("error = %q, want URL rejected", msg)
+	}
+}
+
+// ListResources keeps a failed feed and puts the fetch error in Description.
+// The transport error is redacted at the source, so the description has no token.
+func TestListResources_TransportFailureDescriptionOmitsFeedURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	host := strings.TrimPrefix(dead.URL, "http://")
+	dead.Close()
+	feedURL := "http://user:" + sentinel + "@" + host + "/" + sentinel + "?token=" + sentinel
+
+	res, err := NewConnector().ListResources(context.Background(), makeConfig(feedURL, ""), "")
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(res))
+	}
+	if strings.Contains(res[0].Description, sentinel) {
+		t.Fatalf("description contains sentinel: %s", res[0].Description)
+	}
+	if !strings.HasPrefix(res[0].Description, "fetch failed:") {
+		t.Fatalf("description = %q, want fetch failed", res[0].Description)
+	}
+}
