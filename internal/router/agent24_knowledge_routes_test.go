@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -249,4 +250,66 @@ func (s *agent24KnowledgeAuditReadStub) List(
 		scope = q.ScopeType
 	}
 	return []*types.AuditLog{{ID: 1, TenantID: tenantID, ScopeType: scope}}, nil
+}
+
+// The tenant route keeps the route guards in front of its own check: with RBAC enforced, a mismatched workspace
+// is refused by PathTenantMatch and a Viewer by Admin, each with that guard's message, before the handler runs.
+func TestAgent24KnowledgeAuditTenantRouteGuards(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cases := []struct {
+		name, path, want string
+		role             types.TenantRole
+	}{
+		{
+			name: "path tenant mismatch", path: "/api/v1/tenants/8/agent24/knowledge/audit",
+			want: "URL workspace does not match the active workspace", role: types.TenantRoleAdmin,
+		},
+		{
+			name: "viewer", path: "/api/v1/tenants/7/agent24/knowledge/audit",
+			want: "insufficient workspace role", role: types.TenantRoleViewer,
+		},
+	}
+	for _, tc := range cases {
+		stub := &agent24KnowledgeAuditReadStub{}
+		engine := gin.New()
+		engine.Use(middleware.ErrorHandler())
+		role := tc.role
+		engine.Use(func(c *gin.Context) {
+			ctx := c.Request.Context()
+			ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(7))
+			ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
+			ctx = types.WithCaller(ctx, types.Caller{TenantID: 7, Role: role})
+			c.Request = c.Request.WithContext(ctx)
+			c.Next()
+		})
+		RegisterAgent24KnowledgeAuditRoutes(engine.Group("/api/v1"), handler.NewAuditLogHandler(stub),
+			&rbacGuards{cfg: &config.Config{}})
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("%s: status %d body %s, want 403 with %q", tc.name, w.Code, w.Body.String(), tc.want)
+		}
+		if len(stub.calls) != 0 {
+			t.Fatalf("%s: List called %d times", tc.name, len(stub.calls))
+		}
+	}
+}
+
+// The system route sits behind SystemAdmin: a signed-in user who is not a system administrator gets that guard's
+// refusal before the handler runs.
+func TestAgent24KnowledgeAuditSystemRouteGuard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24KnowledgeAuditReadStub{}
+	engine := gin.New()
+	engine.Use(middleware.ErrorHandler())
+	RegisterAgent24KnowledgeAuditRoutes(engine.Group("/api/v1"), handler.NewAuditLogHandler(stub),
+		&rbacGuards{cfg: &config.Config{}})
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/agent24/knowledge/audit", nil))
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "system administrator required") {
+		t.Fatalf("status %d body %s, want the SystemAdmin guard's 403", w.Code, w.Body.String())
+	}
+	if len(stub.calls) != 0 {
+		t.Fatalf("List called %d times", len(stub.calls))
+	}
 }

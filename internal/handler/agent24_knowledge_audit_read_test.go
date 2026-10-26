@@ -238,7 +238,9 @@ func TestListAgent24KnowledgeAuditSystem_NonAdminForbidden(t *testing.T) {
 }
 
 func TestListAgent24KnowledgeAuditSystem_PlatformKey(t *testing.T) {
-	entries := []*types.AuditLog{{ID: 6, TenantID: 0, Action: agent24AuditActionReady, ScopeType: agent24AuditScopeType}}
+	entries := []*types.AuditLog{
+		{ID: 6, TenantID: 0, Action: agent24AuditActionReady, ScopeType: agent24AuditScopeType},
+	}
 	for _, tc := range []struct {
 		name        string
 		caps        types.StringArray

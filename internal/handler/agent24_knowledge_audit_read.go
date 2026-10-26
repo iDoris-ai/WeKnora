@@ -27,15 +27,15 @@ func (h *AuditLogHandler) ListAgent24KnowledgeAuditTenant(c *gin.Context) {
 	}
 	// Undeclared for API keys at the route. Reject here as well, including when the gate is absent.
 	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
-		c.Error(errors.NewForbiddenError("API keys cannot read agent24 knowledge audit"))
+		_ = c.Error(errors.NewForbiddenError("API keys cannot read agent24 knowledge audit"))
 		return
 	}
 	if types.CallerFromContext(ctx).TenantID != tenantID {
-		c.Error(errors.NewForbiddenError("agent24 knowledge audit is only available in the caller's workspace"))
+		_ = c.Error(errors.NewForbiddenError("agent24 knowledge audit is only available in the caller's workspace"))
 		return
 	}
 	if !types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
-		c.Error(errors.NewForbiddenError("agent24 knowledge audit requires admin access"))
+		_ = c.Error(errors.NewForbiddenError("agent24 knowledge audit requires admin access"))
 		return
 	}
 	h.listAgent24KnowledgeAudit(c, tenantID)
@@ -48,11 +48,12 @@ func (h *AuditLogHandler) ListAgent24KnowledgeAuditSystem(c *gin.Context) {
 	ctx := c.Request.Context()
 	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
 		if !scope.IsPlatform() || !scope.HasCapability(types.APIKeyCapabilitySystemAuditRead) {
-			c.Error(errors.NewForbiddenError("agent24 knowledge audit requires a platform key with system_audit_read"))
+			_ = c.Error(errors.NewForbiddenError(
+				"agent24 knowledge audit requires a platform key with system_audit_read"))
 			return
 		}
 	} else if !types.IsSystemAdminFromContext(ctx) {
-		c.Error(errors.NewForbiddenError("agent24 knowledge audit requires a system administrator"))
+		_ = c.Error(errors.NewForbiddenError("agent24 knowledge audit requires a system administrator"))
 		return
 	}
 	h.listAgent24KnowledgeAudit(c, 0)
@@ -67,7 +68,7 @@ func (h *AuditLogHandler) listAgent24KnowledgeAudit(c *gin.Context, tenantID uin
 	switch action {
 	case "", agent24AuditActionSearch, agent24AuditActionRead, agent24AuditActionReady:
 	default:
-		c.Error(errors.NewValidationError("action must be knowledge.search, knowledge.read, or knowledge.ready"))
+		_ = c.Error(errors.NewValidationError("action must be knowledge.search, knowledge.read, or knowledge.ready"))
 		return
 	}
 	q := &interfaces.AuditLogQuery{
@@ -81,7 +82,7 @@ func (h *AuditLogHandler) listAgent24KnowledgeAudit(c *gin.Context, tenantID uin
 	entries, err := h.auditService.List(ctx, tenantID, q)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
-		c.Error(errors.NewInternalServerError("failed to list audit log"))
+		_ = c.Error(errors.NewInternalServerError("failed to list audit log"))
 		return
 	}
 	var nextCursor uint64
