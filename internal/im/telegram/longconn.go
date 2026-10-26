@@ -52,7 +52,8 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			logger.Errorf(ctx, "[Telegram] getUpdates error: %v", err)
+			logger.Errorf(ctx, "[Telegram] getUpdates error: error_len=%d error_type=%T",
+				len(err.Error()), err)
 			// Back off on error
 			select {
 			case <-ctx.Done():
@@ -100,7 +101,8 @@ func (c *LongConnClient) getUpdates(ctx context.Context) ([]telegramUpdate, erro
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		// Agent24 KB-OBS-01: Do's *url.Error quotes the bot token in the path.
+		return nil, im.RedactRequestError(err)
 	}
 	defer resp.Body.Close()
 

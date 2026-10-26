@@ -276,7 +276,8 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 
 	_, _, _, err := a.api.UpdateMessageContext(ctx, channel, ts, slack.MsgOptionText(fullContent, false))
 	if err != nil {
-		logger.Warnf(ctx, "[Slack] Failed to update stream content: %v", err)
+		logger.Warnf(ctx, "[Slack] Failed to update stream content: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 	return nil
 }
@@ -305,7 +306,8 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 
 	_, _, _, err := a.api.UpdateMessageContext(ctx, state.channel, state.ts, slack.MsgOptionText(fullContent, false))
 	if err != nil {
-		logger.Warnf(ctx, "[Slack] Failed to end stream: %v", err)
+		logger.Warnf(ctx, "[Slack] Failed to end stream: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 
 	logger.Infof(ctx, "[Slack] Streaming ended: stream_id=%s", streamID)

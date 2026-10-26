@@ -1,14 +1,17 @@
 package im
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -36,6 +39,7 @@ type fullOutputSessionService struct {
 	answer          string
 	hangUntilCancel bool
 	started         chan struct{}
+	qaErr           error // returned by KnowledgeQA when set
 }
 
 func (s *fullOutputSessionService) KnowledgeQA(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
@@ -46,6 +50,9 @@ func (s *fullOutputSessionService) KnowledgeQA(ctx context.Context, req *types.Q
 	if s.hangUntilCancel {
 		<-ctx.Done()
 		return ctx.Err()
+	}
+	if s.qaErr != nil {
+		return s.qaErr
 	}
 	return bus.Emit(ctx, event.Event{
 		ID:        "answer-1",
@@ -378,5 +385,61 @@ func TestIMQAFailureReply(t *testing.T) {
 	}
 	if got := imQAFailureReply(errors.New("boom")); got != imErrorFallback {
 		t.Fatalf("other error = %q, want %q", got, imErrorFallback)
+	}
+}
+
+func TestHandleMessageFullOutputEndStreamLogOmitsErrorText(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	service, adapter, _, _ := newFullOutputHarness("最终答案")
+	adapter.endErr = errors.New("end stream " + sentinel)
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	session := &types.Session{ID: "session-1"}
+
+	err := service.handleMessageFullOutput(
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+	)
+	if err != nil {
+		t.Fatalf("handleMessageFullOutput() error = %v", err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "EndStream failed for full output: error_len=") {
+		t.Fatalf("log missing redacted end error: %s", logs)
+	}
+}
+
+// #105 review: a QA failure can carry the user's question or a vendor reply; the Service logs its length and
+// type only.
+func TestHandleMessageFullOutputQAFailureLogOmitsErrorText(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	service, adapter, sessionSvc, _ := newFullOutputHarness("")
+	sessionSvc.qaErr = errors.New("vendor echoed " + sentinel)
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	session := &types.Session{ID: "session-1"}
+
+	err := service.handleMessageFullOutput(
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+	)
+	if err != nil {
+		t.Fatalf("handleMessageFullOutput() error = %v", err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "Full-output QA failed: error_len=") {
+		t.Fatalf("log missing redacted QA failure: %s", logs)
 	}
 }
