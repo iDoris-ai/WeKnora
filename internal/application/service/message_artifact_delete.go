@@ -82,8 +82,8 @@ func (s *messageService) DeleteSessionArtifact(
 		return nil, ErrArtifactNotFound
 	}
 
-	logger.Infof(ctx, "Deleted artifact %s from session %s: %d row(s)",
-		target.FileName, req.SessionID, len(marked))
+	logger.Infof(ctx, "Deleted artifact name_len=%d from session %s: %d row(s)",
+		len(target.FileName), req.SessionID, len(marked))
 	return &types.ArtifactDeleteResult{
 		FileName: target.FileName,
 		Deleted:  len(marked),
@@ -116,7 +116,7 @@ func (s *messageService) reclaimableBlobs(
 			continue
 		}
 		if live > 0 {
-			logger.Infof(ctx, "Keeping artifact blob %s: %d live row(s) still point at it", ref.URL, live)
+			logger.Infof(ctx, "Keeping artifact blob url_len=%d: %d live row(s) still point at it", len(ref.URL), live)
 			continue
 		}
 		out = append(out, ref)

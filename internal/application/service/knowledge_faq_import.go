@@ -178,7 +178,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 			return "", fmt.Errorf("failed to upload entries: %w", err)
 		}
 
-		logger.Infof(ctx, "FAQ entries uploaded to: %s", entriesURL)
+		logger.Infof(ctx, "FAQ entries uploaded: url_len=%d", len(entriesURL))
 		taskPayload.EntriesURL = entriesURL
 		taskPayload.EntryCount = entryCount
 	} else {
@@ -209,7 +209,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 			return "", fmt.Errorf("failed to upload entries: %w", err)
 		}
 
-		logger.Infof(ctx, "FAQ entries uploaded to (size exceeded): %s", entriesURL)
+		logger.Infof(ctx, "FAQ entries uploaded (size exceeded): url_len=%d", len(entriesURL))
 		taskPayload.Entries = nil
 		taskPayload.EntriesURL = entriesURL
 		taskPayload.EntryCount = entryCount
@@ -319,7 +319,7 @@ func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 		return "", fmt.Errorf("failed to get file URL: %w", err)
 	}
 
-	logger.Infof(ctx, "Generated failed entries CSV: %s, entries: %d", fileURL, len(failedEntries))
+	logger.Infof(ctx, "Generated failed entries CSV: url_len=%d, entries: %d", len(fileURL), len(failedEntries))
 	return fileURL, nil
 }
 
@@ -1758,7 +1758,7 @@ func (s *knowledgeService) cleanupFAQEntriesFileOnFinalFailure(ctx context.Conte
 			"Failed to delete FAQ entries file from object storage on final failure: error_len=%d error_type=%T",
 			len(fmt.Sprint(err)), err)
 	} else {
-		logger.Infof(ctx, "Deleted FAQ entries file from object storage on final failure: %s", entriesURL)
+		logger.Infof(ctx, "Deleted FAQ entries file from object storage on final failure: url_len=%d", len(entriesURL))
 	}
 }
 
@@ -2330,7 +2330,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 如果 entries 存储在对象存储中，先下载
 	if payload.EntriesURL != "" && len(payload.Entries) == 0 {
-		logger.Infof(ctx, "Downloading FAQ entries from object storage: %s", payload.EntriesURL)
+		logger.Infof(ctx, "Downloading FAQ entries from object storage: url_len=%d", len(payload.EntriesURL))
 		reader, err := s.fileSvc.GetFile(ctx, payload.EntriesURL)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to download FAQ entries from object storage: error_len=%d error_type=%T",
@@ -2550,7 +2550,7 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 			logger.Warnf(ctx, "Failed to delete FAQ entries file from object storage: error_len=%d error_type=%T",
 				len(fmt.Sprint(err)), err)
 		} else {
-			logger.Infof(ctx, "Deleted FAQ entries file from object storage: %s", payload.EntriesURL)
+			logger.Infof(ctx, "Deleted FAQ entries file from object storage: url_len=%d", len(payload.EntriesURL))
 		}
 	}
 	progress.UpdatedAt = time.Now().Unix()

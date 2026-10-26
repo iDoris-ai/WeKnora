@@ -232,4 +232,30 @@ func TestDeleteSessionArtifactVersionLookupLogOmitsSourcePath(t *testing.T) {
 	require.Contains(t, logs, "error_len=")
 }
 
+// A successful delete logs the file name and the kept blob's URL only by length.
+func TestDeleteSessionArtifactSuccessLogsOmitFileNameAndURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	url := "resource://" + sentinel
+	row := artifactRow("msg-1", 0, url, "/w/a.pptx")
+	row.FileName = sentinel + ".pptx"
+	repo := &deleteMessageRepo{target: ptr(row), liveByte: map[string]int64{url: 1}}
+	s := &messageService{sessionRepo: &deleteSessionRepo{}, messageRepo: repo}
+
+	result, err := s.DeleteSessionArtifact(deleteCallerCtx(), &types.ArtifactDeleteRequest{
+		SessionID: "sess-1", MessageID: "msg-1", Index: 0,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Deleted)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "Keeping artifact blob url_len=")
+	require.Contains(t, logs, "Deleted artifact name_len=")
+}
+
 func ptr[T any](v T) *T { return &v }

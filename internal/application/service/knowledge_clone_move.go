@@ -1629,6 +1629,7 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	}
 
 	tagIDMapping[srcTagID] = newTag.ID
-	logger.Infof(ctx, "Created tag %s (ID: %s) in target KB %s", newTag.Name, newTag.ID, dstKnowledgeBaseID)
+	logger.Infof(ctx, "Created tag name_len=%d (ID: %s) in target KB %s",
+		len(newTag.Name), newTag.ID, dstKnowledgeBaseID)
 	return newTag.ID
 }

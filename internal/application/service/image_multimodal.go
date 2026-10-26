@@ -441,8 +441,8 @@ func (s *ImageMultimodalService) processImage(
 		return handleErr
 	}
 	for _, c := range newChunks {
-		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
-			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
+		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image url_len=%d, len=%d",
+			c.ChunkType, c.ID, len(payload.ImageURL), len(c.Content))
 	}
 
 	// Index chunks so they can be retrieved
@@ -822,8 +822,8 @@ func (s *ImageMultimodalService) indexImageVector(
 	if dims := model.GetDimensions(); dims > 0 && len(vectors[0]) != dims {
 		// The index is laid out for the text vectors' width; a vector of
 		// another would land in a different collection or be refused.
-		logger.Warnf(ctx, "[ImageMultimodal] Image vector for %s has %d dimensions, the index %d",
-			payload.ImageURL, len(vectors[0]), dims)
+		logger.Warnf(ctx, "[ImageMultimodal] Image vector for url_len=%d has %d dimensions, the index %d",
+			len(payload.ImageURL), len(vectors[0]), dims)
 		return fmt.Sprintf("failed: %d dimensions, index has %d", len(vectors[0]), dims)
 	}
 
