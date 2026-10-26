@@ -233,7 +233,10 @@ func TestResolveAPIPrincipalSignedTokenJTI(t *testing.T) {
 		{name: "absent"},
 		{name: "not a string", set: func(c jwt.MapClaims) { c["jti"] = float64(12) }},
 		{name: "too long", set: func(c jwt.MapClaims) { c["jti"] = strings.Repeat("j", 129) }},
-		{name: "max runes", set: func(c jwt.MapClaims) { c["jti"] = strings.Repeat("j", 128) }, want: strings.Repeat("j", 128)},
+		{
+			name: "max runes", set: func(c jwt.MapClaims) { c["jti"] = strings.Repeat("j", 128) },
+			want: strings.Repeat("j", 128),
+		},
 		{name: "blank", set: func(c jwt.MapClaims) { c["jti"] = "   " }},
 		{name: "trimmed", set: func(c jwt.MapClaims) { c["jti"] = "  kept  " }, want: "kept"},
 		{name: "control", set: func(c jwt.MapClaims) { c["jti"] = "bad\njti" }},

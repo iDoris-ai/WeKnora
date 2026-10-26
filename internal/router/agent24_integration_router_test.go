@@ -542,7 +542,9 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 		}
 		return claims
 	}
-	serve := func(keys interfaces.TenantAPIKeyService, tenant *types.Tenant, externalToken string) *httptest.ResponseRecorder {
+	serve := func(
+		keys interfaces.TenantAPIKeyService, tenant *types.Tenant, externalToken string,
+	) *httptest.ResponseRecorder {
 		t.Helper()
 		r := NewRouter(RouterParams{
 			Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},

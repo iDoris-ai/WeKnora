@@ -608,7 +608,9 @@ func attachAPIKeyAuthContext(
 	}
 }
 
-func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.Header) (types.Principal, string, error) {
+func resolveAPIPrincipal(
+	ctx context.Context, tenant *types.Tenant, header http.Header,
+) (types.Principal, string, error) {
 	tenantID := uint64(0)
 	if tenant != nil {
 		tenantID = tenant.ID
@@ -744,9 +746,10 @@ func externalUserTokenOnlyExpired(err error) bool {
 		return false
 	}
 	for _, other := range []error{
-		jwt.ErrTokenMalformed, jwt.ErrTokenUnverifiable, jwt.ErrTokenSignatureInvalid, jwt.ErrTokenRequiredClaimMissing,
-		jwt.ErrTokenInvalidAudience, jwt.ErrTokenUsedBeforeIssued, jwt.ErrTokenInvalidIssuer, jwt.ErrTokenInvalidSubject,
-		jwt.ErrTokenNotValidYet, jwt.ErrTokenInvalidId, jwt.ErrInvalidType,
+		jwt.ErrTokenMalformed, jwt.ErrTokenUnverifiable, jwt.ErrTokenSignatureInvalid,
+		jwt.ErrTokenRequiredClaimMissing, jwt.ErrTokenInvalidAudience, jwt.ErrTokenUsedBeforeIssued,
+		jwt.ErrTokenInvalidIssuer, jwt.ErrTokenInvalidSubject, jwt.ErrTokenNotValidYet, jwt.ErrTokenInvalidId,
+		jwt.ErrInvalidType,
 	} {
 		if errors.Is(err, other) {
 			return false
