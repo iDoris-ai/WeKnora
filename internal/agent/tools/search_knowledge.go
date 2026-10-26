@@ -228,7 +228,8 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	kbIDs := searchTargets.GetAllKnowledgeBaseIDs()
 	kbList, err := t.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load knowledge bases %v: %v", kbIDs, err)
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load knowledge bases %v: error_len=%d error_type=%T",
+			kbIDs, len(fmt.Sprint(err)), err)
 	}
 	kbModes, msg := resolveKBSearchModes(mode, kbList)
 	if msg != "" {
@@ -1051,8 +1052,9 @@ func (t *SearchKnowledgeTool) formatOutput(
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
 			meta, err := faqMetadataFromResult(result.SearchResult)
 			if err != nil {
-				logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load FAQ metadata for chunk %s: %v",
-					result.ID, err)
+				logger.Warnf(ctx,
+					"[Tool][SearchKnowledge] Failed to load FAQ metadata for chunk %s: error_len=%d error_type=%T",
+					result.ID, len(fmt.Sprint(err)), err)
 			} else {
 				faqMeta = meta
 			}
@@ -1149,7 +1151,8 @@ func (t *SearchKnowledgeTool) getEnrichedPassage(ctx context.Context, result *ty
 	}
 	var imageInfos []types.ImageInfo
 	if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err != nil {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to parse image info: %v", err)
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to parse image info: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return result.Content
 	}
 	if len(imageInfos) == 0 {

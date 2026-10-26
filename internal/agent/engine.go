@@ -642,8 +642,8 @@ loop:
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
 		case <-ctx.Done():
-			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: %v",
-				state.CurrentRound+1, ctx.Err())
+			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: error_len=%d error_type=%T",
+				state.CurrentRound+1, len(fmt.Sprint(ctx.Err())), ctx.Err())
 			// Try to salvage existing results
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
 				logger.Infof(ctx, "[Agent] Synthesizing final answer from %d existing tool results",
@@ -1137,7 +1137,8 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs, prompts
 			defer func() { <-sem }()
 			imgBytes, err := decodeDataURIBytes(dataURI)
 			if err != nil {
-				logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: %v", i, err)
+				logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: error_len=%d error_type=%T",
+					i, len(fmt.Sprint(err)), err)
 				return
 			}
 			imageCtx, cancel := context.WithTimeout(ctx, toolImageDescribeTimeout)

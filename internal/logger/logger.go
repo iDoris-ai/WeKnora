@@ -569,10 +569,10 @@ func Errorf(c context.Context, format string, args ...interface{}) {
 
 // ErrorWithFields 输出带有额外字段的错误级别日志
 //
-// Agent24 KB-OBS-01: the error text can quote a user question, a vendor reply or a user path, so the
-// fields carry error_len and error_type instead of err.Error(). A caller-supplied "error" key is
-// removed first, or WithFields would write that raw text; the map is copied so the delete leaves
-// the caller's map unchanged.
+// Agent24 KB-OBS-01: only the "error" key is guaranteed. A caller-supplied "error" value is removed
+// and replaced with error_len and error_type, because the error text can quote a user question, a
+// vendor reply or a user path. The map is copied so the delete leaves the caller's map unchanged.
+// Every other field is the caller's responsibility and is written as given.
 func ErrorWithFields(c context.Context, err error, fields logrus.Fields) {
 	copied := make(logrus.Fields, len(fields)+2)
 	for k, v := range fields {

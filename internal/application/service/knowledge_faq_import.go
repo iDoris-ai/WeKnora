@@ -65,7 +65,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	// 检查是否有正在进行的导入任务（通过Redis）
 	runningTaskID, err := s.getRunningFAQImportTaskID(ctx, kbID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to check running import task: %v", err)
+		logger.Errorf(ctx, "Failed to check running import task: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		// 检查失败不影响导入，继续执行
 	} else if runningTaskID != "" {
 		logger.Warnf(ctx, "Import task already running for KB %s: %s", kbID, runningTaskID)
@@ -91,7 +91,8 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		EnqueuedAt: enqueuedAt,
 		InstanceID: instanceID,
 	}); err != nil {
-		logger.Errorf(ctx, "Failed to set running FAQ import task info: %v", err)
+		logger.Errorf(ctx, "Failed to set running FAQ import task info: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		// 不影响任务执行，继续
 	} else {
 		runningInfoSet = true
@@ -101,7 +102,8 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 			return
 		}
 		if clearErr := s.clearRunningFAQImportInfoIfMatches(ctx, kbID, taskID, instanceID, enqueuedAt); clearErr != nil {
-			logger.Warnf(ctx, "Failed to clear FAQ import running info after setup failure: %v", clearErr)
+			logger.Warnf(ctx, "Failed to clear FAQ import running info after setup failure: error_len=%d error_type=%T",
+				len(fmt.Sprint(clearErr)), clearErr)
 		}
 	}()
 
@@ -123,7 +125,8 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		DryRun:        payload.DryRun,
 	}
 	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-		logger.Errorf(ctx, "Failed to initialize FAQ import task status: %v", err)
+		logger.Errorf(ctx, "Failed to initialize FAQ import task status: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return "", fmt.Errorf("failed to initialize task: %w", err)
 	}
 
@@ -157,7 +160,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		// 数据量较大，上传到对象存储
 		entriesData, err := json.Marshal(payload.Entries)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal FAQ entries: %v", err)
+			logger.Errorf(ctx, "Failed to marshal FAQ entries: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 			return "", fmt.Errorf("failed to marshal entries: %w", err)
 		}
 
@@ -170,7 +173,8 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		}
 		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
+			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			return "", fmt.Errorf("failed to upload entries: %w", err)
 		}
 
@@ -185,7 +189,8 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal FAQ import task payload: %v", err)
+		logger.Errorf(ctx, "Failed to marshal FAQ import task payload: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return "", fmt.Errorf("failed to marshal task payload: %w", err)
 	}
 
@@ -199,7 +204,8 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		}
 		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
+			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			return "", fmt.Errorf("failed to upload entries: %w", err)
 		}
 
@@ -231,7 +237,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	)
 	info, err := s.task.Enqueue(task)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to enqueue FAQ import task: %v", err)
+		logger.Errorf(ctx, "Failed to enqueue FAQ import task: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		return "", fmt.Errorf("failed to enqueue task: %w", err)
 	}
 	logger.Infof(ctx, "Enqueued FAQ import task: id=%s queue=%s task_id=%s dry_run=%v", info.ID, info.Queue, taskID, payload.DryRun)
@@ -490,7 +496,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 	// 查询知识库中已有的所有 FAQ chunks 的 metadata
 	existingChunks, err := s.chunkRepo.ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx, tenantID, kbID)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to list existing FAQ chunks for dry run: %v", err)
+		logger.Warnf(ctx, "Failed to list existing FAQ chunks for dry run: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 
 	// 构建已存在的标准问 → chunk 映射（用于合并候选识别）
@@ -580,7 +587,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			progress.Message = fmt.Sprintf("正在验证标准问 %d/%d...", i+1, totalEntries)
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
+				logger.Warnf(ctx, "Failed to update FAQ dry run progress: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 			}
 		}
 	}
@@ -653,7 +661,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			progress.Message = fmt.Sprintf("正在验证相似问 %d/%d...", idx+1, len(validIndicesAfterStdQ))
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
+				logger.Warnf(ctx, "Failed to update FAQ dry run progress: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 			}
 		}
 	}
@@ -692,7 +701,8 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			progress.Message = fmt.Sprintf("正在验证反例 %d/%d...", idx+1, len(validIndicesAfterStdQ))
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
+				logger.Warnf(ctx, "Failed to update FAQ dry run progress: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 			}
 		}
 	}
@@ -829,7 +839,8 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			progress.Message = fmt.Sprintf("正在验证标准问 %d/%d...", i+1, totalEntries)
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
+				logger.Warnf(ctx, "Failed to update FAQ dry run progress: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 			}
 		}
 	}
@@ -899,7 +910,8 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			progress.Message = fmt.Sprintf("正在验证相似问 %d/%d...", idx+1, len(validIndicesAfterStdQ))
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
+				logger.Warnf(ctx, "Failed to update FAQ dry run progress: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 			}
 		}
 	}
@@ -946,7 +958,8 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			progress.Message = fmt.Sprintf("正在验证反例 %d/%d...", idx+1, len(validIndicesAfterStdQ))
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
+				logger.Warnf(ctx, "Failed to update FAQ dry run progress: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 			}
 		}
 	}
@@ -1065,7 +1078,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		meta, sErr := sanitizeFAQEntryPayload(&entry)
 		if sErr != nil {
 			skippedCount++
-			logger.Warnf(ctx, "Skipping invalid FAQ entry: %v", sErr)
+			logger.Warnf(ctx, "Skipping invalid FAQ entry: error_len=%d error_type=%T", len(fmt.Sprint(sErr)), sErr)
 			continue
 		}
 
@@ -1198,7 +1211,8 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		meta, err := sanitizeFAQEntryPayload(&entry)
 		if err != nil {
 			batchSkippedCount++
-			logger.Warnf(ctx, "Skipping invalid FAQ entry in replace mode: %v", err)
+			logger.Warnf(ctx, "Skipping invalid FAQ entry in replace mode: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			continue
 		}
 
@@ -1290,7 +1304,8 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		}
 		tags, err := s.tagRepo.GetBySeqIDs(ctx, tenantID, seqIDs)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to batch load tags by seq_ids: %v", err)
+			logger.Warnf(ctx, "Failed to batch load tags by seq_ids: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		} else {
 			for _, tag := range tags {
 				tagSeqIDToUUID[tag.SeqID] = tag.ID
@@ -1346,7 +1361,8 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 			// hash 匹配，检查 tag 是否变化
 			newTagID, err := resolveTagIDFromCache(&ewh.entry)
 			if err != nil {
-				logger.Warnf(ctx, "Failed to resolve tag for entry, treating as new: %v", err)
+				logger.Warnf(ctx, "Failed to resolve tag for entry, treating as new: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 				entriesToProcess = append(entriesToProcess, ewh.entry)
 				continue
 			}
@@ -1530,8 +1546,10 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			meta, err := sanitizeFAQEntryPayload(&entry)
 			if err != nil {
 				logger.ErrorWithFields(ctx, err, map[string]interface{}{
-					"entry":   entry,
-					"task_id": taskID,
+					"entry_idx":             i + idx,
+					"standard_question_len": len(entry.StandardQuestion),
+					"answer_count":          len(entry.Answers),
+					"task_id":               taskID,
 				})
 				return fmt.Errorf("failed to sanitize entry at index %d: %w", i+idx, err)
 			}
@@ -1540,8 +1558,10 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			tagID, err := s.resolveTagID(ctx, kbID, &entry)
 			if err != nil {
 				logger.ErrorWithFields(ctx, err, map[string]interface{}{
-					"entry":   entry,
-					"task_id": taskID,
+					"entry_idx":             i + idx,
+					"standard_question_len": len(entry.StandardQuestion),
+					"answer_count":          len(entry.Answers),
+					"task_id":               taskID,
 				})
 				return fmt.Errorf("failed to resolve tag for entry at index %d: %w", i+idx, err)
 			}
@@ -1643,7 +1663,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		// 更新任务进度
 		progress := int(float64(actualProcessed) / float64(totalEntries) * 100)
 		if err := s.updateFAQImportProgressStatus(ctx, taskID, "", 0, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries), ""); err != nil {
-			logger.Errorf(ctx, "Failed to update task progress: %v", err)
+			logger.Errorf(ctx, "Failed to update task progress: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		}
 
 		batchDuration := time.Since(batchStartTime)
@@ -1718,7 +1738,8 @@ func (s *knowledgeService) updateFAQImportProgressStatus(
 	if status == types.FAQImportStatusCompleted || status == types.FAQImportStatusFailed {
 		if existingProgress.KBID != "" {
 			if clearErr := s.clearRunningFAQImportInfoIfMatches(ctx, existingProgress.KBID, taskID, instanceID, enqueuedAt); clearErr != nil {
-				logger.Errorf(ctx, "Failed to clear running FAQ import task ID: %v", clearErr)
+				logger.Errorf(ctx, "Failed to clear running FAQ import task ID: error_len=%d error_type=%T",
+					len(fmt.Sprint(clearErr)), clearErr)
 			}
 		}
 	}
@@ -1733,7 +1754,9 @@ func (s *knowledgeService) cleanupFAQEntriesFileOnFinalFailure(ctx context.Conte
 		return
 	}
 	if err := s.fileSvc.DeleteFile(ctx, entriesURL); err != nil {
-		logger.Warnf(ctx, "Failed to delete FAQ entries file from object storage on final failure: %v", err)
+		logger.Warnf(ctx,
+			"Failed to delete FAQ entries file from object storage on final failure: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	} else {
 		logger.Infof(ctx, "Deleted FAQ entries file from object storage on final failure: %s", entriesURL)
 	}
@@ -2001,7 +2024,9 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	if len(sourceIDsToDelete) > 0 {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: deleting %d obsolete sourceIDs: %v", len(sourceIDsToDelete), sourceIDsToDelete)
 		if delErr := retrieveEngine.DeleteBySourceIDList(ctx, sourceIDsToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); delErr != nil {
-			logger.Warnf(ctx, "incrementalIndexFAQEntry: failed to delete obsolete source IDs: %v", delErr)
+			logger.Warnf(ctx,
+				"incrementalIndexFAQEntry: failed to delete obsolete source IDs: error_len=%d error_type=%T",
+				len(fmt.Sprint(delErr)), delErr)
 		}
 	}
 
@@ -2087,7 +2112,7 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	if needDelete {
 		deleteStartTime := time.Now()
 		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
-			logger.Warnf(ctx, "Delete FAQ vectors failed: %v", err)
+			logger.Warnf(ctx, "Delete FAQ vectors failed: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		}
 		deleteDuration = time.Since(deleteStartTime)
 		if deleteDuration > 100*time.Millisecond {
@@ -2258,7 +2283,8 @@ func (s *knowledgeService) recordFAQImportKBActivity(
 func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) error {
 	var payload types.FAQImportPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		logger.Errorf(ctx, "failed to unmarshal FAQ import task payload: %v", err)
+		logger.Errorf(ctx, "failed to unmarshal FAQ import task payload: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return fmt.Errorf("failed to unmarshal task payload: %w", err)
 	}
 	ctx = payload.Initiator.Apply(ctx)
@@ -2297,7 +2323,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get tenant: %v", err)
+		logger.Errorf(ctx, "failed to get tenant: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		return nil
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
@@ -2307,20 +2333,21 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Infof(ctx, "Downloading FAQ entries from object storage: %s", payload.EntriesURL)
 		reader, err := s.fileSvc.GetFile(ctx, payload.EntriesURL)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to download FAQ entries from object storage: %v", err)
+			logger.Errorf(ctx, "Failed to download FAQ entries from object storage: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			return fmt.Errorf("failed to download entries: %w", err)
 		}
 		defer reader.Close()
 
 		entriesData, err := io.ReadAll(reader)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to read FAQ entries data: %v", err)
+			logger.Errorf(ctx, "Failed to read FAQ entries data: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 			return fmt.Errorf("failed to read entries data: %w", err)
 		}
 
 		var entries []types.FAQEntryPayload
 		if err := json.Unmarshal(entriesData, &entries); err != nil {
-			logger.Errorf(ctx, "Failed to unmarshal FAQ entries: %v", err)
+			logger.Errorf(ctx, "Failed to unmarshal FAQ entries: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 			return fmt.Errorf("failed to unmarshal entries: %w", err)
 		}
 
@@ -2360,7 +2387,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		DryRun:         payload.DryRun,
 	}
 	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-		logger.Warnf(ctx, "Failed to save initial FAQ import progress: %v", err)
+		logger.Warnf(ctx, "Failed to save initial FAQ import progress: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 
 	var validEntryIndices []int
@@ -2377,7 +2405,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		// 保存验证通过的索引，用于重试时跳过验证
 		progress.ValidEntryIndices = validEntryIndices
 		if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-			logger.Warnf(ctx, "Failed to save validation result: %v", err)
+			logger.Warnf(ctx, "Failed to save validation result: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		}
 		logger.Infof(ctx, "FAQ validation completed: total=%d, valid=%d, failed=%d",
 			originalTotalEntries, len(validEntryIndices), progress.FailedCount)
@@ -2404,7 +2432,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	progress.Message = fmt.Sprintf("验证完成，开始导入 %d 条有效数据...", len(validEntries))
 	progress.UpdatedAt = time.Now().Unix()
 	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-		logger.Warnf(ctx, "Failed to update FAQ import progress: %v", err)
+		logger.Warnf(ctx, "Failed to update FAQ import progress: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 	}
 
 	// 检查任务状态 - 幂等性处理（复用之前获取的 existingProgress）
@@ -2413,7 +2441,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		if existingProgress.Status == types.FAQImportStatusCompleted {
 			logger.Infof(ctx, "FAQ import already completed, skipping: %s", payload.TaskID)
 			if clearErr := s.clearRunningFAQImportInfoIfMatches(ctx, payload.KBID, payload.TaskID, payload.InstanceID, payload.EnqueuedAt); clearErr != nil {
-				logger.Warnf(ctx, "Failed to clear running FAQ import info for completed task: %v", clearErr)
+				logger.Warnf(ctx,
+					"Failed to clear running FAQ import info for completed task: error_len=%d error_type=%T",
+					len(fmt.Sprint(clearErr)), clearErr)
 			}
 			return nil // 幂等：已完成的任务直接返回
 		}
@@ -2428,11 +2458,12 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	// 幂等性处理：清理可能已部分处理的chunks和索引数据
 	chunksDeleted, err := s.chunkRepo.DeleteUnindexedChunks(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to delete unindexed chunks: %v", err)
+		logger.Errorf(ctx, "Failed to delete unindexed chunks: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "清理未索引数据失败", err.Error()); updateErr != nil {
-				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
+				logger.Errorf(ctx, "Failed to update task status to failed: error_len=%d error_type=%T",
+					len(fmt.Sprint(updateErr)), updateErr)
 			}
 			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
 		}
@@ -2453,7 +2484,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 					chunkIDs = append(chunkIDs, chunk.ID)
 				}
 				if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
-					logger.Warnf(ctx, "Failed to delete index data for chunks (may not exist): %v", err)
+					logger.Warnf(ctx,
+						"Failed to delete index data for chunks (may not exist): error_len=%d error_type=%T",
+						len(fmt.Sprint(err)), err)
 				} else {
 					logger.Infof(ctx, "Successfully deleted index data for %d chunks", len(chunksDeleted))
 				}
@@ -2486,11 +2519,12 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	// 执行FAQ导入（传入已处理的偏移量，用于进度计算）
 	if err := s.executeFAQImport(ctx, payload.TaskID, payload.KBID, faqPayload, payload.TenantID, progress.FailedCount+processedCount, progress); err != nil {
 		logger.Errorf(ctx, "FAQ import task failed: %s, error_len=%d error_type=%T",
-			payload.TaskID, len(err.Error()), err)
+			payload.TaskID, len(fmt.Sprint(err)), err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {
-				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
+				logger.Errorf(ctx, "Failed to update task status to failed: error_len=%d error_type=%T",
+					len(fmt.Sprint(updateErr)), updateErr)
 			}
 			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
 		}
@@ -2513,7 +2547,8 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	// 清理对象存储中的 entries 文件（如果有）
 	if payload.EntriesURL != "" {
 		if err := s.fileSvc.DeleteFile(ctx, payload.EntriesURL); err != nil {
-			logger.Warnf(ctx, "Failed to delete FAQ entries file from object storage: %v", err)
+			logger.Warnf(ctx, "Failed to delete FAQ entries file from object storage: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		} else {
 			logger.Infof(ctx, "Deleted FAQ entries file from object storage: %s", payload.EntriesURL)
 		}
@@ -2524,7 +2559,8 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	if len(progress.FailedEntries) > 0 {
 		csvURL, err := s.generateFailedEntriesCSV(ctx, payload.TenantID, payload.TaskID, progress.FailedEntries)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to generate failed entries CSV: %v", err)
+			logger.Warnf(ctx, "Failed to generate failed entries CSV: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		} else {
 			progress.FailedEntriesURL = csvURL
 			progress.FailedEntries = nil // 清空内联数据，使用 URL
@@ -2572,7 +2608,8 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	// 如果不是 dry run 模式，保存导入结果统计到数据库
 	if !payload.DryRun {
 		if err := s.saveFAQImportResultToDatabase(ctx, payload, progress, originalTotalEntries); err != nil {
-			logger.Warnf(ctx, "Failed to save FAQ import result to database: %v", err)
+			logger.Warnf(ctx, "Failed to save FAQ import result to database: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		}
 
 		// 只有 replace 模式才清理未使用的 Tag
@@ -2580,7 +2617,8 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 		if payload.Mode == types.FAQBatchModeReplace {
 			deletedTags, err := s.tagRepo.DeleteUnusedTags(ctx, payload.TenantID, payload.KBID)
 			if err != nil {
-				logger.Warnf(ctx, "FAQ import task %s: failed to cleanup unused tags: %v", payload.TaskID, err)
+				logger.Warnf(ctx, "FAQ import task %s: failed to cleanup unused tags: error_len=%d error_type=%T",
+					payload.TaskID, len(fmt.Sprint(err)), err)
 			} else if deletedTags > 0 {
 				logger.Infof(ctx, "FAQ import task %s: cleaned up %d unused tags after replace import", payload.TaskID, deletedTags)
 			}
@@ -2590,13 +2628,15 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	// 使用 updateFAQImportProgressStatus 来确保正确清理 running key
 	// 但是需要先保存其他字段，因为 updateFAQImportProgressStatus 不会保存所有字段
 	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-		logger.Warnf(ctx, "Failed to save final FAQ import progress: %v", err)
+		logger.Warnf(ctx, "Failed to save final FAQ import progress: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 
 	// 然后调用状态更新来清理 running key
 	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusCompleted,
 		100, originalTotalEntries, originalTotalEntries, progress.Message, ""); err != nil {
-		logger.Warnf(ctx, "Failed to update final FAQ import status: %v", err)
+		logger.Warnf(ctx, "Failed to update final FAQ import status: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 
 	logger.Infof(ctx, "FAQ task completed: %s, dry_run=%v, success: %d, added: %d, merged: %d, failed: %d, partial_failed: %d",
@@ -2651,7 +2691,9 @@ func (s *knowledgeService) executeFAQMergeOperations(
 		}
 		fullChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
 		if err != nil {
-			logger.Errorf(ctx, "FAQ import task %s: failed to batch reload chunks for merge: %v", taskID, err)
+			logger.Errorf(ctx,
+				"FAQ import task %s: failed to batch reload chunks for merge: error_len=%d error_type=%T",
+				taskID, len(fmt.Sprint(err)), err)
 			return mergedCount, fmt.Errorf("failed to batch reload chunks for merge: %w", err)
 		}
 		chunkMap := make(map[string]*types.Chunk, len(fullChunks))
@@ -2669,7 +2711,9 @@ func (s *knowledgeService) executeFAQMergeOperations(
 			}
 
 			if err := fullChunk.SetFAQMetadata(op.MergedMeta); err != nil {
-				logger.Errorf(ctx, "FAQ import task %s: failed to set merged metadata for chunk %s: %v", taskID, fullChunk.ID, err)
+				logger.Errorf(ctx,
+					"FAQ import task %s: failed to set merged metadata for chunk %s: error_len=%d error_type=%T",
+					taskID, fullChunk.ID, len(fmt.Sprint(err)), err)
 				return mergedCount, fmt.Errorf("failed to set merged FAQ metadata: %w", err)
 			}
 
@@ -2694,7 +2738,8 @@ func (s *knowledgeService) executeFAQMergeOperations(
 
 		// 3. 事务批量保存（GORM Save 全字段更新，确保 metadata/content_hash 持久化）
 		if err := s.chunkRepo.SaveChunks(ctx, mergedChunks); err != nil {
-			logger.Errorf(ctx, "FAQ import task %s: failed to batch save merged chunks: %v", taskID, err)
+			logger.Errorf(ctx, "FAQ import task %s: failed to batch save merged chunks: error_len=%d error_type=%T",
+				taskID, len(fmt.Sprint(err)), err)
 			return mergedCount, fmt.Errorf("failed to batch save merged chunks: %w", err)
 		}
 
@@ -2750,7 +2795,8 @@ func (s *knowledgeService) loadFAQTagsForChunks(
 	}
 	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, ids)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to load FAQ tags for import result: %v", err)
+		logger.Warnf(ctx, "Failed to load FAQ tags for import result: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return tagsByID
 	}
 	for _, tag := range tags {

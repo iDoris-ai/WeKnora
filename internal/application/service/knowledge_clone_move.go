@@ -85,7 +85,8 @@ func bindCopiedResource(
 		return
 	}
 	if err := catalog.Bind(ctx, ref, types.ResourceOwnerKnowledge, knowledgeID, relation); err != nil {
-		logger.Warnf(ctx, "Failed to bind cloned resource %s to knowledge %s: %v", ref, knowledgeID, err)
+		logger.Warnf(ctx, "Failed to bind cloned resource to knowledge %s: ref_len=%d error_len=%d error_type=%T",
+			knowledgeID, len(ref), len(fmt.Sprint(err)), err)
 	}
 }
 
@@ -226,7 +227,8 @@ func cleanupCopiedObjects(ctx context.Context, svc interfaces.FileService, paths
 			continue
 		}
 		if err := svc.DeleteFile(ctx, p); err != nil {
-			logger.Errorf(ctx, "Failed to clean up copied object %s: %v", p, err)
+			logger.Errorf(ctx, "Failed to clean up copied object: path_len=%d error_len=%d error_type=%T",
+				len(p), len(fmt.Sprint(err)), err)
 		}
 	}
 }
@@ -531,7 +533,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	// Get tenant info and add to context
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get tenant info: %v", err)
+		logger.Errorf(ctx, "Failed to get tenant info: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		return fmt.Errorf("failed to get tenant info: %w", err)
 	}
 	if tenantInfo == nil || tenantInfo.ID != payload.TenantID {
@@ -597,7 +599,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 		UpdatedAt: time.Now().Unix(),
 	}
 	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
-		logger.Errorf(ctx, "Failed to update KB clone progress: %v", err)
+		logger.Errorf(ctx, "Failed to update KB clone progress: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 	}
 
 	if retryCount == 0 {
@@ -640,7 +642,8 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	progress.Message = "Knowledge base clone completed successfully"
 	progress.UpdatedAt = time.Now().Unix()
 	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
-		logger.Errorf(ctx, "Failed to update KB clone progress to completed: %v", err)
+		logger.Errorf(ctx, "Failed to update KB clone progress to completed: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 	// Derive the target's description from the cloned documents now instead
 	// of waiting for the next upload. dstKB is the loaded target (type and
@@ -683,7 +686,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// Get source FAQ knowledge first (FAQ KB has exactly one Knowledge entry)
 	srcKnowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, srcKB.TenantID, srcKB.ID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get source FAQ knowledge: %v", err)
+		logger.Errorf(ctx, "Failed to get source FAQ knowledge: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		handleError(progress, err, "Failed to get source FAQ knowledge")
 		return err
 	}
@@ -701,7 +704,8 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// Get chunk-level differences based on content_hash.
 	diff, err := s.chunkRepo.FAQChunkDiff(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to calculate FAQ chunk difference: %v", err)
+		logger.Errorf(ctx, "Failed to calculate FAQ chunk difference: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		handleError(progress, err, "Failed to calculate FAQ chunk difference")
 		return err
 	}
@@ -748,7 +752,8 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 
 	syncPlan, err := s.buildFAQStatusSyncPlan(ctx, srcKB.TenantID, dstKB.TenantID, diff.MatchedPairs, resolveFAQTag)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to build FAQ status sync plan: %v", err)
+		logger.Errorf(ctx, "Failed to build FAQ status sync plan: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		handleError(progress, err, "Failed to build FAQ status sync plan")
 		return err
 	}
@@ -785,7 +790,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), sourceStoreID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to init retrieve engine: %v", err)
+		logger.Errorf(ctx, "Failed to init retrieve engine: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		handleError(progress, err, "Failed to initialize retrieve engine")
 		return err
 	}
@@ -793,7 +798,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// Get embedding model
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, dstKB.EmbeddingModelID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
+		logger.Errorf(ctx, "Failed to get embedding model: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		handleError(progress, err, "Failed to get embedding model")
 		return err
 	}
@@ -804,13 +809,15 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	if len(chunksToDelete) > 0 {
 		// Delete from vector store
 		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunksToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
-			logger.Errorf(ctx, "Failed to delete FAQ chunks from vector store: %v", err)
+			logger.Errorf(ctx, "Failed to delete FAQ chunks from vector store: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			handleError(progress, err, "Failed to delete FAQ entries from vector store")
 			return err
 		}
 		// Delete from database
 		if err := s.chunkRepo.DeleteChunks(ctx, dstKB.TenantID, chunksToDelete); err != nil {
-			logger.Errorf(ctx, "Failed to delete FAQ chunks from database: %v", err)
+			logger.Errorf(ctx, "Failed to delete FAQ chunks from database: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			handleError(progress, err, "Failed to delete FAQ entries from database")
 			return err
 		}
@@ -827,7 +834,8 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// Get or create the FAQ knowledge entry in destination
 	dstKnowledge, err := s.getOrCreateFAQKnowledge(ctx, dstKB, srcKnowledge)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get or create FAQ knowledge: %v", err)
+		logger.Errorf(ctx, "Failed to get or create FAQ knowledge: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		handleError(progress, err, "Failed to prepare FAQ knowledge entry")
 		return err
 	}
@@ -860,7 +868,8 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 			newImageInfo, copied, copyErr := cloneChunkImageInfo(
 				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache, s.resourceCatalog)
 			if copyErr != nil {
-				logger.Errorf(ctx, "Failed to copy FAQ chunk images: %v", copyErr)
+				logger.Errorf(ctx, "Failed to copy FAQ chunk images: error_len=%d error_type=%T",
+					len(fmt.Sprint(copyErr)), copyErr)
 				handleError(progress, copyErr, "Failed to copy FAQ entry images")
 				retErr = copyErr
 				return retErr
@@ -890,7 +899,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 
 		// Save to database
 		if err := s.chunkRepo.CreateChunks(ctx, newChunks); err != nil {
-			logger.Errorf(ctx, "Failed to create FAQ chunks: %v", err)
+			logger.Errorf(ctx, "Failed to create FAQ chunks: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 			handleError(progress, err, "Failed to create FAQ entries")
 			return err
 		}
@@ -903,7 +912,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		// Index in vector store using existing method
 		// This will index standard question + similar questions based on FAQConfig
 		if err := s.indexFAQChunks(ctx, dstKB, dstKnowledge, newChunks, embeddingModel, false, false); err != nil {
-			logger.Errorf(ctx, "Failed to index FAQ chunks: %v", err)
+			logger.Errorf(ctx, "Failed to index FAQ chunks: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 			handleError(progress, err, "Failed to index FAQ entries")
 			return err
 		}
@@ -934,7 +943,8 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		}
 		if err := s.syncFAQChunkStatusBatch(
 			ctx, dstKB, chunksToUpdate[i:end], syncPlan.SrcByID, syncPlan.DstByID, resolveFAQTag); err != nil {
-			logger.Errorf(ctx, "Failed to sync FAQ status fields: %v", err)
+			logger.Errorf(ctx, "Failed to sync FAQ status fields: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 			handleError(progress, err, "Failed to sync FAQ status fields")
 			return err
 		}
@@ -955,7 +965,8 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	progress.Message = "FAQ knowledge base clone completed successfully"
 	progress.UpdatedAt = time.Now().Unix()
 	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
-		logger.Errorf(ctx, "Failed to update KB clone progress to completed: %v", err)
+		logger.Errorf(ctx, "Failed to update KB clone progress to completed: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 	}
 
 	return nil
@@ -1581,7 +1592,8 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	// Get source tag
 	srcTag, err := s.tagRepo.GetByID(ctx, srcTenantID, srcTagID)
 	if err != nil || srcTag == nil {
-		logger.Warnf(ctx, "Failed to get source tag %s: %v", srcTagID, err)
+		logger.Warnf(ctx, "Failed to get source tag %s: error_len=%d error_type=%T",
+			srcTagID, len(fmt.Sprint(err)), err)
 		tagIDMapping[srcTagID] = "" // Cache empty result to avoid repeated lookups
 		return ""
 	}
@@ -1610,7 +1622,8 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 		UpdatedAt:       time.Now(),
 	}
 	if err := s.tagRepo.Create(ctx, newTag); err != nil {
-		logger.Warnf(ctx, "Failed to create tag %s in target KB: %v", srcTag.Name, err)
+		logger.Warnf(ctx, "Failed to create tag in target KB: name_len=%d error_len=%d error_type=%T",
+			len(srcTag.Name), len(fmt.Sprint(err)), err)
 		tagIDMapping[srcTagID] = "" // Cache empty result
 		return ""
 	}

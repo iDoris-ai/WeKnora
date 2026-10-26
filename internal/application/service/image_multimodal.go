@@ -158,8 +158,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	}
 
 	logger.Infof(ctx,
-		"[ImageMultimodal] Processing image: chunk=%s, url=%s, ocr=%v, caption=%v, attrs=%v",
-		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption, payload.ImageAttrsEnabled)
+		"[ImageMultimodal] Processing image: chunk=%s, url_len=%d, ocr=%v, caption=%v, attrs=%v",
+		payload.ChunkID, len(payload.ImageURL), payload.EnableOCR, payload.EnableCaption, payload.ImageAttrsEnabled)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -170,8 +170,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	// this stale image would drain a slot of the new run and finalize it
 	// before its images are done.
 	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
-		logger.Infof(ctx, "[ImageMultimodal] Attempt %d of %s superseded, dropping image %s",
-			payload.Attempt, payload.KnowledgeID, payload.ImageURL)
+		logger.Infof(ctx, "[ImageMultimodal] Attempt %d of %s superseded, dropping image url_len=%d",
+			payload.Attempt, payload.KnowledgeID, len(payload.ImageURL))
 		return nil
 	}
 
@@ -191,8 +191,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	}
 	if drop {
 		logger.Infof(ctx,
-			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s image=%s",
-			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
+			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s url_len=%d",
+			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, len(payload.ImageURL))
 		// Still count this image toward the parent finalize gate so a task
 		// of dropped orphans cannot strand multimodal:pending forever.
 		return s.checkAndFinalizeAllImages(ctx, payload)
@@ -218,8 +218,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 			}
 		} else {
 			logger.Infof(ctx,
-				"[ImageMultimodal] Skip finalize on retryable error for %s (will count on last attempt)",
-				payload.ImageURL)
+				"[ImageMultimodal] Skip finalize on retryable error for url_len=%d (will count on last attempt)",
+				len(payload.ImageURL))
 		}
 	}()
 
@@ -317,7 +317,8 @@ func (s *ImageMultimodalService) processImage(
 	// skipped (the deferred finalize still counts it).
 	imgBytes, readErr := s.readImageBytes(ctx, *payload)
 	if readErr != nil {
-		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
+		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image: url_len=%d error_len=%d error_type=%T",
+			len(payload.ImageURL), len(fmt.Sprint(readErr)), readErr)
 		out["skipped"] = "unreadable_image"
 		out["read_error"] = readErr.Error()
 		handleErr = fmt.Errorf("read source image: %w", readErr)
@@ -371,8 +372,8 @@ func (s *ImageMultimodalService) processImage(
 			if ocrWanted {
 				plan = append(plan, ActionRound{Actions: []types.ActionKind{types.ActionOCR}})
 			} else {
-				logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (attrs=%v)",
-					payload.ImageURL, imageInfo.Attrs.Attrs)
+				logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for url_len=%d (attrs=%v)",
+					len(payload.ImageURL), imageInfo.Attrs.Attrs)
 				out["ocr_skipped"] = "attr_policy"
 			}
 		}
@@ -542,7 +543,7 @@ func (s *ImageMultimodalService) runImageOCR(
 	// the scanned-PDF or default prompt and ignores vlmCfg on purpose.
 	prompt := buildVLMOCRPrompt(payload.ImageSourceType, vlmCfg)
 	if payload.ImageSourceType == "scanned_pdf" {
-		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
+		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: url_len=%d", len(payload.ImageURL))
 		out["ocr_prompt"] = "scanned_pdf"
 	} else {
 		out["ocr_prompt"] = "default"
@@ -551,7 +552,8 @@ func (s *ImageMultimodalService) runImageOCR(
 	ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 	if ocrErr != nil {
 		failure = ocrErr
-		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
+		logger.Warnf(ctx, "[ImageMultimodal] OCR failed: url_len=%d error_len=%d error_type=%T",
+			len(payload.ImageURL), len(fmt.Sprint(ocrErr)), ocrErr)
 		out["ocr_status"] = "failed"
 		out["ocr_error_code"] = "OCR_REQUEST_FAILED"
 		if errors.Is(ocrErr, vlm.ErrTruncatedCompletion) {
@@ -571,7 +573,8 @@ func (s *ImageMultimodalService) runImageOCR(
 		if errors.As(ocrErr, &invalid) {
 			out["ocr_rejection_reason"] = invalid.reason
 		}
-		logger.Warnf(ctx, "[ImageMultimodal] OCR rejected for %s: %v", payload.ImageURL, ocrErr)
+		logger.Warnf(ctx, "[ImageMultimodal] OCR rejected: url_len=%d error_len=%d error_type=%T",
+			len(payload.ImageURL), len(fmt.Sprint(ocrErr)), ocrErr)
 		return
 	}
 	if ocrText != "" {
@@ -651,7 +654,8 @@ func (s *ImageMultimodalService) indexChunks(
 ) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 	if err != nil || kb == nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: %v", err)
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return
 	}
 
@@ -666,12 +670,16 @@ func (s *ImageMultimodalService) indexChunks(
 		for _, chunk := range chunks {
 			dbChunk, gerr := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID)
 			if gerr != nil {
-				logger.Warnf(ctx, "[ImageMultimodal] Failed to fetch chunk %s for status update: %v", chunk.ID, gerr)
+				logger.Warnf(ctx,
+					"[ImageMultimodal] Failed to fetch chunk %s for status update: error_len=%d error_type=%T",
+					chunk.ID, len(fmt.Sprint(gerr)), gerr)
 				continue
 			}
 			dbChunk.Status = int(types.ChunkStatusIndexed)
 			if uerr := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); uerr != nil {
-				logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, uerr)
+				logger.Warnf(ctx,
+					"[ImageMultimodal] Failed to update chunk %s status to indexed: error_len=%d error_type=%T",
+					chunk.ID, len(fmt.Sprint(uerr)), uerr)
 			}
 		}
 		return
@@ -679,13 +687,15 @@ func (s *ImageMultimodalService) indexChunks(
 
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return
 	}
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to get tenant for indexing: %v", err)
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to get tenant for indexing: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return
 	}
 	// The factory's unbound path reads TenantInfo from ctx; make sure it's there.
@@ -696,7 +706,8 @@ func (s *ImageMultimodalService) indexChunks(
 	engine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, payload.TenantID, kb.VectorStoreID)
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to init retrieve engine: %v", err)
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to init retrieve engine: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return
 	}
 
@@ -717,7 +728,8 @@ func (s *ImageMultimodalService) indexChunks(
 	}
 
 	if err := engine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
-		logger.Errorf(ctx, "[ImageMultimodal] Failed to index multimodal chunks: %v", err)
+		logger.Errorf(ctx, "[ImageMultimodal] Failed to index multimodal chunks: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return
 	}
 
@@ -727,12 +739,16 @@ func (s *ImageMultimodalService) indexChunks(
 	for _, chunk := range chunks {
 		dbChunk, err := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID)
 		if err != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Failed to fetch chunk %s for status update: %v", chunk.ID, err)
+			logger.Warnf(ctx,
+				"[ImageMultimodal] Failed to fetch chunk %s for status update: error_len=%d error_type=%T",
+				chunk.ID, len(fmt.Sprint(err)), err)
 			continue
 		}
 		dbChunk.Status = int(types.ChunkStatusIndexed)
 		if err := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); err != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, err)
+			logger.Warnf(ctx,
+				"[ImageMultimodal] Failed to update chunk %s status to indexed: error_len=%d error_type=%T",
+				chunk.ID, len(fmt.Sprint(err)), err)
 		}
 	}
 
@@ -793,12 +809,14 @@ func (s *ImageMultimodalService) indexImageVector(
 
 	prepared, err := imageprep.Prepare(img, imageModel.ImageLimits())
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Image %s not embeddable: %v", payload.ImageURL, err)
+		logger.Warnf(ctx, "[ImageMultimodal] Image not embeddable: url_len=%d error_len=%d error_type=%T",
+			len(payload.ImageURL), len(fmt.Sprint(err)), err)
 		return "failed: " + err.Error()
 	}
 	vectors, err := imageModel.BatchEmbedImages(ctx, []embedding.Image{prepared})
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Image embedding failed for %s: %v", payload.ImageURL, err)
+		logger.Warnf(ctx, "[ImageMultimodal] Image embedding failed: url_len=%d error_len=%d error_type=%T",
+			len(payload.ImageURL), len(fmt.Sprint(err)), err)
 		return "failed: " + err.Error()
 	}
 	if dims := model.GetDimensions(); dims > 0 && len(vectors[0]) != dims {
@@ -825,7 +843,9 @@ func (s *ImageMultimodalService) indexImageVector(
 		UpdatedAt:       now,
 	}
 	if err := s.chunkService.GetRepository().CreateChunks(ctx, []*types.Chunk{chunk}); err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to create image vector chunk for %s: %v", payload.ImageURL, err)
+		logger.Warnf(ctx,
+			"[ImageMultimodal] Failed to create image vector chunk: url_len=%d error_len=%d error_type=%T",
+			len(payload.ImageURL), len(fmt.Sprint(err)), err)
 		return "failed: " + err.Error()
 	}
 	err = engine.BatchIndexVectors(ctx, model, []*types.IndexInfo{{
@@ -840,7 +860,8 @@ func (s *ImageMultimodalService) indexImageVector(
 	if err != nil {
 		// The chunk stays unindexed: nothing retrieves it, and a re-parse
 		// replaces it with the rest of the knowledge's chunks.
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to index image vector for %s: %v", payload.ImageURL, err)
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to index image vector: url_len=%d error_len=%d error_type=%T",
+			len(payload.ImageURL), len(fmt.Sprint(err)), err)
 		return "failed: " + err.Error()
 	}
 	// Re-fetch for the same reason as indexChunks: GORM Save would zero
@@ -848,10 +869,13 @@ func (s *ImageMultimodalService) indexImageVector(
 	if dbChunk, err := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID); err == nil {
 		dbChunk.Status = int(types.ChunkStatusIndexed)
 		if err := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); err != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Failed to mark image vector chunk %s indexed: %v", chunk.ID, err)
+			logger.Warnf(ctx,
+				"[ImageMultimodal] Failed to mark image vector chunk %s indexed: error_len=%d error_type=%T",
+				chunk.ID, len(fmt.Sprint(err)), err)
 		}
 	}
-	logger.Infof(ctx, "[ImageMultimodal] Indexed image vector chunk %s for image %s", chunk.ID, payload.ImageURL)
+	logger.Infof(ctx, "[ImageMultimodal] Indexed image vector chunk %s for image url_len=%d",
+		chunk.ID, len(payload.ImageURL))
 	return "indexed"
 }
 
@@ -901,8 +925,8 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(
 	kb := func() *types.KnowledgeBase {
 		kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 		if err != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v",
-				payload.KnowledgeBaseID, err)
+			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s error_len=%d error_type=%T",
+				payload.KnowledgeBaseID, len(fmt.Sprint(err)), err)
 			return nil
 		}
 		return kb
@@ -952,7 +976,10 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 		if data, err := os.ReadFile(payload.ImageLocalPath); err == nil {
 			return data, nil
 		} else {
-			logger.Warnf(ctx, "[ImageMultimodal] Local file %s not available (%v), falling back to URL", payload.ImageLocalPath, err)
+			logger.Warnf(ctx,
+				"[ImageMultimodal] Local file not available, falling back to URL: "+
+					"path_len=%d error_len=%d error_type=%T",
+				len(payload.ImageLocalPath), len(fmt.Sprint(err)), err)
 		}
 	}
 
@@ -1000,8 +1027,9 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(
 			// The alternative — silently returning — is what produced the
 			// "permanently stuck" reports we are fixing here.
 			logger.Warnf(ctx,
-				"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
-				payload.KnowledgeID, err)
+				"[ImageMultimodal] Decrement failed for %s, fallback-enqueueing post-process: "+
+					"error_len=%d error_type=%T",
+				payload.KnowledgeID, len(fmt.Sprint(err)), err)
 			return s.enqueueKnowledgePostProcessTask(ctx, payload)
 		}
 	}
@@ -1041,14 +1069,16 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to marshal post process payload: %v", err)
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to marshal post process payload: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		return fmt.Errorf("marshal post process payload: %w", err)
 	}
 
 	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
 		knowledgePostProcessTaskOptions()...)
 	if err := enqueueWithRetry(ctx, s.taskEnqueuer, task); err != nil {
-		logger.Errorf(ctx, "[ImageMultimodal] Failed to enqueue post process task for %s: %v", payload.KnowledgeID, err)
+		logger.Errorf(ctx, "[ImageMultimodal] Failed to enqueue post process task for %s: error_len=%d error_type=%T",
+			payload.KnowledgeID, len(fmt.Sprint(err)), err)
 		return err
 	}
 	logger.Infof(ctx, "[ImageMultimodal] Enqueued post process task for %s", payload.KnowledgeID)

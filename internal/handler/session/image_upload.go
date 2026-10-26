@@ -156,7 +156,9 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 			return svc
 		}
 		if err != nil {
-			logger.Warnf(ctx, "[image-storage] failed to resolve storage instance for provider=%s: %v", storageProvider, err)
+			logger.Warnf(ctx,
+				"[image-storage] failed to resolve storage instance for provider=%s: error_len=%d error_type=%T",
+				storageProvider, len(fmt.Sprint(err)), err)
 		}
 	}
 	if strings.TrimSpace(storageProvider) == "" || tenant.StorageEngineConfig == nil {
@@ -165,7 +167,9 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 
 	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, tenant.StorageEngineConfig, "")
 	if err != nil {
-		logger.Warnf(ctx, "[image-storage] failed to create %s file service: %v, fallback to default", storageProvider, err)
+		logger.Warnf(ctx,
+			"[image-storage] failed to create %s file service: error_len=%d error_type=%T, fallback to default",
+			storageProvider, len(fmt.Sprint(err)), err)
 		return h.fileService
 	}
 	logger.Infof(ctx, "[image-storage] using provider=%s for image uploads", resolvedProvider)

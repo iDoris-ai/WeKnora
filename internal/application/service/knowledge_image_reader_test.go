@@ -76,12 +76,16 @@ func TestReadChunkImageRefusesWhatItCannotOrShouldNotRead(t *testing.T) {
 }
 
 // imageReaderLogTenant returns a tenant so fileService does not stop at the
-// GetTenantByID warning.
+// GetTenantByID warning. err, when set, is that lookup's failure.
 type imageReaderLogTenant struct {
 	interfaces.TenantRepository
+	err error
 }
 
-func (imageReaderLogTenant) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
+func (t imageReaderLogTenant) GetTenantByID(context.Context, uint64) (*types.Tenant, error) {
+	if t.err != nil {
+		return nil, t.err
+	}
 	return &types.Tenant{ID: 7}, nil
 }
 
@@ -100,11 +104,15 @@ func (imageReaderLogCatalog) Resolve(context.Context, string) (*types.StoredReso
 type imageReaderLogResolver struct {
 	interfaces.StorageBackendResolver
 	svc interfaces.FileService
+	err error
 }
 
 func (r imageReaderLogResolver) ResolveFileService(
 	context.Context, *types.Tenant, string, string, string,
 ) (interfaces.FileService, string, error) {
+	if r.err != nil {
+		return nil, "", r.err
+	}
 	return r.svc, "local", nil
 }
 
@@ -137,4 +145,54 @@ func TestImageReaderFileServiceLogOmitsURL(t *testing.T) {
 	require.Contains(t, logs, "[ImageReader] resolve resource reference failed:")
 	require.Contains(t, logs, "[ImageReader] resolving file service:")
 	require.Contains(t, logs, "url_len=")
+}
+
+// GetTenantByID's error is already logged as a length and a type. The sentinel
+// stays in the error the fixture returns and must not reach the log.
+func TestImageReaderGetTenantByIDLogOmitsErrorText(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	files := &imageReaderFiles{body: []byte("png")}
+	s := &knowledgeBaseService{
+		repo:       &imageReaderKBRepo{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}},
+		tenantRepo: imageReaderLogTenant{err: errors.New("tenant lookup S3NT1NEL")},
+		fileSvc:    files,
+	}
+	data, err := s.ReadChunkImage(context.Background(), imageResult("local://a.png"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("png"), data)
+
+	logs := buf.String()
+	require.NotContains(t, logs, "S3NT1NEL")
+	require.Contains(t, logs, "[ImageReader] GetTenantByID failed:")
+	require.Contains(t, logs, "error_len=")
+}
+
+// Resolving the file service fails closed onto the default service. The
+// sentinel stays in that error and must not reach the log.
+func TestImageReaderResolveFileServiceLogOmitsErrorText(t *testing.T) {
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", "/data/files")
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	files := &imageReaderFiles{body: []byte("png")}
+	s := &knowledgeBaseService{
+		repo:            &imageReaderKBRepo{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}},
+		tenantRepo:      imageReaderLogTenant{},
+		fileSvc:         files,
+		storageResolver: imageReaderLogResolver{err: errors.New("resolve file service S3NT1NEL")},
+	}
+	data, err := s.ReadChunkImage(context.Background(), imageResult("local://a.png"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("png"), data)
+
+	logs := buf.String()
+	require.NotContains(t, logs, "S3NT1NEL")
+	require.Contains(t, logs, "[ImageReader] resolve file service failed")
+	require.Contains(t, logs, "error_len=")
 }

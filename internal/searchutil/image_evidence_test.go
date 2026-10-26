@@ -122,3 +122,23 @@ func TestContextImagesUnreadableImageLogOmitsErrorText(t *testing.T) {
 	assert.NotContains(t, logs, sentinel)
 	assert.Contains(t, logs, "Image of broken unreadable: error_len=")
 }
+
+// Prepare rejects bytes that are not an image. The sentinel is those bytes;
+// the error names only the detected type.
+func TestContextImagesUnpreparedImageLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	results := []*types.SearchResult{evidenceResult("broken", string(types.ChunkTypeImageVector), "u1")}
+	read := func(context.Context, *types.SearchResult) ([]byte, error) {
+		return []byte(sentinel), nil
+	}
+	images, _ := ContextImages(context.Background(), results, read, 2)
+	assert.Empty(t, images)
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "Image of broken does not fit a vision model: error_len=")
+}

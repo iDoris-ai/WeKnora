@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -110,7 +111,8 @@ func (s *messageService) reclaimableBlobs(
 	for _, ref := range candidates {
 		live, err := s.messageRepo.CountLiveArtifactsByURL(ctx, ref.URL)
 		if err != nil {
-			logger.Warnf(ctx, "Artifact reclaim check failed for %s, keeping the blob: %v", ref.URL, err)
+			logger.Warnf(ctx, "Artifact reclaim check failed, keeping the blob: url_len=%d error_len=%d error_type=%T",
+				len(ref.URL), len(fmt.Sprint(err)), err)
 			continue
 		}
 		if live > 0 {
@@ -135,8 +137,8 @@ func (s *messageService) artifactDeleteSet(
 	versions, err := s.messageRepo.FindSessionArtifactVersions(ctx, req.SessionID, target.SourcePath)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"session_id":  req.SessionID,
-			"source_path": target.SourcePath,
+			"session_id":      req.SessionID,
+			"source_path_len": len(target.SourcePath),
 		})
 		return nil, err
 	}
