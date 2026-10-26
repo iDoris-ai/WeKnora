@@ -146,6 +146,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Language())
 	r.Use(middleware.Logger())
+	// Agent24 A24-KB-16: audit the knowledge endpoints outside Recovery and Auth, so the row records the status
+	// and size that were actually written, including an Auth rejection the envelope rewrote and Recovery's 500.
+	// Standalone and integration both install it; a nil AuditLogService passes the request through.
+	r.Use(handler.Agent24KnowledgeAudit(params.AuditLogService))
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
 

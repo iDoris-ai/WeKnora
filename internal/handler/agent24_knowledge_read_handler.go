@@ -69,7 +69,9 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 	defer cancel()
 	kbs, err := h.scope.Resolve(ctx, req.KBIDs)
 	if err != nil {
-		if e, gone := agent24StorageError(ctx, err); !gone {
+		if e, gone := agent24StorageError(ctx, err); gone {
+			agent24NoteCancelled(c, echo, nil)
+		} else {
 			writeAgent24KnowledgeError(c, e, echo)
 		}
 		return
@@ -78,10 +80,7 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 		writeAgent24KnowledgeError(c, agent24Forbidden("empty_scope"), echo)
 		return
 	}
-	scope := make([]string, len(kbs))
-	for i, kb := range kbs {
-		scope[i] = kb.ID
-	}
+	scope := agent24CollectedKBIDs(kbs)
 	w := agent24ReadWindow{ChunkID: req.ChunkID, Limit: req.PageLimit}
 	if req.ChunkID == "" && req.Cursor != nil {
 		w.Position = req.Cursor.Position
@@ -91,16 +90,31 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 		err = ctx.Err() // a snapshot that answered as the caller left or the deadline passed
 	}
 	if err != nil {
-		if e, gone := agent24StorageError(ctx, err); !gone {
+		if e, gone := agent24StorageError(ctx, err); gone {
+			agent24NoteCancelled(c, echo, scope)
+		} else {
+			agent24NoteScope(c, scope)
 			writeAgent24KnowledgeError(c, e, echo)
 		}
 		return
 	}
 	page, kerr := agent24JudgeRead(h.key, req, snap)
 	if kerr != nil {
+		agent24NoteScope(c, scope)
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
 	}
+	resource, revision := agent24ReadAuditResource(req.KnowledgeID, page.Revision, page.Segments)
+	agent24NoteAudit(c, func(f *agent24AuditFacts) {
+		f.Echo = echo
+		f.Outcome = agent24AuditOK
+		if len(scope) > 0 {
+			f.EffectiveScope = append([]string(nil), scope...)
+		}
+		f.Resource = resource
+		f.Revision = revision
+		f.ResultCount = len(page.Segments)
+	})
 	c.JSON(http.StatusOK, agent24ReadResponse{
 		ProtocolVersion: agent24KnowledgeProtocolVersion, RequestID: *echo.RequestID, Generation: *echo.Generation,
 		EffectiveScope: agent24EffectiveScope{KnowledgeBaseIDs: scope}, KnowledgeID: req.KnowledgeID,
