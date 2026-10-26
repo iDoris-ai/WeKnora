@@ -212,3 +212,23 @@ func TestRerankUnreadableImageLogOmitsErrorText(t *testing.T) {
 	assert.NotContains(t, logs, sentinel)
 	assert.Contains(t, logs, "Image of img unreadable, scoring its text: error_len=")
 }
+
+// Prepare rejects bytes that are not an image. The sentinel is those bytes;
+// the error names only the detected type.
+func TestRerankUnpreparedImageLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	model := &visionScorer{textScorer: textScorer{scores: map[string]float64{"a red circle": 0.7}}}
+	res := Rerank(context.Background(), model, "q", []*types.SearchResult{imageHit("img", "a red circle", 0.2, 0)},
+		Options{Threshold: 0.5, LoadImage: func(context.Context, *types.SearchResult) ([]byte, error) {
+			return []byte(sentinel), nil
+		}})
+	assert.Equal(t, "img", ids(res.Results))
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "Image of img does not fit the model, scoring its text: error_len=")
+}

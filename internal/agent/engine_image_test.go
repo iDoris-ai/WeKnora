@@ -253,3 +253,34 @@ func TestDescribeImagesVLMFailureOmitsErrorText(t *testing.T) {
 		t.Fatalf("log = %s, want %s and error_type=", logs, prefix)
 	}
 }
+
+// The payload after ";base64," is not valid base64, so decodeDataURIBytes
+// returns a base64.CorruptInputError, which quotes only an offset. The sentinel
+// sits in the URI, so the test also catches a log that quotes the URI itself.
+func TestDescribeImagesDecodeFailureLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	engine := &AgentEngine{
+		imageDescriber: func(context.Context, []byte, string) (string, error) {
+			t.Fatal("imageDescriber should not be called for an invalid data URI")
+			return "", nil
+		},
+	}
+	uri := "data:image/png;" + sentinel + ";base64,!!!!"
+	descriptions := engine.describeImages(context.Background(), []string{uri}, nil)
+	if len(descriptions) != 1 || descriptions[0] != "" {
+		t.Fatalf("descriptions = %q, want one empty description", descriptions)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("decode log leaked the URI or error text: %s", logs)
+	}
+	const prefix = "Failed to decode tool result image 0: error_len="
+	if !strings.Contains(logs, prefix) || !strings.Contains(logs, "error_type=") {
+		t.Fatalf("log = %s, want %s and error_type=", logs, prefix)
+	}
+}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -497,6 +499,47 @@ func TestRetrieveFromStoresKeepsThePoolWhenARefillIsIncomplete(t *testing.T) {
 			assert.Equal(t, []int{50, 100}, engine.topKs[types.VectorRetrieverType])
 		})
 	}
+}
+
+// An incomplete refill keeps the first pool and logs the failure without its text.
+func TestRefillIncompleteLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	engine := &flakyRefillEngine{
+		rankedEngine: rankedEngine{
+			fakeRetrieveEngineService: fakeRetrieveEngineService{
+				engineType: types.PostgresRetrieverEngineType,
+				support:    []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType},
+			},
+			ranked: map[types.RetrieverType][]*types.IndexWithScore{
+				types.VectorRetrieverType: append(
+					rankedHits("kb", "image", 40, 0.9, types.ImageSourceType),
+					rankedHits("kb", "text", 10, 0.5, types.ChunkSourceType)...),
+				types.KeywordsRetrieverType: rankedHits("kb", "kw", 3, 0.9, types.ChunkSourceType),
+			},
+		},
+		refill: func([]*types.IndexWithScore) ([]*types.RetrieveResult, error) {
+			return nil, errors.New("store unavailable " + sentinel)
+		},
+	}
+	g := &storeGroup{
+		KBIDs: []string{"kb"}, Engine: buildBoundComposite(t, engine), TopK: 50,
+		BaseParams: []types.RetrieveParams{
+			{RetrieverType: types.VectorRetrieverType},
+			{RetrieverType: types.KeywordsRetrieverType},
+		},
+	}
+	_, err := (&knowledgeBaseService{}).retrieveFromStores(context.Background(), []*storeGroup{g}, nil)
+	require.NoError(t, err)
+
+	logs := buf.String()
+	assert.NotContains(t, logs, sentinel)
+	assert.Contains(t, logs, "image row refill incomplete, keeping the smaller pool")
+	assert.Contains(t, logs, "error_len=")
 }
 
 // Fusion turns Score into a rank-based number; reranking still needs to know
