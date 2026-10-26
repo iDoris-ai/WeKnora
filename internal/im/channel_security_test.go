@@ -186,3 +186,21 @@ type temporaryCause struct{ text string }
 
 func (e *temporaryCause) Error() string   { return e.text }
 func (e *temporaryCause) Temporary() bool { return true }
+
+func TestRedactURLErrorInChain(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	// The shape url.Parse returns for a URL with a control character.
+	parseErr := &url.Error{
+		Op:  "parse",
+		URL: "https://img.example.com/a.png?sig=" + sentinel + "\n",
+		Err: errors.New("net/url: invalid control character in URL"),
+	}
+	wrapped := fmt.Errorf("invalid URL: %w", parseErr)
+
+	got := RedactURLErrorInChain(wrapped)
+	require.NotContains(t, got.Error(), sentinel)
+	require.Contains(t, got.Error(), "parse")
+
+	plain := errors.New("host not allowed")
+	require.Same(t, plain, RedactURLErrorInChain(plain))
+}

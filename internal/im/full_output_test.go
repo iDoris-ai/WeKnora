@@ -443,3 +443,71 @@ func TestHandleMessageFullOutputQAFailureLogOmitsErrorText(t *testing.T) {
 		t.Fatalf("log missing redacted QA failure: %s", logs)
 	}
 }
+
+type lastStateSessionStub struct {
+	interfaces.SessionService
+	err error
+}
+
+func (s *lastStateSessionStub) UpdateSessionLastRequestState(
+	context.Context, string, *types.SessionLastRequestState,
+) error {
+	return s.err
+}
+
+func TestPersistIMLastRequestStateLogOmitsErrorText(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	svc := &Service{sessionService: &lastStateSessionStub{err: errors.New("db detail " + sentinel)}}
+	svc.persistIMLastRequestState(context.Background(), "session-1", "", nil, nil)
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "persist last_request_state failed") || !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log missing redacted persist error: %s", logs)
+	}
+}
+
+type updateFailMessageService struct {
+	fullOutputMessageService
+	err error
+}
+
+func (s *updateFailMessageService) UpdateMessage(context.Context, *types.Message) error {
+	return s.err
+}
+
+func TestRunQAUpdateAssistantMessageLogOmitsErrorText(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	const sentinel = "S3NT1NEL"
+	svc := &Service{
+		sessionService: &fullOutputSessionService{order: &fullOutputOrder{}, answer: "answer"},
+		messageService: &updateFailMessageService{err: errors.New("db detail " + sentinel)},
+		streamManager:  &fullOutputStreamManager{},
+	}
+	answer, err := svc.runQA(
+		context.Background(), &types.Session{ID: "session-1"}, "question", nil, nil, nil, nil, "user", nil,
+	)
+	if err != nil {
+		t.Fatalf("runQA error = %v", err)
+	}
+	if answer != "answer" {
+		t.Fatalf("answer = %q", answer)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel: %s", logs)
+	}
+	if !strings.Contains(logs, "Failed to update assistant message") || !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log missing redacted update error: %s", logs)
+	}
+}
