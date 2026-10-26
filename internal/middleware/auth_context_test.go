@@ -1,11 +1,15 @@
 package middleware
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
@@ -125,4 +129,36 @@ func TestBearerToken(t *testing.T) {
 			t.Fatalf("bearerToken(%q) = (%q, %v), want (%q, %v)", tc.header, got, ok, tc.want, tc.ok)
 		}
 	}
+}
+
+// rejectTokenUserService fails ValidateToken. The bearer-rejection path calls no other UserService method.
+type rejectTokenUserService struct {
+	interfaces.UserService
+}
+
+func (rejectTokenUserService) ValidateToken(context.Context, string) (*types.User, uint64, error) {
+	return nil, 0, errors.New("S3NT1NEL")
+}
+
+func TestAuthBearerRejectionLogOmitsSentinel(t *testing.T) {
+	buf := captureAuthLogs(t)
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	r := gin.New()
+	r.Use(Auth(nil, rejectTokenUserService{}, nil, nil, nil))
+	r.GET("/api/v1/x", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/x", nil)
+	req.Header.Set("Authorization", "Bearer not-a-jwt")
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Unauthorized: invalid or expired token") || strings.Contains(body, "S3NT1NEL") {
+		t.Fatalf("body = %s", body)
+	}
+	assertAuthLogOmitsSentinel(t, buf.String(), "[auth] bearer token rejected")
 }

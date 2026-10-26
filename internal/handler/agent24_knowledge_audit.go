@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -440,11 +439,10 @@ func agent24AuditPrincipalOf(c *gin.Context) *agent24AuditPrincipal {
 // agent24AuditCredentialID is "key:<id>" for a tenant API key. JWT jti is filled by a later slice, so every
 // other credential is null here.
 func agent24AuditCredentialID(c *gin.Context) *string {
-	scope, ok := types.TenantAPIKeyScopeFromContext(c.Request.Context())
-	if !ok || scope.KeyID == 0 {
+	id, ok := types.CredentialIDFromContext(c.Request.Context())
+	if !ok {
 		return nil
 	}
-	id := fmt.Sprintf("key:%d", scope.KeyID)
 	return &id
 }
 

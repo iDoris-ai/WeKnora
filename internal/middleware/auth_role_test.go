@@ -1,11 +1,14 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -262,5 +265,55 @@ func TestResolveTenantRole_DemotedUserCannotReclaimViaOrphan(t *testing.T) {
 	got, ok := resolveTenantRole(context.Background(), svc, user, 5, false, cfgWithRBAC(true))
 	if !ok || got != types.TenantRoleOwner {
 		t.Fatalf("current policy allows orphan-tenant self-heal on home tenant, got (%v, %v)", got, ok)
+	}
+}
+
+func captureAuthLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+	return &buf
+}
+
+func assertAuthLogOmitsSentinel(t *testing.T, logs, marker string) {
+	t.Helper()
+	if strings.Contains(logs, "S3NT1NEL") {
+		t.Fatalf("log contains sentinel:\n%s", logs)
+	}
+	if !strings.Contains(logs, marker) {
+		t.Fatalf("log missing %q:\n%s", marker, logs)
+	}
+}
+
+func TestResolveTenantRoleLookupErrorLogOmitsSentinel(t *testing.T) {
+	buf := captureAuthLogs(t)
+	svc := newFakeMemberService()
+	svc.failGet = errors.New("S3NT1NEL")
+	svc.seedActive("placeholder", 8, types.TenantRoleAdmin)
+	user := &types.User{ID: "user-1", TenantID: 7}
+
+	resolveTenantRole(context.Background(), svc, user, 8, false, cfgWithRBAC(false))
+
+	logs := buf.String()
+	assertAuthLogOmitsSentinel(t, logs, "tenant_members lookup failed user=user-1 tenant=8")
+	if !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log missing error_len:\n%s", logs)
+	}
+}
+
+func TestResolveTenantRoleAutoPromoteLogOmitsSentinel(t *testing.T) {
+	buf := captureAuthLogs(t)
+	svc := newFakeMemberService()
+	svc.failAdd = errors.New("S3NT1NEL")
+	user := &types.User{ID: "user-1", TenantID: 7}
+
+	resolveTenantRole(context.Background(), svc, user, 7, false, cfgWithRBAC(true))
+
+	logs := buf.String()
+	assertAuthLogOmitsSentinel(t, logs, "Failed to auto-promote user user-1 in tenant 7")
+	if !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log missing error_len:\n%s", logs)
 	}
 }

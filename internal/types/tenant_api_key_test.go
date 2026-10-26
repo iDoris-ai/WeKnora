@@ -1,6 +1,9 @@
 package types
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestTenantAPIKeyScopeNormalizePreservesFullAccess(t *testing.T) {
 	scope := TenantAPIKeyScope{FullAccess: true}.Normalize()
@@ -28,5 +31,20 @@ func TestTenantAPIKeyScopeNormalizeDropsInvalidCapabilities(t *testing.T) {
 		if scope.Capabilities[i] != want[i] {
 			t.Fatalf("capabilities = %#v, want %#v", scope.Capabilities, want)
 		}
+	}
+}
+
+func TestCredentialIDFromContext(t *testing.T) {
+	if id, ok := CredentialIDFromContext(context.Background()); ok || id != "" {
+		t.Fatalf("no scope: got %q, %v", id, ok)
+	}
+	zero := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{})
+	if id, ok := CredentialIDFromContext(zero); ok || id != "" {
+		t.Fatalf("key id 0: got %q, %v", id, ok)
+	}
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{KeyID: 42})
+	got, ok := CredentialIDFromContext(ctx)
+	if !ok || got != "key:42" {
+		t.Fatalf("key id 42: got %q, %v", got, ok)
 	}
 }

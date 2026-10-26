@@ -268,6 +268,16 @@ func Logger() gin.HandlerFunc {
 			"client_ip":   secutils.SanitizeForLog(clientIP),
 		})
 
+		// Auth replaces c.Request inside Next, so principal and credential_id are read here.
+		if v, ok := c.Get(types.PrincipalContextKey.String()); ok {
+			if p, ok := v.(types.Principal); ok && p.Type != "" {
+				logMsg = logMsg.WithField("principal", secutils.SanitizeForLog(p.Type+":"+p.ID))
+			}
+		}
+		if credentialID, ok := types.CredentialIDFromContext(c.Request.Context()); ok {
+			logMsg = logMsg.WithField("credential_id", credentialID)
+		}
+
 		// 添加请求体（如果有）
 		if requestBody != "" {
 			logMsg = logMsg.WithField("request_body", secutils.SanitizeForLog(requestBody))

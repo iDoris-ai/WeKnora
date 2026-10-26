@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -92,4 +94,29 @@ func TestAttachTargetedPlatformAPIKeyKeepsPlatformPrincipal(t *testing.T) {
 	if !ok || user.ID != "api_platform:27" || user.TenantID != 42 {
 		t.Fatalf("user = %#v, ok=%v", user, ok)
 	}
+}
+
+func TestAuthAPIKeyTenantLookupLogOmitsSentinel(t *testing.T) {
+	buf := captureAuthLogs(t)
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/knowledge-bases", nil)
+	tenants := errTenantService{
+		fakeTenantService: &fakeTenantService{},
+		err:               errors.New("S3NT1NEL"),
+	}
+
+	attachAPIKeyAuthContext(c, tenants, nil, 42, &types.TenantAPIKey{ID: 7})
+	if !c.IsAborted() {
+		t.Fatal("API key tenant lookup failure did not abort")
+	}
+	body := rec.Body.String()
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(body, "Unauthorized: invalid API key") {
+		t.Fatalf("response = %d %s", rec.Code, body)
+	}
+	if strings.Contains(body, "S3NT1NEL") {
+		t.Fatalf("response contains sentinel: %s", body)
+	}
+	assertAuthLogOmitsSentinel(t, buf.String(), "[auth] API key tenant lookup failed: tenant=42")
 }
