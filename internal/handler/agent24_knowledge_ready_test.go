@@ -5,20 +5,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -459,5 +465,599 @@ func TestAgent24KnowledgeReadyBodyLimit(t *testing.T) {
 					`"details":{"retryable":false,"request_id":null,"generation":null}}}`, w.Body.String())
 			}
 		})
+	}
+}
+
+// agent24AuditStub records Log entries. Other AuditLogService methods panic if called.
+type agent24AuditStub struct {
+	interfaces.AuditLogService
+	mu      sync.Mutex
+	entries []*types.AuditLog
+}
+
+func (s *agent24AuditStub) Log(_ context.Context, entry *types.AuditLog) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *entry
+	cp.Details = append(types.JSON(nil), entry.Details...)
+	s.entries = append(s.entries, &cp)
+	return nil
+}
+
+// agent24AuditIdentity stands in for middleware.Auth: caller, principal and a tenant API key on the request.
+func agent24AuditIdentity(c *gin.Context) {
+	ctx := types.WithCaller(c.Request.Context(), types.Caller{TenantID: 9, UserID: "user-should-not-leak"})
+	p := types.Principal{Type: types.PrincipalAPITenant, ID: "principal-7"}
+	ctx = types.WithPrincipal(ctx, p)
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KeyID: 7})
+	c.Request = c.Request.WithContext(ctx)
+	c.Set(types.PrincipalContextKey.String(), p)
+	c.Next()
+}
+
+func agent24AuditServe(
+	t *testing.T, svc interfaces.AuditLogService, identity bool, path, body string, h gin.HandlerFunc,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(svc))
+	if identity {
+		r.Use(agent24AuditIdentity)
+	}
+	r.POST(path, h)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func agent24AuditBlob(t *testing.T, entry *types.AuditLog) string {
+	t.Helper()
+	raw, err := json.Marshal(entry)
+	require.NoError(t, err)
+	return string(raw)
+}
+
+func TestAgent24KnowledgeAuditSearch(t *testing.T) {
+	stub := &agent24AuditStub{}
+	e := newAgent24SearchEnv()
+	body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"S3NT1NEL",` +
+		`"scope":{"knowledge_base_ids":["b","a"]},"budget":` + agent24Budget + `}`
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/search", body, e.h.Search)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, types.AuditAction("knowledge.search"), entry.Action)
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, "agent24_knowledge", entry.ScopeType)
+	require.Equal(t, "", entry.ScopeID)
+	require.Equal(t, types.AuditOutcomeSuccess, entry.Outcome)
+
+	var details struct {
+		OccurredAt string  `json:"occurred_at"`
+		RequestID  *string `json:"request_id"`
+		Generation *int64  `json:"generation"`
+		Principal  *struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"principal"`
+		CredentialID   *string  `json:"credential_id"`
+		TenantID       *uint64  `json:"tenant_id"`
+		EffectiveScope []string `json:"effective_scope"`
+		Resource       struct {
+			ChunkIDs []string `json:"chunk_ids"`
+			Count    int      `json:"count"`
+		} `json:"resource"`
+		Revision []struct {
+			ChunkID        string `json:"chunk_id"`
+			SourceRevision string `json:"source_revision"`
+			IndexBuildID   string `json:"index_build_id"`
+			ChunkRevision  int    `json:"chunk_revision"`
+		} `json:"revision"`
+		Outcome  string `json:"outcome"`
+		Metering struct {
+			ResultCount   int `json:"result_count"`
+			BytesReturned int `json:"bytes_returned"`
+		} `json:"metering"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	occurred, err := time.Parse(time.RFC3339Nano, details.OccurredAt)
+	require.NoError(t, err)
+	require.Equal(t, time.UTC, occurred.Location())
+	require.Equal(t, "r1", *details.RequestID)
+	require.Equal(t, int64(7), *details.Generation)
+	require.Equal(t, "api_tenant", details.Principal.Type)
+	require.Equal(t, "principal-7", details.Principal.ID)
+	require.Equal(t, "key:7", *details.CredentialID)
+	require.Equal(t, uint64(9), *details.TenantID)
+	require.Equal(t, []string{"b", "a"}, details.EffectiveScope)
+	require.Equal(t, []string{"c2", "c1"}, details.Resource.ChunkIDs)
+	require.Equal(t, 2, details.Resource.Count)
+	require.Equal(t, 2, details.Metering.ResultCount)
+	require.Greater(t, details.Metering.BytesReturned, 0)
+	require.Equal(t, "ok", details.Outcome)
+	fp := agent24SourceFingerprint{}
+	require.Equal(t, "c2", details.Revision[0].ChunkID)
+	require.Equal(t, agent24SourceRevision(agent24TestKey, "k2", fp), details.Revision[0].SourceRevision)
+	require.Equal(t, agent24IndexBuildID(agent24TestKey, "k2", []string{"c2", "c7"}), details.Revision[0].IndexBuildID)
+	require.Equal(t, 0, details.Revision[0].ChunkRevision)
+	require.Equal(t, "c1", details.Revision[1].ChunkID)
+	require.Equal(t, agent24SourceRevision(agent24TestKey, "k1", fp), details.Revision[1].SourceRevision)
+	require.Equal(t, agent24IndexBuildID(agent24TestKey, "k1", []string{"c1"}), details.Revision[1].IndexBuildID)
+	require.Equal(t, 2, details.Revision[1].ChunkRevision)
+	blob := agent24AuditBlob(t, entry)
+	require.NotContains(t, blob, "S3NT1NEL")
+	require.NotContains(t, blob, "content_tag")
+	require.NotContains(t, blob, "user-should-not-leak")
+}
+
+func TestAgent24KnowledgeAuditRead(t *testing.T) {
+	stub := &agent24AuditStub{}
+	e := newAgent24ReadEnv()
+	doc := e.reads.docs["doc-1"]
+	doc.Chunks[1].Content = "S3NT1NEL"
+	e.reads.docs["doc-1"] = doc
+	tag := agent24ContentTag(agent24TestKey, "c2", "S3NT1NEL")
+	body := agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`, `"knowledge_id":"doc-1"`, `"chunk_id":"c2"`)
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/read", body, e.h.Read)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "S3NT1NEL")
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, types.AuditAction("knowledge.read"), entry.Action)
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, "agent24_knowledge", entry.ScopeType)
+	require.Equal(t, types.AuditOutcomeSuccess, entry.Outcome)
+
+	var details struct {
+		EffectiveScope []string `json:"effective_scope"`
+		Resource       struct {
+			KnowledgeID string   `json:"knowledge_id"`
+			ChunkIDs    []string `json:"chunk_ids"`
+		} `json:"resource"`
+		Revision struct {
+			SourceRevision string `json:"source_revision"`
+			IndexBuildID   string `json:"index_build_id"`
+			Segments       []struct {
+				ChunkID       string `json:"chunk_id"`
+				ChunkRevision int    `json:"chunk_revision"`
+			} `json:"segments"`
+		} `json:"revision"`
+		Outcome  string `json:"outcome"`
+		Metering struct {
+			ResultCount int `json:"result_count"`
+		} `json:"metering"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	require.Equal(t, "ok", details.Outcome)
+	require.Equal(t, []string{"a", "b"}, details.EffectiveScope)
+	require.Equal(t, "doc-1", details.Resource.KnowledgeID)
+	require.Equal(t, []string{"c2"}, details.Resource.ChunkIDs)
+	require.Equal(t, 1, details.Metering.ResultCount)
+	fp := agent24SourceFingerprint{FileHash: "h"}
+	require.Equal(t, agent24SourceRevision(agent24TestKey, "doc-1", fp), details.Revision.SourceRevision)
+	require.Equal(t, agent24IndexBuildID(agent24TestKey, "doc-1", []string{"c1", "c2", "c3"}),
+		details.Revision.IndexBuildID)
+	require.Equal(t, []string{"c2"}, []string{details.Revision.Segments[0].ChunkID})
+	require.Equal(t, 0, details.Revision.Segments[0].ChunkRevision)
+	blob := agent24AuditBlob(t, entry)
+	require.NotContains(t, blob, "S3NT1NEL")
+	require.NotContains(t, blob, tag)
+	require.NotContains(t, blob, "content_tag")
+}
+
+func TestAgent24KnowledgeAuditEmptyScope(t *testing.T) {
+	stub := &agent24AuditStub{}
+	e := newAgent24SearchEnv()
+	body := agent24SearchBody(`"x"`, agent24Budget)
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/search", body, e.h.Search)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, types.AuditOutcomeDenied, entry.Outcome)
+	var details struct {
+		Outcome string `json:"outcome"`
+		Reason  string `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	require.Equal(t, "forbidden", details.Outcome)
+	require.Equal(t, "empty_scope", details.Reason)
+}
+
+func TestAgent24KnowledgeAuditUnauthenticated(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, false, "/api/v1/agent24/knowledge/search", "", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, uint64(0), entry.TenantID)
+	require.Equal(t, "", entry.ActorUserID)
+	require.Equal(t, types.AuditOutcomeDenied, entry.Outcome)
+	var details struct {
+		Principal    *struct{ Type, ID string } `json:"principal"`
+		CredentialID *string                    `json:"credential_id"`
+		TenantID     *uint64                    `json:"tenant_id"`
+		Outcome      string                     `json:"outcome"`
+		Reason       string                     `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	require.Equal(t, "unauthorized", details.Outcome)
+	require.Equal(t, "credential_invalid", details.Reason)
+	require.Nil(t, details.Principal)
+	require.Nil(t, details.CredentialID)
+	require.Nil(t, details.TenantID)
+	raw := string(entry.Details)
+	require.Contains(t, raw, `"principal":null`)
+	require.Contains(t, raw, `"credential_id":null`)
+	require.Contains(t, raw, `"tenant_id":null`)
+}
+
+// Unauthenticated rows sit in tenant 0, the system scope. The system feed lists only unscoped rows, so a
+// flood of anonymous requests cannot page a real system event out of its first page (PR #96 probe).
+func TestAgent24KnowledgeAuditAnonymousRowsStayOutOfSystemFeed(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "audit.db")), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.AuditLog{}))
+	svc := service.NewAuditLogService(repository.NewAuditLogRepository(db))
+	require.NoError(t, svc.Log(context.Background(), &types.AuditLog{Action: types.AuditActionSystemSettingChanged}))
+
+	const anonymous = 60 // more than the feed's default page of 50
+	for range anonymous {
+		w := agent24AuditServe(t, svc, false, "/api/v1/agent24/knowledge/search", "", func(c *gin.Context) {
+			c.AbortWithStatus(http.StatusUnauthorized)
+		})
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+	}
+	var written int64
+	require.NoError(t, db.Model(&types.AuditLog{}).
+		Where("tenant_id = 0 AND scope_type = ?", agent24AuditScopeType).Count(&written).Error)
+	require.Positive(t, written, "the anonymous rows must reach tenant 0 for this test to mean anything")
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/system/audit-log", NewAuditLogHandler(svc).ListSystemAuditLog)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/system/audit-log", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var page auditLogListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	require.Len(t, page.Data, 1)
+	require.Equal(t, types.AuditActionSystemSettingChanged, page.Data[0].Action)
+}
+
+// The integration credential gate rejects after Auth bound a caller (platform key, direct-mode tenant key):
+// R10.2 still records the identity as null for credential_invalid.
+func TestAgent24KnowledgeAuditCredentialInvalidAfterAuthIsAnonymous(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/search", "", func(c *gin.Context) {
+		writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), agent24KnowledgeEcho{})
+	})
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Len(t, stub.entries, 1)
+	entry := stub.entries[0]
+	require.Equal(t, uint64(0), entry.TenantID)
+	require.Equal(t, types.AuditOutcomeDenied, entry.Outcome)
+	raw := string(entry.Details)
+	require.Contains(t, raw, `"principal":null`)
+	require.Contains(t, raw, `"credential_id":null`)
+	require.Contains(t, raw, `"tenant_id":null`)
+	require.Contains(t, raw, `"reason":"credential_invalid"`)
+	require.NotContains(t, raw, "principal-7")
+}
+
+// A panic in the handler leaves one row, as internal even after a success was noted, with the size of the
+// 500 that Recovery (mounted inside the audit, as in router.go) wrote.
+func TestAgent24KnowledgeAuditRecordsPanic(t *testing.T) {
+	stub := &agent24AuditStub{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(stub))
+	r.Use(gin.CustomRecovery(func(c *gin.Context, _ any) {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+	}))
+	r.Use(agent24AuditIdentity)
+	r.POST("/api/v1/agent24/knowledge/read", func(c *gin.Context) {
+		agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Outcome = agent24AuditOK })
+		panic("boom")
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/read", strings.NewReader("{}")))
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Len(t, stub.entries, 1)
+	require.Equal(t, types.AuditOutcomeFailed, stub.entries[0].Outcome)
+	var details struct {
+		Outcome  string `json:"outcome"`
+		Metering struct {
+			BytesReturned int `json:"bytes_returned"`
+		} `json:"metering"`
+	}
+	require.NoError(t, json.Unmarshal(stub.entries[0].Details, &details))
+	require.Equal(t, "internal", details.Outcome)
+	require.Equal(t, w.Body.Len(), details.Metering.BytesReturned)
+	require.Positive(t, details.Metering.BytesReturned)
+}
+
+type agent24PanickingAudit struct{ interfaces.AuditLogService }
+
+func (agent24PanickingAudit) Log(context.Context, *types.AuditLog) error {
+	panic("audit store S3NT1NEL")
+}
+
+// The audit sits outside Recovery: a panic while writing the row is contained, and the response the handler
+// already wrote reaches the client unchanged.
+func TestAgent24KnowledgeAuditContainsOwnPanic(t *testing.T) {
+	var w *httptest.ResponseRecorder
+	require.NotPanics(t, func() {
+		w = agent24AuditServe(t, agent24PanickingAudit{}, true, "/api/v1/agent24/knowledge/ready", "",
+			func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"ok":true}`, w.Body.String())
+}
+
+// A guard ahead of the handler (the API-key capability gate, the Viewer guard) writes its own 403: the row is
+// forbidden and denied, not internal.
+func TestAgent24KnowledgeAuditInfersForbiddenFromGuard(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, true, "/api/v1/agent24/knowledge/read", "", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	})
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Len(t, stub.entries, 1)
+	require.Equal(t, types.AuditOutcomeDenied, stub.entries[0].Outcome)
+	require.Contains(t, string(stub.entries[0].Details), `"outcome":"forbidden"`)
+	require.Contains(t, string(stub.entries[0].Details), `"principal":{"type"`)
+}
+
+func TestAgent24KnowledgeAuditSkipsOtherPaths(t *testing.T) {
+	stub := &agent24AuditStub{}
+	w := agent24AuditServe(t, stub, true, "/api/v1/other", "", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.Empty(t, stub.entries)
+}
+
+func TestAgent24KnowledgeAuditNilService(t *testing.T) {
+	require.NotPanics(t, func() {
+		w := agent24AuditServe(t, nil, false, "/api/v1/agent24/knowledge/ready", "", func(c *gin.Context) {
+			c.Status(http.StatusNoContent)
+		})
+		require.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+// agent24AuditCtxProbe records, when Log is called, the row and what its context and the response looked like.
+type agent24AuditCtxProbe struct {
+	interfaces.AuditLogService
+	w           *httptest.ResponseRecorder
+	entry       *types.AuditLog
+	err         error
+	hasDeadline bool
+	remaining   time.Duration
+	flushed     bool
+}
+
+func (p *agent24AuditCtxProbe) Log(ctx context.Context, entry *types.AuditLog) error {
+	p.entry, p.err = entry, ctx.Err()
+	var deadline time.Time
+	deadline, p.hasDeadline = ctx.Deadline()
+	p.remaining = time.Until(deadline)
+	p.flushed = p.w.Flushed
+	return nil
+}
+
+// PR #96 blocker 2: the response is flushed before the row is written, and the write runs on a context that
+// survives the client leaving but ends after agent24AuditWriteTimeout.
+func TestAgent24KnowledgeAuditFlushesThenWritesOnBoundedContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	probe := &agent24AuditCtxProbe{w: w}
+	reqCtx, leave := context.WithCancel(context.Background())
+	defer leave()
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(probe))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		leave() // the client goes away once the rejection is written
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", nil).WithContext(reqCtx)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.NotNil(t, probe.entry)
+	require.NoError(t, probe.err, "the row's context must not end with the request")
+	require.True(t, probe.hasDeadline, "the row's context must have a deadline")
+	require.Greater(t, probe.remaining, time.Duration(0))
+	require.LessOrEqual(t, probe.remaining, agent24AuditWriteTimeout)
+	require.True(t, probe.flushed, "the response must be flushed before the row is written")
+}
+
+// agent24StalledAudit blocks Log until its context ends.
+type agent24StalledAudit struct {
+	interfaces.AuditLogService
+	done chan error
+}
+
+func (s *agent24StalledAudit) Log(ctx context.Context, _ *types.AuditLog) error {
+	<-ctx.Done()
+	s.done <- ctx.Err()
+	return ctx.Err()
+}
+
+// The reviewer's probe on a real server: with the audit store stalled, the 401's status and body still reach
+// the client, and the write gives up after agent24AuditWriteTimeout. The final chunk, and so EOF, follows the
+// write (accepted in the PR #96 decision); the test does not read to EOF.
+func TestAgent24KnowledgeAuditStalledStoreDoesNotHoldResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stalled := &agent24StalledAudit{done: make(chan error, 1)}
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(stalled))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	started := time.Now()
+	client := &http.Client{Timeout: agent24AuditWriteTimeout / 2}
+	resp, err := client.Post(srv.URL+"/api/v1/agent24/knowledge/search", "application/json", nil)
+	require.NoError(t, err, "the response must arrive while the audit store is stalled")
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Less(t, time.Since(started), agent24AuditWriteTimeout)
+
+	select {
+	case err := <-stalled.done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(2 * agent24AuditWriteTimeout):
+		t.Fatal("the stalled write did not end")
+	}
+}
+
+func agent24AuditAnonymousRequest(t *testing.T, r *gin.Engine) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", nil))
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// PR #96 blocker 1, rate half: anonymous rows go through the token bucket and the next written one carries how
+// many were dropped; authenticated rows are not limited.
+func TestAgent24KnowledgeAuditRateLimitsAnonymousRows(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24AuditStub{}
+	limiter := newAgent24AnonymousAuditLimiter(time.Hour, 2)
+	r := gin.New()
+	r.Use(agent24KnowledgeAudit(stub, limiter))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	authed := r.Group("/api/v1/agent24/knowledge", agent24AuditIdentity)
+	authed.POST("/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+
+	for range 5 {
+		agent24AuditAnonymousRequest(t, r)
+	}
+	require.Len(t, stub.entries, 2, "the bucket holds two anonymous rows")
+	for range 3 {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", nil))
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	require.Len(t, stub.entries, 5, "authenticated rows are not limited")
+
+	limiter.bucket.SetLimit(rate.Inf)
+	agent24AuditAnonymousRequest(t, r)
+	require.Len(t, stub.entries, 6)
+	require.Contains(t, string(stub.entries[5].Details), `"suppressed":3`)
+	agent24AuditAnonymousRequest(t, r)
+	for i, e := range stub.entries {
+		if i != 5 {
+			require.NotContains(t, string(e.Details), `"suppressed"`, "row %d", i)
+		}
+	}
+}
+
+// The exported middleware carries the bucket: a burst of anonymous requests writes agent24AuditAnonymousBurst
+// rows.
+func TestAgent24KnowledgeAuditDefaultAnonymousBurst(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24AuditStub{}
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(stub))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	started := time.Now()
+	for range agent24AuditAnonymousBurst + 5 {
+		agent24AuditAnonymousRequest(t, r)
+	}
+	// The bucket refills once a second; a slow run may earn a token per second it took.
+	refilled := int(time.Since(started) / agent24AuditAnonymousEvery)
+	require.GreaterOrEqual(t, len(stub.entries), agent24AuditAnonymousBurst)
+	require.LessOrEqual(t, len(stub.entries), agent24AuditAnonymousBurst+refilled)
+}
+
+// agent24FlakyAudit records rows and fails the next Log when fail is set.
+type agent24FlakyAudit struct {
+	agent24AuditStub
+	fail bool
+}
+
+func (s *agent24FlakyAudit) Log(ctx context.Context, entry *types.AuditLog) error {
+	if s.fail {
+		s.fail = false
+		return errors.New("store down")
+	}
+	return s.agent24AuditStub.Log(ctx, entry)
+}
+
+// An admitted anonymous row whose write fails gives its suppressed count back to the next one.
+func TestAgent24KnowledgeAuditFailedWriteKeepsSuppressedCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24FlakyAudit{}
+	limiter := newAgent24AnonymousAuditLimiter(time.Hour, 1)
+	r := gin.New()
+	r.Use(agent24KnowledgeAudit(stub, limiter))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	for range 4 {
+		agent24AuditAnonymousRequest(t, r)
+	}
+	require.Len(t, stub.entries, 1)
+
+	limiter.bucket.SetLimit(rate.Inf)
+	stub.fail = true
+	agent24AuditAnonymousRequest(t, r) // admitted with suppressed 3, write fails
+	agent24AuditAnonymousRequest(t, r)
+	require.Len(t, stub.entries, 2)
+	require.Contains(t, string(stub.entries[1].Details), `"suppressed":3`)
+}
+
+// agent24AuditCtxErr records the context error Log saw.
+type agent24AuditCtxErr struct {
+	interfaces.AuditLogService
+	seen chan error
+}
+
+func (s *agent24AuditCtxErr) Log(ctx context.Context, _ *types.AuditLog) error {
+	s.seen <- ctx.Err()
+	return nil
+}
+
+// Flushing a rejection makes net/http read the unread request body first. A client that declares a body and
+// never sends it holds the flush; the row's deadline starts after it, so the row is still written.
+func TestAgent24KnowledgeAuditStalledRequestBodyStillWritesRow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	probe := &agent24AuditCtxErr{seen: make(chan error, 1)}
+	r := gin.New()
+	r.Use(Agent24KnowledgeAudit(probe))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	require.NoError(t, err)
+	_, err = conn.Write([]byte("POST /api/v1/agent24/knowledge/search HTTP/1.1\r\nHost: x\r\n" +
+		"Content-Type: application/json\r\nContent-Length: 1\r\n\r\n"))
+	require.NoError(t, err)
+	time.Sleep(agent24AuditWriteTimeout + 300*time.Millisecond) // longer than the row's timeout
+	require.NoError(t, conn.Close())
+
+	select {
+	case err := <-probe.seen:
+		require.NoError(t, err, "the row's context must not have run out while the flush waited")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the row was not written")
 	}
 }

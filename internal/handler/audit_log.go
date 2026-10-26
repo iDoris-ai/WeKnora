@@ -227,12 +227,17 @@ func (h *AuditLogHandler) ListSystemAuditLog(c *gin.Context) {
 		}
 	}
 
+	// UnscopedOnly, as in the tenant feed: tenant 0 also holds the Agent24
+	// knowledge audit rows of unauthenticated requests (scope_type
+	// agent24_knowledge, A24-KB-16), and anyone could otherwise page real
+	// system events out of view.
 	q := &interfaces.AuditLogQuery{
-		AfterID:     afterID,
-		Limit:       limit,
-		Action:      types.AuditAction(c.Query("action")),
-		Outcome:     types.AuditOutcome(c.Query("outcome")),
-		ActorUserID: c.Query("actor"),
+		AfterID:      afterID,
+		Limit:        limit,
+		Action:       types.AuditAction(c.Query("action")),
+		Outcome:      types.AuditOutcome(c.Query("outcome")),
+		ActorUserID:  c.Query("actor"),
+		UnscopedOnly: true,
 	}
 
 	// tenant_id=0 is the system-scope convention; see

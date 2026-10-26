@@ -135,6 +135,11 @@ func writeAgent24KnowledgeError(c *gin.Context, e *agent24KnowledgeError, echo a
 	if e.Reason != "" {
 		details["reason"] = e.Reason
 	}
+	agent24NoteAudit(c, func(f *agent24AuditFacts) {
+		f.Outcome = string(e.Code)
+		f.Reason = e.Reason
+		f.Echo = echo
+	})
 	c.AbortWithStatusJSON(meta.status, gin.H{"error": gin.H{
 		"code": e.Code, "message": meta.message, "details": details,
 	}})

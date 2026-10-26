@@ -141,21 +141,40 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 	defer cancel()
 	plan, kerr, gone := h.plan(ctx, req.KBIDs)
 	if gone {
+		agent24NoteCancelled(c, echo, plan.Scope)
 		return
 	}
 	if kerr != nil {
+		agent24NoteScope(c, plan.Scope)
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
 	}
 	hits, searchErr, gone := h.retrieve(ctx, req, plan)
 	if gone {
+		agent24NoteCancelled(c, echo, plan.Scope)
 		return
 	}
 	completeness, failures, kerr := agent24SearchOutcome(plan, searchErr)
 	if kerr != nil {
+		agent24NoteScope(c, plan.Scope)
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
 	}
+	outcome := completeness
+	if completeness == "complete" {
+		outcome = agent24AuditOK
+	}
+	resource, revision := agent24SearchAuditResource(hits)
+	agent24NoteAudit(c, func(f *agent24AuditFacts) {
+		f.Echo = echo
+		f.Outcome = outcome
+		if len(plan.Scope) > 0 {
+			f.EffectiveScope = append([]string(nil), plan.Scope...)
+		}
+		f.Resource = resource
+		f.Revision = revision
+		f.ResultCount = len(hits)
+	})
 	c.JSON(http.StatusOK, agent24SearchResponse{
 		ProtocolVersion: agent24KnowledgeProtocolVersion, RequestID: *echo.RequestID, Generation: *echo.Generation,
 		Completeness: completeness, EffectiveScope: agent24EffectiveScope{KnowledgeBaseIDs: plan.Scope},
@@ -181,14 +200,16 @@ func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) 
 	if len(kbs) == 0 {
 		return agent24SearchPlan{}, agent24Forbidden("empty_scope"), false
 	}
+	// E is known from here on. Keep it on the plan when a later check fails, so the audit can name it.
+	scope := agent24CollectedKBIDs(kbs)
 	if _, kerr := agent24SearchScoreSpace(kbs); kerr != nil {
-		return agent24SearchPlan{}, kerr, false
+		return agent24SearchPlan{Scope: scope}, kerr, false
 	}
 	facts := make([]agent24KBIndexFacts, len(kbs))
 	for i, kb := range kbs {
 		if facts[i], err = h.index.Facts(ctx, kb); err != nil {
 			e, gone := agent24StorageError(ctx, err)
-			return agent24SearchPlan{}, e, gone
+			return agent24SearchPlan{Scope: scope}, e, gone
 		}
 	}
 	plan, kerr := agent24PlanSearch(agent24State(storageErr == nil && engineErr == nil), kbs, facts)
