@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -132,6 +133,10 @@ func TestContextImagesUnpreparedImageLogOmitsErrorText(t *testing.T) {
 	logger.SetLogLevel(logger.LevelDebug)
 	t.Cleanup(logger.ConfigureFromEnv)
 
+	_, prepErr := imageprep.Prepare([]byte(sentinel), VisionImageLimits)
+	require.Error(t, prepErr)
+	require.NotEmpty(t, prepErr.Error())
+
 	results := []*types.SearchResult{evidenceResult("broken", string(types.ChunkTypeImageVector), "u1")}
 	read := func(context.Context, *types.SearchResult) ([]byte, error) {
 		return []byte(sentinel), nil
@@ -140,5 +145,6 @@ func TestContextImagesUnpreparedImageLogOmitsErrorText(t *testing.T) {
 	assert.Empty(t, images)
 	logs := buf.String()
 	assert.NotContains(t, logs, sentinel)
+	assert.NotContains(t, logs, prepErr.Error())
 	assert.Contains(t, logs, "Image of broken does not fit a vision model: error_len=")
 }

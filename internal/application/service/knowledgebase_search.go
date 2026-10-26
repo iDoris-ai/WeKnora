@@ -37,7 +37,8 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	}
 	if err != nil {
-		logger.Errorf(ctx, "GetQueryEmbedding: failed to get embedding model %s: %v", kb.EmbeddingModelID, err)
+		logger.Errorf(ctx, "GetQueryEmbedding: failed to get embedding model %s: error_len=%d error_type=%T",
+			kb.EmbeddingModelID, len(fmt.Sprint(err)), err)
 		return nil, err
 	}
 
@@ -46,7 +47,7 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		return nil, err
 	}
 	if err := validateQueryEmbeddingDimension(embeddingModel, len(vector)); err != nil {
-		logger.Errorf(ctx, "GetQueryEmbedding: %v", err)
+		logger.Errorf(ctx, "GetQueryEmbedding: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		return nil, err
 	}
 	return vector, nil
@@ -99,7 +100,9 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 		tenantCtx := types.WithExecutionTenant(ctx, ref.TenantID)
 		model, err := s.modelService.GetModelByID(tenantCtx, ref.ModelID)
 		if err != nil || model == nil {
-			logger.Warnf(ctx, "ResolveEmbeddingModelKeys: cannot resolve model %s for tenant %d: %v", ref.ModelID, ref.TenantID, err)
+			logger.Warnf(ctx, "ResolveEmbeddingModelKeys: cannot resolve model %s for tenant %d: "+
+				"error_len=%d error_type=%T",
+				ref.ModelID, ref.TenantID, len(fmt.Sprint(err)), err)
 			resolvedKeys[ref] = ref.ModelID
 			continue
 		}
@@ -529,20 +532,21 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	}
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
+		logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error_len=%d error_type=%T",
+			kb.EmbeddingModelID, len(fmt.Sprint(err)), err)
 		return nil, err
 	}
-	logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
+	logger.Infof(ctx, "Embedding model retrieved, model ID: %s", kb.EmbeddingModelID)
 
 	logger.Info(ctx, "Starting to generate query embedding")
 	queryEmbedding, err := embeddingModel.Embed(types.WithEmbedQuery(ctx), params.QueryText)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to embed query text, query_len=%d, error_len=%d error_type=%T",
-			len(params.QueryText), len(err.Error()), err)
+			len(params.QueryText), len(fmt.Sprint(err)), err)
 		return nil, err
 	}
 	if err := validateQueryEmbeddingDimension(embeddingModel, len(queryEmbedding)); err != nil {
-		logger.Errorf(ctx, "resolveQueryEmbedding: %v", err)
+		logger.Errorf(ctx, "resolveQueryEmbedding: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
 		return nil, err
 	}
 	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))

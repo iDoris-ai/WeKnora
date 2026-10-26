@@ -145,3 +145,119 @@ func logLevelFromEnv() logger.LogLevel {
 		return logger.LevelDebug
 	}
 }
+
+// sentinelModelByID fails every model lookup with an error that quotes the sentinel.
+type sentinelModelByID struct {
+	interfaces.ModelService
+}
+
+func (sentinelModelByID) GetModelByID(context.Context, string) (*types.Model, error) {
+	return nil, stderrors.New("model row S3NT1NEL")
+}
+
+// sentinelEmbeddingLookup fails embedding-model lookup with an error that quotes the sentinel.
+type sentinelEmbeddingLookup struct {
+	interfaces.ModelService
+}
+
+func (sentinelEmbeddingLookup) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+	return nil, stderrors.New("embedding model S3NT1NEL")
+}
+
+// leakedEmbedder puts the sentinel in a struct field. Printing the value with %v
+// includes that field; Embed fails so resolveQueryEmbedding stops after the log.
+type leakedEmbedder struct {
+	embedding.Embedder
+	secret string
+}
+
+func (e *leakedEmbedder) Embed(context.Context, string) ([]float32, error) {
+	return nil, stderrors.New(e.secret)
+}
+
+func TestResolveEmbeddingModelKeysLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	svc := &knowledgeBaseService{modelService: sentinelModelByID{}}
+	kbs := []*types.KnowledgeBase{{
+		ID: "kb-1", EmbeddingModelID: "embed-1", TenantID: 7,
+	}}
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	got := svc.ResolveEmbeddingModelKeys(context.Background(), kbs)
+	require.Equal(t, "embed-1", got["kb-1"])
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "ResolveEmbeddingModelKeys: cannot resolve model embed-1 for tenant 7")
+	require.Contains(t, logs, "error_len=")
+}
+
+func TestGetQueryEmbeddingModelLookupLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 1, EmbeddingModelID: "embed-1"}
+	svc := &knowledgeBaseService{
+		repo:         hybridSearchLogRepo{kb: kb},
+		modelService: sentinelEmbeddingLookup{},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, kb.TenantID)
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	_, err := svc.GetQueryEmbedding(ctx, kb.ID, "query")
+	require.Error(t, err)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "GetQueryEmbedding: failed to get embedding model embed-1")
+	require.Contains(t, logs, "error_len=")
+}
+
+func TestResolveQueryEmbeddingModelLookupLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 1, EmbeddingModelID: "embed-1"}
+	svc := &knowledgeBaseService{modelService: sentinelEmbeddingLookup{}}
+	// resolveQueryEmbedding compares kb.TenantID with the argument, not the context.
+	// Equal ids take GetEmbeddingModel, which is the line under test.
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, kb.TenantID)
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	_, err := svc.resolveQueryEmbedding(ctx, kb, types.SearchParams{QueryText: "q"}, kb.TenantID)
+	require.Error(t, err)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "Failed to get embedding model, model ID: embed-1")
+	require.Contains(t, logs, "error_len=")
+}
+
+func TestResolveQueryEmbeddingRetrievedModelLogOmitsStruct(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 1, EmbeddingModelID: "embed-1"}
+	svc := &knowledgeBaseService{modelService: &imageRecallModels{
+		model: &leakedEmbedder{secret: sentinel},
+	}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, kb.TenantID)
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	_, err := svc.resolveQueryEmbedding(ctx, kb, types.SearchParams{QueryText: "q"}, kb.TenantID)
+	require.Error(t, err)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "Embedding model retrieved, model ID:")
+}
