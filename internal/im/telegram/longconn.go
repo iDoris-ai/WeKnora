@@ -95,7 +95,7 @@ func (c *LongConnClient) getUpdates(ctx context.Context) ([]telegramUpdate, erro
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, err
+		return nil, im.RedactRequestError(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 

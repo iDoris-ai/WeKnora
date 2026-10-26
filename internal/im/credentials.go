@@ -71,9 +71,11 @@ func RedactRequestError(err error) error {
 }
 
 // redactRequestCause keeps a transport cause that is itself a dial or DNS failure (*net.OpError,
-// *net.DNSError: their text names a host and port, not a URL), a deadline, a cancellation or EOF. The
-// cause's own type decides, not anything it wraps: a *url.Error is a net.Error too, and the SSRF redirect
-// check wraps one that quotes the whole redirect target. Every other cause keeps only its type and length.
+// *net.DNSError). Dial and DNS failures in this repo usually name only a host and port; the SSRF
+// dial check returns a fmt.Errorf wrapper and does not take this branch. A deadline, a cancellation
+// or EOF is kept too. The cause's own type decides, not anything it wraps: a *url.Error is a
+// net.Error too, and the SSRF redirect check wraps one that quotes the whole redirect target. Every
+// other cause keeps only its type and length.
 func redactRequestCause(cause error) error {
 	switch cause.(type) { // the cause's own type, on purpose
 	case nil, *net.OpError, *net.DNSError:

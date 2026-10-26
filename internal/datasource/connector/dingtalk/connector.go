@@ -1117,8 +1117,8 @@ func collectUnknownBlockTypes(document node, rendered renderResult) (unknownBloc
 func (u unknownBlockTypes) fields() map[string]interface{} {
 	return map[string]interface{}{
 		"node_id":     u.NodeID,
-		"title":       u.Title,
-		"url":         u.URL,
+		"title":       u.Title, // PipelineLog logs only the length of this key
+		"url_len":     len(u.URL),
 		"block_types": strings.Join(u.BlockTypes, ","),
 		"count":       len(u.BlockTypes),
 	}
@@ -1135,8 +1135,8 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 		return
 	}
 	logger.Warnf(ctx,
-		"[DingTalk] document %s (%s) contains unmodelled block types %s; their text is not rendered",
-		unknown.NodeID, unknown.Title, strings.Join(unknown.BlockTypes, ", "))
+		"[DingTalk] document %s (title_len=%d) contains unmodelled block types %s; their text is not rendered",
+		unknown.NodeID, len(unknown.Title), strings.Join(unknown.BlockTypes, ", "))
 	common.PipelineWarn(ctx, "DingTalkConnector", "unknown_block_types", unknown.fields())
 }
 
