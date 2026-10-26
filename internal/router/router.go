@@ -346,6 +346,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 		RegisterAgent24KnowledgeRoutes(v1, params.Agent24KnowledgeReadyHandler, params.Agent24KnowledgeSearchHandler,
 			params.Agent24KnowledgeReadHandler, rbacGuards)
+		RegisterAgent24KnowledgeAuditRoutes(v1, params.AuditLogHandler, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route
 		// template that does not actually exist (typo / path drift). A
