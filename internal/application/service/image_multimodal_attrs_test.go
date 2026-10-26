@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -720,5 +721,40 @@ func TestProcessImageReturnsUnreadableImageError(t *testing.T) {
 	}
 	if len(repo.created) != 0 {
 		t.Errorf("no chunk should be persisted, got %d", len(repo.created))
+	}
+}
+
+// The skip log used to print the image URL and the read error. Both carry the
+// sentinel here; the returned error still does, the log must not.
+func TestProcessImageUnreadableImageLogOmitsURLAndErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	fileSvc := &attrsFileService{err: fmt.Errorf("object is gone %s", sentinel)}
+	repo := &attrsChunkRepo{}
+	svc := newAttrsTestService(fileSvc, repo)
+	payload := &types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/" + sentinel + ".png",
+		ChunkID:         "chunk-a",
+	}
+
+	out := types.JSONMap{}
+	err := svc.processImage(context.Background(), payload, &attrsFakeVLM{}, types.VLMConfig{}, noopSpanTracker{}, out)
+	if err == nil || !strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("returned error = %v, want it to still carry %s", err, sentinel)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("unreadable-image log leaked URL or error text: %s", logs)
+	}
+	const prefix = "[ImageMultimodal] Skip unreadable image: url_len="
+	if !strings.Contains(logs, prefix) || !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log = %s, want %s and error_len=", logs, prefix)
 	}
 }
