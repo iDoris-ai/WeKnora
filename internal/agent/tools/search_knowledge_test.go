@@ -252,6 +252,42 @@ func TestSearchKnowledgeParseFailureLogsOmitErrorText(t *testing.T) {
 	}
 }
 
+// embedFailKnowledgeBaseService resolves kb-1 to a model key made of a
+// tenant-chosen model name and base URL, then fails the query embedding.
+type embedFailKnowledgeBaseService struct {
+	searchLogKnowledgeBaseService
+}
+
+func (s *embedFailKnowledgeBaseService) ResolveEmbeddingModelKeys(
+	context.Context, []*types.KnowledgeBase,
+) map[string]string {
+	return map[string]string{"kb-1": "model-S3NT1NEL|https://embed.example/S3NT1NEL"}
+}
+
+func (s *embedFailKnowledgeBaseService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
+	return nil, errors.New("embedding failed")
+}
+
+func TestSearchKnowledgeEmbeddingFailureLogOmitsModelKey(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	tool := NewSearchKnowledgeTool(&embedFailKnowledgeBaseService{}, nil, nil, types.SearchTargets{{
+		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1,
+	}}, nil, nil)
+	_, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"hello","mode":"semantic"}`))
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("embedding log leaked the model key: %s", logs)
+	}
+	if !strings.Contains(logs, "Failed to pre-compute embedding: model_key_len=") {
+		t.Fatalf("log = %s, want the pre-compute embedding warning with model_key_len=", logs)
+	}
+}
+
 func TestRetrievalParamsFallBackAndNeverUndercutLimit(t *testing.T) {
 	tool := &SearchKnowledgeTool{config: &config.Config{Conversation: &config.ConversationConfig{EmbeddingTopK: 5}}}
 	topK, v, k := tool.retrievalParams(12)

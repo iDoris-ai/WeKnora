@@ -697,8 +697,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			if modelKey != "" && needsEmbedding {
 				emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, query)
 				if err != nil {
-					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding for model %s: "+
-						"error_len=%d error_type=%T", modelKey, len(fmt.Sprint(err)), err)
+					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding: model_key_len=%d "+
+						"error_len=%d error_type=%T", len(modelKey), len(fmt.Sprint(err)), err)
 					embedErr = err
 				} else {
 					queryEmbedding = emb
