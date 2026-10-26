@@ -1318,3 +1318,97 @@ func TestBreakdownContextOmitsUnknownToolName(t *testing.T) {
 	}, nil)
 	require.Contains(t, known.String(), "tool:known_tool")
 }
+
+// TestAgentLLMErrorLogsOmitErrorText drives the QA/agent error logs with mockChat.
+// An empty response list makes ChatStream fail; that fixed text is the sentinel.
+func TestAgentLLMErrorLogsOmitErrorText(t *testing.T) {
+	const sentinel = "unexpected ChatStream call"
+
+	capture := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		logger.SetLogLevel(logger.LevelDebug)
+		var buf bytes.Buffer
+		logger.SetOutput(&buf)
+		t.Cleanup(logger.ConfigureFromEnv)
+		return &buf
+	}
+	assertRedacted := func(t *testing.T, logs string, prefixes ...string) {
+		t.Helper()
+		if strings.Contains(logs, sentinel) {
+			t.Fatalf("log leaked ChatStream error text: %s", logs)
+		}
+		for _, prefix := range prefixes {
+			want := prefix + "error_len="
+			if !strings.Contains(logs, want) || !strings.Contains(logs, "error_type=") {
+				t.Fatalf("log = %s, want %s and error_type=", logs, want)
+			}
+		}
+	}
+
+	t.Run("stream start", func(t *testing.T) {
+		buf := capture(t)
+		engine := newTestEngine(t, &mockChat{})
+		_, err := engine.streamLLMToEventBus(context.Background(), emptyMessages(), nil, nil)
+		require.Error(t, err)
+		assertRedacted(t, buf.String(), "Failed to start LLM stream: ")
+	})
+
+	t.Run("iteration", func(t *testing.T) {
+		buf := capture(t)
+		engine := newTestEngine(t, &mockChat{})
+		_, err := engine.streamThinkingToEventBus(
+			context.Background(), emptyMessages(), nil, 0, "sess-1")
+		require.Error(t, err)
+		assertRedacted(t, buf.String(), "Iteration-1 failed: ")
+	})
+
+	t.Run("llm call", func(t *testing.T) {
+		buf := capture(t)
+		engine := newTestEngine(t, &mockChat{})
+		messages := emptyMessages()
+		_, err := engine.callLLMWithRetry(
+			context.Background(), &messages, nil, &types.AgentState{}, "q", 0, "sess-1")
+		require.Error(t, err)
+		assertRedacted(t, buf.String(), "LLM call failed: ")
+	})
+
+	t.Run("synthesis also failed", func(t *testing.T) {
+		buf := capture(t)
+		engine := newTestEngine(t, &mockChat{})
+		state := &types.AgentState{RoundSteps: []types.AgentStep{{
+			ToolCalls: []types.ToolCall{{ID: "c1", Name: "tool"}},
+		}}}
+		messages := emptyMessages()
+		_, err := engine.callLLMWithRetry(
+			context.Background(), &messages, nil, state, "q", 0, "sess-1")
+		require.Error(t, err)
+		assertRedacted(t, buf.String(), "Final answer synthesis also failed: ")
+	})
+
+	t.Run("final answer", func(t *testing.T) {
+		buf := capture(t)
+		engine := newTestEngine(t, &mockChat{})
+		err := engine.streamFinalAnswerToEventBus(
+			context.Background(), "q", &types.AgentState{}, "sess-1", emptyMessages())
+		require.Error(t, err)
+		assertRedacted(t, buf.String(), "Final answer generation failed: ")
+	})
+
+	t.Run("max iterations", func(t *testing.T) {
+		buf := capture(t)
+		engine := newTestEngine(t, &mockChat{})
+		state := &types.AgentState{}
+		engine.handleMaxIterations(context.Background(), "q", state, "sess-1", emptyMessages())
+		require.Equal(t, "Sorry, I was unable to generate a complete answer.", state.FinalAnswer)
+		assertRedacted(t, buf.String(), "Failed to synthesize final answer: ")
+	})
+
+	t.Run("execute", func(t *testing.T) {
+		buf := capture(t)
+		engine := newTestEngine(t, &mockChat{})
+		engine.toolRegistry = agenttools.NewToolRegistry()
+		_, err := engine.Execute(context.Background(), "sess-1", "msg-1", "q", nil)
+		require.Error(t, err)
+		assertRedacted(t, buf.String(), "Execution failed: ")
+	})
+}
