@@ -1392,15 +1392,19 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					streamCtx.releaseTurn()
 				}
 				buf := make([]byte, 10240)
-				runtime.Stack(buf, true)
+				buf = buf[:runtime.Stack(buf, true)]
 				stageName := "Knowledge QA"
 				if mode == qaModeAgent {
 					stageName = "Agent QA"
 				}
+				// Agent24 KB-OBS-01: ErrorWithFields keeps only the error's length and type, so the stage, the
+				// panic description (already safe) and the stack go in their own fields.
+				panicValue := logger.PanicValue(r)
 				logger.ErrorWithFields(streamCtx.asyncCtx,
-					errors.NewInternalServerError(fmt.Sprintf(
-						"%s service panicked: %s\n%s", stageName, logger.PanicValue(r), string(buf))),
-					map[string]interface{}{"session_id": sessionID})
+					errors.NewInternalServerError(fmt.Sprintf("%s service panicked: %s", stageName, panicValue)),
+					map[string]interface{}{
+						"session_id": sessionID, "stage": stageName, "panic": panicValue, "stacktrace": string(buf),
+					})
 			}
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
 			if mode == qaModeAgent {

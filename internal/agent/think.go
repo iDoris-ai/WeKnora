@@ -71,7 +71,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 		if ctx.Err() == nil && stalled.Load() {
 			return nil, fmt.Errorf("LLM stream stalled: no output for %s", stallTimeout)
 		}
-		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
+		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		return nil, err
 	}
 
@@ -461,7 +462,8 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		},
 	)
 	if err != nil {
-		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
+		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: error_len=%d error_type=%T",
+			iteration+1, len(err.Error()), err)
 		return nil, err
 	}
 
@@ -575,8 +577,9 @@ func (e *AgentEngine) callLLMWithRetry(
 		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
 		for retry := 1; retry <= maxLLMRetries; retry++ {
 			retryDelay := llmRetryDelay(err, retry)
-			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
-				round, retry, maxLLMRetries, retryDelay, err)
+			logger.Warnf(ctx,
+				"[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: error_len=%d error_type=%T",
+				round, retry, maxLLMRetries, retryDelay, len(err.Error()), err)
 			// A stop pressed during the backoff ends the turn now rather than
 			// after the delay and one more doomed request.
 			select {
@@ -594,7 +597,8 @@ func (e *AgentEngine) callLLMWithRetry(
 		}
 	}
 	if err != nil {
-		logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: %v", round, err)
+		logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: error_len=%d error_type=%T",
+			round, len(err.Error()), err)
 		common.PipelineError(ctx, "Agent", "think_failed", map[string]interface{}{
 			"iteration": iteration,
 			"error":     err.Error(),
@@ -611,7 +615,8 @@ func (e *AgentEngine) callLLMWithRetry(
 				"tool_calls": totalTC,
 			})
 			if synthErr := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, messages); synthErr != nil {
-				logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: %v", synthErr)
+				logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: error_len=%d error_type=%T",
+					len(synthErr.Error()), synthErr)
 				return nil, fmt.Errorf("LLM call failed: %w (synthesis also failed: %v)", err, synthErr)
 			}
 			state.IsComplete = true

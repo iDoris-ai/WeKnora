@@ -217,9 +217,10 @@ const (
 	pipelineTruncateEll     = "..."
 )
 
-// agent24PipelineContentKeys are pipeline log fields that carry query, document, prompt or answer text (fork
-// patch A24-OBS-03). PipelineLog writes a string, []byte or json.RawMessage value under one of these as
-// "<key>_len=<bytes>" instead of the value; other value types (counts) are logged as before.
+// agent24PipelineContentKeys are pipeline log fields that carry query, document, prompt, answer or error
+// text (fork patch A24-OBS-03, Agent24 KB-OBS-01). PipelineLog writes a string, []byte, json.RawMessage
+// or error value under one of these as "<key>_len=<bytes>" instead of the value; other value types
+// (counts) are logged as before.
 var agent24PipelineContentKeys = map[string]struct{}{
 	"user_query":        {},
 	"query":             {},
@@ -242,9 +243,11 @@ var agent24PipelineContentKeys = map[string]struct{}{
 	"title":             {},
 	"question":          {},
 	"sql":               {},
+	"error":             {},
 }
 
-// agent24PipelineContentLen reports the byte length of a text value under a content key.
+// agent24PipelineContentLen reports the byte length of a text or error value under a content key.
+// An error is measured through fmt, which also copes with a typed nil whose Error method would panic.
 func agent24PipelineContentLen(key string, value interface{}) (int, bool) {
 	if _, ok := agent24PipelineContentKeys[key]; !ok {
 		return 0, false
@@ -256,6 +259,8 @@ func agent24PipelineContentLen(key string, value interface{}) (int, bool) {
 		return len(v), true
 	case json.RawMessage:
 		return len(v), true
+	case error:
+		return len(fmt.Sprint(v)), true
 	}
 	return 0, false
 }
