@@ -37,13 +37,13 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	cli := newClient(cfg.parseHeaders())
 	parser := gofeed.NewParser()
 
-	for _, feedURL := range cfg.feedURLList() {
+	for i, feedURL := range cfg.feedURLList() {
 		data, err := cli.fetchFeed(ctx, feedURL)
 		if err != nil {
-			return fmt.Errorf("fetch feed %s: %w", feedURL, err)
+			return fmt.Errorf("fetch feed #%d (%s): %w", i+1, datasource.ConnectorBaseURLForLog(feedURL), err)
 		}
 		if _, err := parser.Parse(bytes.NewReader(data)); err != nil {
-			return fmt.Errorf("parse feed %s: %w", feedURL, err)
+			return fmt.Errorf("parse feed #%d (%s): %w", i+1, datasource.ConnectorBaseURLForLog(feedURL), err)
 		}
 	}
 	return nil
@@ -210,12 +210,13 @@ func (c *Connector) walk(
 	var out []types.FetchedItem
 	var feedErrors []string
 
-	for _, feedURL := range feedURLs {
+	for i, feedURL := range feedURLs {
 		data, err := cli.fetchFeed(ctx, feedURL)
 		if err != nil {
 			logger.Warnf(ctx, "[RSS] sync: fetch url_len=%d failed: error_len=%d error_type=%T",
 				len(feedURL), len(fmt.Sprint(err)), err)
-			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
+			feedErrors = append(feedErrors, fmt.Sprintf("feed #%d (%s): %v",
+				i+1, datasource.ConnectorBaseURLForLog(feedURL), err))
 			copyFeedCursor(newCursor, prev, feedURL)
 			continue
 		}
@@ -223,7 +224,8 @@ func (c *Connector) walk(
 		if err != nil {
 			logger.Warnf(ctx, "[RSS] sync: parse url_len=%d failed: error_len=%d error_type=%T",
 				len(feedURL), len(fmt.Sprint(err)), err)
-			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
+			feedErrors = append(feedErrors, fmt.Sprintf("feed #%d (%s): %v",
+				i+1, datasource.ConnectorBaseURLForLog(feedURL), err))
 			copyFeedCursor(newCursor, prev, feedURL)
 			continue
 		}
