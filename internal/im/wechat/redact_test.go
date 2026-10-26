@@ -79,3 +79,26 @@ func TestDownloadFileSSRFRejectionRedactsQueryParam(t *testing.T) {
 		t.Fatalf("error = %v, want SSRF rejection", err)
 	}
 }
+
+// A host that starts with a digit, with a port and no scheme, passes the SSRF
+// check (it prepends https://) but fails in NewRequest, whose error quotes the
+// raw FileKey.
+func TestDownloadFileCreateRequestRedactsQueryParam(t *testing.T) {
+	secutils.SetSSRFWhitelistFromRaw("1password.com")
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+	const sentinel = "S3NT1NEL"
+	a := NewAdapter("bot-token", "bot-id")
+	_, _, err := a.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey:  "1password.com:443/c2c/download?encrypted_query_param=" + sentinel,
+		FileName: "a.bin",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains encrypted_query_param: %v", err)
+	}
+	if !strings.Contains(err.Error(), "create download request:") {
+		t.Fatalf("error = %v, want create download request failure", err)
+	}
+}
