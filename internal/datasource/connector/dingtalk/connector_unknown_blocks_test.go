@@ -35,6 +35,7 @@ func TestCollectUnknownBlockTypesReportsDocumentIdentity(t *testing.T) {
 
 	fields := unknown.fields()
 	if fields["node_id"] != "node-1" || fields["title"] != "季度规划" ||
+		fields["url_len"] != len("https://example.com/i/nodes/node-1") ||
 		fields["block_types"] != "attachment,code" || fields["count"] != 2 {
 		t.Fatalf("fields() = %#v", fields)
 	}
@@ -68,7 +69,8 @@ func TestFetchAllReportsUnknownBlockTypes(t *testing.T) {
 		nodes: map[string][]node{
 			"root": {{
 				ID: "doc-unmapped", Type: "FILE", Category: "ALIDOC", Extension: "adoc",
-				Name: "Release notes",
+				Name: "Release notes S3NT1NEL",
+				URL:  "https://example.com/i/nodes/S3NT1NEL",
 			}},
 		},
 		blocks: map[string][]json.RawMessage{
@@ -101,6 +103,10 @@ func TestFetchAllReportsUnknownBlockTypes(t *testing.T) {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("pipeline event missing %q:\n%s", want, buf.String())
 		}
+	}
+	// The document title and URL are user content: the warning and the event keep only their lengths.
+	if strings.Contains(buf.String(), "S3NT1NEL") {
+		t.Fatalf("unknown block warnings leak the document title or URL:\n%s", buf.String())
 	}
 	t.Logf("emitted warnings:\n%s", strings.TrimSpace(buf.String()))
 }

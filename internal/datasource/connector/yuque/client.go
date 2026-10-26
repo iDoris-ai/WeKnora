@@ -85,7 +85,8 @@ func (c *client) doRequest(ctx context.Context, method, path string, result inte
 	backoff := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
 	c.logTokenOnce.Do(func() {
-		logger.Infof(ctx, "[Yuque] client configured token=%s base=%s", redactToken(c.token), c.baseURL)
+		logger.Infof(ctx, "[Yuque] client configured token=%s base=%s", redactToken(c.token),
+			datasource.ConnectorBaseURLForLog(c.baseURL))
 	})
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
