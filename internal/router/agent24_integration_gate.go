@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // agent24IntegrationAllowlist keys are method + " " + c.FullPath().
@@ -74,9 +75,9 @@ func installAgent24IntegrationAuthEnvelope(r *gin.Engine) {
 }
 
 // installAgent24IntegrationCredentialGate must run right after middleware.Auth.
-func installAgent24IntegrationCredentialGate(r *gin.Engine) {
+func installAgent24IntegrationCredentialGate(r *gin.Engine, revocations interfaces.Agent24CredentialRevocationStore) {
 	mode, err := handler.Agent24KnowledgeModeFromEnv()
 	if err == nil && mode == handler.Agent24KnowledgeModeIntegration {
-		r.Use(handler.Agent24IntegrationCredentialGate())
+		r.Use(handler.Agent24IntegrationCredentialGate(revocations))
 	}
 }
