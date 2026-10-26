@@ -271,6 +271,10 @@ func TestDescribeImagesDecodeFailureLogOmitsErrorText(t *testing.T) {
 		},
 	}
 	uri := "data:image/png;" + sentinel + ";base64,!!!!"
+	_, decErr := decodeDataURIBytes(uri)
+	if decErr == nil || decErr.Error() == "" {
+		t.Fatal("decodeDataURIBytes returned no error text")
+	}
 	descriptions := engine.describeImages(context.Background(), []string{uri}, nil)
 	if len(descriptions) != 1 || descriptions[0] != "" {
 		t.Fatalf("descriptions = %q, want one empty description", descriptions)
@@ -278,6 +282,9 @@ func TestDescribeImagesDecodeFailureLogOmitsErrorText(t *testing.T) {
 	logs := buf.String()
 	if strings.Contains(logs, sentinel) {
 		t.Fatalf("decode log leaked the URI or error text: %s", logs)
+	}
+	if strings.Contains(logs, decErr.Error()) {
+		t.Fatalf("decode log contains the error text %q: %s", decErr.Error(), logs)
 	}
 	const prefix = "Failed to decode tool result image 0: error_len="
 	if !strings.Contains(logs, prefix) || !strings.Contains(logs, "error_type=") {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -187,5 +188,33 @@ func TestAnalyzeImageAttachmentsVLMFailureOmitsErrorText(t *testing.T) {
 	}
 	if !strings.Contains(logs, "VLM analysis failed for image 0: error_len=") {
 		t.Fatalf("log = %s, want the VLM analysis failure", logs)
+	}
+}
+
+func TestResolveImageFileServiceUnsupportedProviderLogOmitsURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	provider := "https://" + sentinel + ".example/x"
+	cfg := &types.StorageEngineConfig{}
+	_, _, factoryErr := filesvc.NewFileServiceFromStorageConfig(provider, cfg, "")
+	if factoryErr == nil || factoryErr.Error() == "" {
+		t.Fatal("NewFileServiceFromStorageConfig returned no error text")
+	}
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{
+		StorageEngineConfig: cfg,
+	})
+	_ = (&Handler{}).resolveImageFileService(ctx, provider)
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) || strings.Contains(logs, factoryErr.Error()) {
+		t.Fatalf("log leaked the storage provider or error text: %s", logs)
+	}
+	if !strings.Contains(logs, "(unsupported len=") {
+		t.Fatalf("log = %s, want unsupported provider length", logs)
 	}
 }

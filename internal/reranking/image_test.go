@@ -223,6 +223,9 @@ func TestRerankUnpreparedImageLogOmitsErrorText(t *testing.T) {
 	t.Cleanup(logger.ConfigureFromEnv)
 
 	model := &visionScorer{textScorer: textScorer{scores: map[string]float64{"a red circle": 0.7}}}
+	_, prepErr := imageprep.Prepare([]byte(sentinel), model.ImageLimits())
+	require.Error(t, prepErr)
+	require.NotEmpty(t, prepErr.Error())
 	res := Rerank(context.Background(), model, "q", []*types.SearchResult{imageHit("img", "a red circle", 0.2, 0)},
 		Options{Threshold: 0.5, LoadImage: func(context.Context, *types.SearchResult) ([]byte, error) {
 			return []byte(sentinel), nil
@@ -230,5 +233,6 @@ func TestRerankUnpreparedImageLogOmitsErrorText(t *testing.T) {
 	assert.Equal(t, "img", ids(res.Results))
 	logs := buf.String()
 	assert.NotContains(t, logs, sentinel)
+	assert.NotContains(t, logs, prepErr.Error())
 	assert.Contains(t, logs, "Image of img does not fit the model, scoring its text: error_len=")
 }

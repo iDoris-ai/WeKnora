@@ -230,6 +230,17 @@ func (s *searchLogKnowledgeBaseService) HybridSearch(
 
 func TestSearchKnowledgeParseFailureLogsOmitErrorText(t *testing.T) {
 	const sentinel = "S3NT1NEL"
+	var faqMeta types.FAQChunkMetadata
+	faqErr := json.Unmarshal([]byte(sentinel), &faqMeta)
+	if faqErr == nil || faqErr.Error() == "" {
+		t.Fatal("FAQ metadata unmarshal returned no error text")
+	}
+	var imageInfos []types.ImageInfo
+	imageErr := json.Unmarshal([]byte(sentinel), &imageInfos)
+	if imageErr == nil || imageErr.Error() == "" {
+		t.Fatal("image info unmarshal returned no error text")
+	}
+
 	var buf bytes.Buffer
 	logger.SetOutput(&buf)
 	logger.SetLogLevel(logger.LevelDebug)
@@ -245,6 +256,9 @@ func TestSearchKnowledgeParseFailureLogsOmitErrorText(t *testing.T) {
 	logs := buf.String()
 	if strings.Contains(logs, sentinel) {
 		t.Fatalf("parse logs leaked error text: %s", logs)
+	}
+	if strings.Contains(logs, faqErr.Error()) || strings.Contains(logs, imageErr.Error()) {
+		t.Fatalf("parse logs contain the unmarshal error text: %s", logs)
 	}
 	if !strings.Contains(logs, "Failed to load FAQ metadata for chunk chunk-1: error_len=") ||
 		!strings.Contains(logs, "Failed to parse image info: error_len=") {
