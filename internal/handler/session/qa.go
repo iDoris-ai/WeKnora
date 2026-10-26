@@ -224,11 +224,15 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		request.Images[i].Caption = ""
 	}
 
-	// Log request details
-	if requestJSON, err := json.Marshal(request); err == nil {
-		logger.Infof(ctx, "[%s] Request: session_id=%s, request=%s",
-			logPrefix, sessionID, secutils.SanitizeForLog(secutils.CompactImageDataURLForLog(string(requestJSON))))
-	}
+	// Log the request shape only: the query, mentioned names and attachment file
+	// names are user text.
+	logger.Infof(ctx, "[%s] Request: session_id=%s, query_len=%d, kb_count=%d, knowledge_count=%d, "+
+		"mentioned_count=%d, tag_count=%d, image_count=%d, attachment_count=%d, agent_id=%s, "+
+		"agent_enabled=%v, web_search_enabled=%v",
+		logPrefix, sessionID, len(request.Query), len(request.KnowledgeBaseIDs), len(request.KnowledgeIDs),
+		len(request.MentionedItems), len(request.TagIDs), len(request.Images),
+		len(request.AttachmentUploads)+len(request.AttachmentIDs), secutils.SanitizeForLog(request.AgentID),
+		request.AgentEnabled, request.WebSearchEnabled)
 
 	// Get session. QA writes new messages into the session, so use the strict
 	// owner scope: a tenant admin may read an API-key session but must not be
@@ -638,7 +642,7 @@ func (h *Handler) resolveAgent(
 		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
 		if err == nil && agent != nil {
 			logger.Infof(ctx, "Using own agent: ID=%s, name_len=%d, AgentMode=%s",
-				agent.ID, len(agent.Name), agent.Config.AgentMode)
+				agent.ID, len(agent.Name), agentModeForLog(agent.Config.AgentMode))
 			return agent, 0, false
 		}
 		ownErr = err
@@ -654,7 +658,7 @@ func (h *Handler) resolveAgent(
 		if err == nil && agent != nil {
 			logger.Infof(ctx,
 				"Using shared agent: ID=%s, name_len=%d, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
-				agent.ID, len(agent.Name), agent.IsBuiltin, agent.Config.AgentMode, agent.TenantID)
+				agent.ID, len(agent.Name), agent.IsBuiltin, agentModeForLog(agent.Config.AgentMode), agent.TenantID)
 			return agent, agent.TenantID, true
 		}
 		shareErr = err
@@ -665,6 +669,16 @@ func (h *Handler) resolveAgent(
 		secutils.SanitizeForLog(agentID), sourceTenantID,
 		len(fmt.Sprint(ownErr)), ownErr, len(fmt.Sprint(shareErr)), shareErr)
 	return nil, 0, false
+}
+
+// agentModeForLog returns a known agent mode. Agent config does not validate
+// agent_mode, so any other value is logged as a length only.
+func agentModeForLog(mode string) string {
+	switch mode {
+	case "", types.AgentModeQuickAnswer, types.AgentModeSmartReasoning:
+		return mode
+	}
+	return fmt.Sprintf("(unknown len=%d)", len(mode))
 }
 
 // mergeKnowledgeTargets merges request KB/knowledge IDs with @mentioned items into deduplicated slices.
@@ -1046,7 +1060,7 @@ func (h *Handler) AgentQA(c *gin.Context) {
 	if reqCtx.customAgent != nil {
 		agentModeEnabled = reqCtx.customAgent.IsAgentMode()
 		logger.Infof(reqCtx.ctx, "Agent mode determined by custom agent: %v (config.agent_mode=%s)",
-			agentModeEnabled, reqCtx.customAgent.Config.AgentMode)
+			agentModeEnabled, agentModeForLog(reqCtx.customAgent.Config.AgentMode))
 	}
 
 	// Sanity gate: agent mode requires a resolved CustomAgent. If we got
