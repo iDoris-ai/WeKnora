@@ -1,13 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -261,5 +264,41 @@ func TestRebuildParentContentPreservesConflictingEdits(t *testing.T) {
 		if !strings.Contains(repo.updated.Content, want) {
 			t.Fatalf("rebuilt parent lost %q: %q", want, repo.updated.Content)
 		}
+	}
+}
+
+type failingImageSourceKnowledgeRepo struct {
+	interfaces.KnowledgeRepository
+}
+
+func (r *failingImageSourceKnowledgeRepo) GetKnowledgeBatch(
+	context.Context, uint64, []string,
+) ([]*types.Knowledge, error) {
+	return nil, errors.New("S3NT1NEL")
+}
+
+func TestResolveImageAssetSourceNamesLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	names := resolveImageAssetSourceNames(
+		context.Background(),
+		&chunkService{knowledgeRepo: &failingImageSourceKnowledgeRepo{}},
+		1,
+		[]types.ImageAsset{{KnowledgeID: "doc-1"}},
+	)
+	if len(names) != 0 {
+		t.Fatalf("names = %#v, want empty after the batch lookup fails", names)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log leaked error text: %s", logs)
+	}
+	if !strings.Contains(logs, "failed to resolve image source names") ||
+		!strings.Contains(logs, "error_len=") {
+		t.Fatalf("log = %s, want the source-name warning with error_len", logs)
 	}
 }

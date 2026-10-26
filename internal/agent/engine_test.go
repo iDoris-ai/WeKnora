@@ -1412,3 +1412,39 @@ func TestAgentLLMErrorLogsOmitErrorText(t *testing.T) {
 		assertRedacted(t, buf.String(), "Execution failed: ")
 	})
 }
+
+// TestCallLLMWithRetryTransientErrorLogOmitsErrorText covers the transient
+// retry log. The first stream ends on a retryable error and the second
+// succeeds. Attempt 1 waits llmRetryDelay, which is one second.
+func TestCallLLMWithRetryTransientErrorLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	logger.SetLogLevel(logger.LevelDebug)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{
+			ResponseType: types.ResponseTypeError,
+			Content:      "upstream timeout " + sentinel,
+			Done:         true,
+		}}},
+		{chunks: []types.StreamResponse{{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      "ok",
+			Done:         true,
+			FinishReason: "stop",
+		}}},
+	}}
+	engine := newTestEngine(t, model)
+	messages := emptyMessages()
+	resp, err := engine.callLLMWithRetry(
+		context.Background(), &messages, nil, &types.AgentState{}, "q", 0, "sess-1")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "ok", resp.Content)
+
+	logs := buf.String()
+	require.NotContains(t, logs, sentinel)
+	require.Contains(t, logs, "LLM transient error (attempt 1/2), retrying in 1s: error_len=")
+}

@@ -608,3 +608,28 @@ func TestErrorWithFieldsOmitsErrorText(t *testing.T) {
 		t.Fatalf("log = %s, want session_id=sess-1", logs)
 	}
 }
+
+func TestErrorWithFieldsDropsCallerErrorKey(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	SetOutput(&buf)
+	SetLogLevel(LevelDebug)
+	t.Cleanup(ConfigureFromEnv)
+
+	fields := logrus.Fields{
+		"error":      sentinel,
+		"session_id": "sess-1",
+	}
+	ErrorWithFields(context.Background(), errors.New("boom"), fields)
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("ErrorWithFields leaked caller error text: %s", logs)
+	}
+	if !strings.Contains(logs, "error_len=") {
+		t.Fatalf("log = %s, want error_len=", logs)
+	}
+	if got, ok := fields["error"].(string); !ok || got != sentinel {
+		t.Fatalf("caller map error = %#v, want %q", fields["error"], sentinel)
+	}
+}

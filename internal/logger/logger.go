@@ -570,16 +570,20 @@ func Errorf(c context.Context, format string, args ...interface{}) {
 // ErrorWithFields 输出带有额外字段的错误级别日志
 //
 // Agent24 KB-OBS-01: the error text can quote a user question, a vendor reply or a user path, so the
-// fields carry error_len and error_type instead of err.Error().
+// fields carry error_len and error_type instead of err.Error(). A caller-supplied "error" key is
+// removed first, or WithFields would write that raw text; the map is copied so the delete leaves
+// the caller's map unchanged.
 func ErrorWithFields(c context.Context, err error, fields logrus.Fields) {
-	if fields == nil {
-		fields = logrus.Fields{}
+	copied := make(logrus.Fields, len(fields)+2)
+	for k, v := range fields {
+		copied[k] = v
 	}
+	delete(copied, "error")
 	if err != nil {
-		fields["error_len"] = len(err.Error())
-		fields["error_type"] = fmt.Sprintf("%T", err)
+		copied["error_len"] = len(fmt.Sprint(err))
+		copied["error_type"] = fmt.Sprintf("%T", err)
 	}
-	addCaller(GetLogger(c), 2).WithFields(fields).Error("发生错误")
+	addCaller(GetLogger(c), 2).WithFields(copied).Error("发生错误")
 }
 
 // Fatal 输出致命级别的日志并退出程序
