@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/im"
@@ -82,8 +83,8 @@ func (c *LongConnClient) Close() {
 // replacing raw SDK connection messages with a consistent format.
 //
 // Agent24 KB-OBS-01: the SDK's messages carry the wss connection URL with its query,
-// message payloads (Debug) and raw errors, so only the connect and disconnect events
-// keep a fixed text; every other message is logged as its argument types and length.
+// message payloads (Debug) and raw errors. Connect and disconnect keep a fixed text;
+// every other message is logged as its event phrase, integer arguments and length.
 type feishuLoggerAdapter struct {
 	region Region
 	appID  string
@@ -114,14 +115,50 @@ func (l *feishuLoggerAdapter) Error(ctx context.Context, args ...interface{}) {
 	logger.Errorf(ctx, "[%s] sdk error: %s", l.region.Label, feishuSDKLogShape(args))
 }
 
-// feishuSDKLogShape describes an SDK log call without its text: the type of each
-// argument and the length of the joined message.
+// feishuSDKLogEvents are the fixed leading phrases of the SDK ws client's log lines
+// (oapi-sdk-go v3 ws/client.go). Only the phrase is logged, never the text after it.
+var feishuSDKLogEvents = []string{
+	"connect failed", "get conn url failed", "trying to reconnect", "response status code",
+	"ping loop panic", "ping failed", "ping success", "receive pong",
+	"receive message loop panic", "connection is closed", "receive message failed",
+	"receive unknown message", "receive message", "handle message panic", "handle message failed",
+	"unmarshal message failed", "unmarshal client config failed", "response message failed",
+}
+
+// feishuSDKLogShape describes an SDK log call without its text: the event phrase
+// (longest known prefix of the first argument), the reconnect attempt, integer
+// arguments such as an HTTP status code, the argument types and the message length.
 func feishuSDKLogShape(args []interface{}) string {
+	event, first := "unknown", ""
+	if len(args) > 0 {
+		first, _ = args[0].(string)
+	}
+	for _, e := range feishuSDKLogEvents {
+		if strings.HasPrefix(first, e) && (event == "unknown" || len(e) > len(event)) {
+			event = e
+		}
+	}
+	var extra strings.Builder
+	if event == "trying to reconnect" {
+		// The attempt number is formatted into the string: "trying to reconnect: 3".
+		if n, err := strconv.Atoi(strings.TrimPrefix(first, "trying to reconnect: ")); err == nil {
+			fmt.Fprintf(&extra, " attempt=%d", n)
+		}
+	}
 	types := make([]string, len(args))
+	var ints []string
 	for i, arg := range args {
 		types[i] = fmt.Sprintf("%T", arg)
+		switch arg.(type) {
+		case int, int32, int64, uint, uint32, uint64:
+			ints = append(ints, fmt.Sprint(arg))
+		}
 	}
-	return fmt.Sprintf("arg_types=[%s] len=%d", strings.Join(types, ","), len(fmt.Sprint(args...)))
+	if len(ints) > 0 {
+		fmt.Fprintf(&extra, " int_args=[%s]", strings.Join(ints, ","))
+	}
+	return fmt.Sprintf("event=%q%s arg_types=[%s] len=%d",
+		event, extra.String(), strings.Join(types, ","), len(fmt.Sprint(args...)))
 }
 
 // convertEvent converts a Feishu/Lark SDK event to a unified IncomingMessage.

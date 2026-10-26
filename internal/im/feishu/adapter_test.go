@@ -582,11 +582,14 @@ func TestFeishuLoggerAdapterOmitsSDKText(t *testing.T) {
 
 	l := &feishuLoggerAdapter{region: Region{Label: "Feishu"}, appID: "cli_1"}
 	ctx := context.Background()
-	l.Info(ctx, "disconnected to ", "wss://open.feishu.cn/ws?ticket="+sentinel)
-	l.Info(ctx, "reconnecting ", sentinel)
-	l.Debug(ctx, "receive message: ", `{"text":"`+sentinel+`"}`)
-	l.Warn(ctx, errors.New("handle failed: "+sentinel))
-	l.Error(ctx, "write failed: ", errors.New(sentinel))
+	// Shapes follow oapi-sdk-go v3 ws/client.go: fmtLog yields the formatted text plus
+	// an optional "[conn_id=...]"; the status-code warning passes its int unformatted.
+	l.Info(ctx, "disconnected to wss://open.feishu.cn/ws?ticket="+sentinel, "[conn_id=c1]")
+	l.Info(ctx, "trying to reconnect: 3", "[conn_id=c1]")
+	l.Debug(ctx, `receive message, message_type: event, payload: {"text":"`+sentinel+`"}`)
+	l.Warn(ctx, "response status code %d", 401)
+	l.Error(ctx, "connect failed, err: dial wss://open.feishu.cn/ws?ticket="+sentinel)
+	l.Error(ctx, errors.New("read: "+sentinel))
 
 	logs := buf.String()
 	if strings.Contains(logs, sentinel) {
@@ -594,10 +597,11 @@ func TestFeishuLoggerAdapterOmitsSDKText(t *testing.T) {
 	}
 	for _, want := range []string{
 		"WebSocket disconnected (app_id=cli_1)",
-		"sdk info: arg_types=[string,string]",
-		"sdk debug: arg_types=[string,string]",
-		"sdk warn: arg_types=[*errors.errorString]",
-		"sdk error: arg_types=[string,*errors.errorString]",
+		`sdk info: event="trying to reconnect" attempt=3 arg_types=[string,string]`,
+		`sdk debug: event="receive message" arg_types=[string]`,
+		`sdk warn: event="response status code" int_args=[401] arg_types=[string,int]`,
+		`sdk error: event="connect failed" arg_types=[string]`,
+		`sdk error: event="unknown" arg_types=[*errors.errorString]`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("log missing %q: %s", want, logs)

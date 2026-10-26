@@ -150,7 +150,8 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", fmt.Errorf("no file URL in message")
 	}
 	if err := secutils.ValidateURLForSSRF(msg.FileKey); err != nil {
-		return nil, "", fmt.Errorf("file URL rejected by SSRF policy: %w", err)
+		// Agent24 KB-OBS-01: a parse failure quotes the CDN URL with encrypted_query_param.
+		return nil, "", fmt.Errorf("file URL rejected by SSRF policy: %w", im.RedactURLErrorInChain(err))
 	}
 
 	fileName := msg.FileName

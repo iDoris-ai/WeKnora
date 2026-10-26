@@ -59,3 +59,23 @@ func TestDownloadFileTransportErrorRedactsQueryParam(t *testing.T) {
 		t.Fatalf("error = %v, want download failure", err)
 	}
 }
+
+// A CDN URL that fails to parse is rejected by the SSRF check, whose error wraps
+// url.Parse's *url.Error with the whole URL.
+func TestDownloadFileSSRFRejectionRedactsQueryParam(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	a := NewAdapter("bot-token", "bot-id")
+	_, _, err := a.DownloadFile(context.Background(), &im.IncomingMessage{
+		FileKey:  "https://novac2c.cdn.weixin.qq.com/%zz?encrypted_query_param=" + sentinel,
+		FileName: "a.bin",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains encrypted_query_param: %v", err)
+	}
+	if !strings.Contains(err.Error(), "file URL rejected by SSRF policy:") {
+		t.Fatalf("error = %v, want SSRF rejection", err)
+	}
+}
