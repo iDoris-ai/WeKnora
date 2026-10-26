@@ -2073,7 +2073,8 @@ func (s *Service) handleMessageFullOutput(
 	}
 	endErr := streamer.EndStream(outCtx, msg, streamID)
 	if endErr != nil {
-		logger.Warnf(ctx, "[IM] EndStream failed for full output: %v", endErr)
+		logger.Warnf(ctx, "[IM] EndStream failed for full output: error_len=%d error_type=%T",
+			len(endErr.Error()), endErr)
 	}
 
 	// If the placeholder could not be replaced, send a plain final reply so the
@@ -2196,7 +2197,9 @@ func (s *Service) handleCommand(
 	if channel.OutputMode != "full" {
 		if streamer, ok := adapter.(StreamSender); ok {
 			if err := s.sendStreamReply(ctx, msg, streamer, result.Content); err != nil {
-				logger.Warnf(ctx, "[IM] Stream reply for command /%s failed, falling back: %v", cmd.Name(), err)
+				logger.Warnf(ctx,
+					"[IM] Stream reply for command /%s failed, falling back: error_len=%d error_type=%T",
+					cmd.Name(), len(err.Error()), err)
 			} else {
 				sent = true
 			}
@@ -2928,7 +2931,8 @@ loop:
 	// End the stream
 	endErr := streamer.EndStream(outCtx, msg, streamID)
 	if endErr != nil {
-		logger.Warnf(ctx, "[IM] EndStream failed: %v", endErr)
+		logger.Warnf(ctx, "[IM] EndStream failed: error_len=%d error_type=%T",
+			len(endErr.Error()), endErr)
 	}
 
 	// Match full-output delivery: a failed card replacement must not strand the

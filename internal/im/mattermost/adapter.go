@@ -191,7 +191,10 @@ func parseOutgoingBody(contentType string, body []byte) (*outgoingPayload, error
 		if err := json.Unmarshal(body, &p); err == nil && (p.Token != "" || p.ChannelID != "") {
 			return &p, nil
 		}
-		return nil, fmt.Errorf("unsupported content-type: %s", contentType)
+		// Agent24 KB-OBS-01: Content-Type from an unauthenticated request must not be
+		// copied into this error. Callers only log it; the HTTP body is a fixed
+		// "parse failed" or "verification failed".
+		return nil, fmt.Errorf("unsupported content-type (len=%d)", len(contentType))
 	}
 }
 

@@ -241,3 +241,33 @@ func TestLongConnHandleErrorLogOmitsErrorText(t *testing.T) {
 		t.Fatalf("log missing the handle error line: %s", logs)
 	}
 }
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestGetAccessTokenRedactsCorpSecret(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	saved := httpClient
+	httpClient = &http.Client{
+		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	}
+	t.Cleanup(func() { httpClient = saved })
+
+	adapter := &WebhookAdapter{
+		corpID:      "ww_corp",
+		agentSecret: sentinel,
+		apiBaseURL:  "https://qyapi.weixin.qq.com",
+	}
+	_, err := adapter.getAccessToken(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains corpsecret: %v", err)
+	}
+}
