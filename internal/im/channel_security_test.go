@@ -80,6 +80,19 @@ func TestRedactRequestError(t *testing.T) {
 		require.ErrorIs(t, got, cause)
 	})
 
+	t.Run("cause wrapping a url.Error from the SSRF redirect check", func(t *testing.T) {
+		inner := &url.Error{
+			Op: "parse", URL: "https://https:qyapi.weixin.qq.com/cgi-bin/gettoken?corpsecret=" + sentinel,
+			Err: errors.New("invalid port"),
+		}
+		cause := fmt.Errorf("%w: %w", errors.New("redirect blocked"), fmt.Errorf("invalid URL: %w", inner))
+		loc := "https:qyapi.weixin.qq.com/cgi-bin/gettoken?corpsecret=" + sentinel
+		err := &url.Error{Op: "Get", URL: loc, Err: cause}
+		got := RedactRequestError(err)
+		require.NotContains(t, got.Error(), sentinel)
+		require.ErrorIs(t, got, cause)
+	})
+
 	t.Run("network cause keeps its text", func(t *testing.T) {
 		cause := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
 		err := &url.Error{Op: "Post", URL: "https://api.telegram.org/bot" + sentinel + "/x", Err: cause}

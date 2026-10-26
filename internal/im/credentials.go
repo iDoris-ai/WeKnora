@@ -3,7 +3,6 @@ package im
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -71,13 +70,18 @@ func RedactRequestError(err error) error {
 	return &cloned
 }
 
-// redactRequestCause keeps a transport cause whose text names no URL (a net.Error such as a dial, DNS or
-// deadline failure, a cancellation, EOF). Any other cause can quote one: net/http reports an unparsable
-// redirect as "failed to parse Location header %q". Those keep only their type and length.
+// redactRequestCause keeps a transport cause that is itself a dial or DNS failure (*net.OpError,
+// *net.DNSError: their text names a host and port, not a URL), a deadline, a cancellation or EOF. The
+// cause's own type decides, not anything it wraps: a *url.Error is a net.Error too, and the SSRF redirect
+// check wraps one that quotes the whole redirect target. Every other cause keeps only its type and length.
 func redactRequestCause(cause error) error {
-	var netErr net.Error
-	if cause == nil || errors.As(cause, &netErr) || errors.Is(cause, context.Canceled) ||
-		errors.Is(cause, io.EOF) || errors.Is(cause, io.ErrUnexpectedEOF) {
+	switch cause.(type) { // the cause's own type, on purpose
+	case nil, *net.OpError, *net.DNSError:
+		return cause
+	}
+	// Identity with the sentinels, not errors.Is: a wrapper around one may add text.
+	if cause == context.DeadlineExceeded || cause == context.Canceled || cause == io.EOF ||
+		cause == io.ErrUnexpectedEOF {
 		return cause
 	}
 	return redactedRequestCause{cause: cause}
