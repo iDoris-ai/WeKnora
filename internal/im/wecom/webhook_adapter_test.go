@@ -519,3 +519,17 @@ func TestSendReplyAppChatFailureLogOmitsAccessToken(t *testing.T) {
 		t.Fatalf("log error_type is nil: %s", logs)
 	}
 }
+
+func TestValidateEndpointURLParseErrorOmitsURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	err := validateEndpointURL("https://qyapi.example.com/%zz?sig="+sentinel, "https://qyapi.weixin.qq.com", "https")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains endpoint secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid endpoint URL:") {
+		t.Fatalf("error = %v, want invalid endpoint URL", err)
+	}
+}

@@ -80,13 +80,17 @@ func (c *LongConnClient) Close() {
 
 // feishuLoggerAdapter bridges the Feishu/Lark SDK logger to our unified logger,
 // replacing raw SDK connection messages with a consistent format.
+//
+// Agent24 KB-OBS-01: the SDK's messages carry the wss connection URL with its query,
+// message payloads (Debug) and raw errors, so only the connect and disconnect events
+// keep a fixed text; every other message is logged as its argument types and length.
 type feishuLoggerAdapter struct {
 	region Region
 	appID  string
 }
 
 func (l *feishuLoggerAdapter) Debug(ctx context.Context, args ...interface{}) {
-	logger.Debugf(ctx, "[%s] %s", l.region.Label, fmt.Sprint(args...))
+	logger.Debugf(ctx, "[%s] sdk debug: %s", l.region.Label, feishuSDKLogShape(args))
 }
 
 func (l *feishuLoggerAdapter) Info(ctx context.Context, args ...interface{}) {
@@ -95,15 +99,29 @@ func (l *feishuLoggerAdapter) Info(ctx context.Context, args ...interface{}) {
 		logger.Infof(ctx, "[IM] %s WebSocket connected successfully (app_id=%s)", l.region.Label, l.appID)
 		return
 	}
-	logger.Infof(ctx, "[%s] %s", l.region.Label, msg)
+	if strings.HasPrefix(msg, "disconnected to ") {
+		logger.Infof(ctx, "[IM] %s WebSocket disconnected (app_id=%s)", l.region.Label, l.appID)
+		return
+	}
+	logger.Infof(ctx, "[%s] sdk info: %s", l.region.Label, feishuSDKLogShape(args))
 }
 
 func (l *feishuLoggerAdapter) Warn(ctx context.Context, args ...interface{}) {
-	logger.Warnf(ctx, "[%s] %s", l.region.Label, fmt.Sprint(args...))
+	logger.Warnf(ctx, "[%s] sdk warn: %s", l.region.Label, feishuSDKLogShape(args))
 }
 
 func (l *feishuLoggerAdapter) Error(ctx context.Context, args ...interface{}) {
-	logger.Errorf(ctx, "[%s] %s", l.region.Label, fmt.Sprint(args...))
+	logger.Errorf(ctx, "[%s] sdk error: %s", l.region.Label, feishuSDKLogShape(args))
+}
+
+// feishuSDKLogShape describes an SDK log call without its text: the type of each
+// argument and the length of the joined message.
+func feishuSDKLogShape(args []interface{}) string {
+	types := make([]string, len(args))
+	for i, arg := range args {
+		types[i] = fmt.Sprintf("%T", arg)
+	}
+	return fmt.Sprintf("arg_types=[%s] len=%d", strings.Join(types, ","), len(fmt.Sprint(args...)))
 }
 
 // convertEvent converts a Feishu/Lark SDK event to a unified IncomingMessage.

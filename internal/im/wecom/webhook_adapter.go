@@ -69,7 +69,7 @@ func validateEndpointURL(endpoint, defaultEndpoint, requiredScheme string) error
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return fmt.Errorf("invalid endpoint URL: %w", err)
+		return fmt.Errorf("invalid endpoint URL: %w", im.RedactRequestError(err))
 	}
 	if u.Scheme != requiredScheme {
 		return fmt.Errorf("endpoint must use %s:// scheme, got %s://", requiredScheme, u.Scheme)

@@ -100,7 +100,7 @@ func validateAPIBaseURL(endpoint, defaultEndpoint string) error {
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return fmt.Errorf("invalid api_base_url: %w", err)
+		return fmt.Errorf("invalid api_base_url: %w", im.RedactRequestError(err))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("api_base_url must use http(s):// scheme, got %s://", u.Scheme)

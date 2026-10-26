@@ -1,12 +1,16 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -565,5 +569,52 @@ func TestUploadImageFromURLSSRFRejectionRedactsSignedURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ssrf validation:") {
 		t.Fatalf("error = %v, want ssrf validation failure", err)
+	}
+}
+
+// The SDK logs the wss URL with its query, message payloads and raw errors.
+func TestFeishuLoggerAdapterOmitsSDKText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	l := &feishuLoggerAdapter{region: Region{Label: "Feishu"}, appID: "cli_1"}
+	ctx := context.Background()
+	l.Info(ctx, "disconnected to ", "wss://open.feishu.cn/ws?ticket="+sentinel)
+	l.Info(ctx, "reconnecting ", sentinel)
+	l.Debug(ctx, "receive message: ", `{"text":"`+sentinel+`"}`)
+	l.Warn(ctx, errors.New("handle failed: "+sentinel))
+	l.Error(ctx, "write failed: ", errors.New(sentinel))
+
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains SDK text: %s", logs)
+	}
+	for _, want := range []string{
+		"WebSocket disconnected (app_id=cli_1)",
+		"sdk info: arg_types=[string,string]",
+		"sdk debug: arg_types=[string,string]",
+		"sdk warn: arg_types=[*errors.errorString]",
+		"sdk error: arg_types=[string,*errors.errorString]",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("log missing %q: %s", want, logs)
+		}
+	}
+}
+
+func TestValidateAPIBaseURLParseErrorOmitsURL(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	err := validateAPIBaseURL("https://open.example.com/%zz?sig="+sentinel, "https://open.feishu.cn")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains base URL secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid api_base_url:") {
+		t.Fatalf("error = %v, want invalid api_base_url", err)
 	}
 }

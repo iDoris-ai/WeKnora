@@ -692,3 +692,18 @@ func TestSendReplyDoRedactsYZJToken(t *testing.T) {
 		t.Fatalf("error = %v, want send failure", err)
 	}
 }
+
+// send_msg_url carries yzjtoken; a parse failure must not quote it.
+func TestValidateEndpointURLParseErrorOmitsToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	_, err := deriveWebSocketURL("https://www.yunzhijia.com/%zz?yzjtoken="+sentinel, "yunzhijia.com")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains yzjtoken: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid send_msg_url for websocket:") {
+		t.Fatalf("error = %v, want invalid send_msg_url", err)
+	}
+}
