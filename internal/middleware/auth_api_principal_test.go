@@ -366,3 +366,38 @@ func TestResolveAPIPrincipalSignedTokenExpiredOtherClaimFails(t *testing.T) {
 		}
 	}
 }
+
+// An expired token with no sub is invalid, not credential_expired: there is no principal to record.
+func TestResolveAPIPrincipalSignedTokenExpiredWithoutSubject(t *testing.T) {
+	secret := "test-secret"
+	header := http.Header{}
+	header.Set("X-External-User-Token", signedExternalUserToken(t, secret, jwt.MapClaims{
+		"sub":       "  ",
+		"tenant_id": float64(7),
+		"aud":       "weknora",
+		"exp":       time.Now().Add(-time.Minute).Unix(),
+		"jti":       "expired-jti",
+	}))
+	_, _, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:       types.APIPrincipalModeSignedToken,
+			HMACSecret: secret,
+		},
+	}, header)
+	if err == nil || errors.Is(err, errExternalUserTokenExpired) {
+		t.Fatalf("err = %v, want an invalid token that is not credential_expired", err)
+	}
+}
+
+// verifyExternalUserJWT itself keeps an expired token with an empty sub on its original error.
+func TestVerifyExternalUserJWTExpiredWithoutSubject(t *testing.T) {
+	secret := "test-secret"
+	token := signedExternalUserToken(t, secret, jwt.MapClaims{
+		"sub": " ", "tenant_id": float64(7), "aud": "weknora", "exp": time.Now().Add(-time.Minute).Unix(),
+	})
+	_, err := verifyExternalUserJWT(token, 7, secret)
+	if err == nil || errors.Is(err, errExternalUserTokenExpired) || !errors.Is(err, jwt.ErrTokenExpired) {
+		t.Fatalf("err = %v, want the parser's expiry error, not errExternalUserTokenExpired", err)
+	}
+}

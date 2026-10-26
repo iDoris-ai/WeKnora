@@ -1244,3 +1244,50 @@ func TestAgent24KnowledgeAuditInfersCredentialRejection(t *testing.T) {
 	require.NotNil(t, details.Principal)
 	require.Equal(t, "jti:tok-1", *details.CredentialID)
 }
+
+// http_request_id is the access log's request_id, sanitized the same way: a control character in X-Request-ID
+// does not reach the row.
+func TestAgent24KnowledgeAuditHTTPRequestIDSanitized(t *testing.T) {
+	entry := agent24AuditWithRequestID(t, "req\x01-9", false, func(c *gin.Context) {
+		writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), agent24KnowledgeEcho{})
+	})
+	details := agent24AuditReadIdentity(t, entry)
+	require.NotNil(t, details.HTTPRequestID)
+	require.Equal(t, "req-9", *details.HTTPRequestID)
+}
+
+// Only an expired or revoked rejection counts, and a signed_token principal without a jti does not: the
+// envelope then answers credential_invalid and the row stays anonymous.
+func TestAgent24CredentialRejectionOf(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	external := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "9:user-1"}
+	cases := []struct {
+		name string
+		rej  types.Agent24CredentialRejection
+		ok   bool
+	}{
+		{"expired token", types.Agent24CredentialRejection{
+			Reason: "credential_expired", Principal: external, CredentialID: "jti:t", TenantID: 9, JTI: "t",
+		}, true},
+		{"revoked key", types.Agent24CredentialRejection{
+			Reason: "credential_revoked", CredentialID: "key:8", TenantID: 9,
+		}, true},
+		{"other reason", types.Agent24CredentialRejection{
+			Reason: "credential_invalid", CredentialID: "key:8", TenantID: 9,
+		}, false},
+		{"expired token without jti", types.Agent24CredentialRejection{
+			Reason: "credential_expired", Principal: external, CredentialID: "key:8", TenantID: 9,
+		}, false},
+	}
+	for _, tc := range cases {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", nil)
+		c.Request.Header.Set("X-API-Key", "sk-x")
+		c.Set(types.Agent24CredentialRejectionKey, tc.rej)
+		_, ok := agent24CredentialRejectionOf(c)
+		require.Equal(t, tc.ok, ok, tc.name)
+		if !tc.ok {
+			require.Equal(t, "credential_invalid", agent24AuthRejection(c, http.StatusUnauthorized).Reason, tc.name)
+		}
+	}
+}
