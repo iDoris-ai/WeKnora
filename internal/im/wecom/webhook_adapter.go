@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -587,6 +588,12 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 	// SSRF protection: reject internal/private URLs unless on the WeCom API allowlist.
 	if !isAllowedIMAPIHost(rawURL, extraAllowedHost) {
 		if err := secutils.ValidateURLForSSRF(rawURL); err != nil {
+			// A URL that fails to parse is rejected here, before NewRequest, and the parse
+			// error quotes rawURL with its access_token: keep only the scheme and host.
+			var uerr *url.Error
+			if errors.As(err, &uerr) {
+				err = im.RedactRequestError(uerr)
+			}
 			return nil, "", fmt.Errorf("URL rejected for security reasons: %v", err)
 		}
 	}

@@ -426,6 +426,22 @@ func TestDownloadFromURLDoRedactsAccessToken(t *testing.T) {
 	}
 }
 
+// A URL that fails to parse is rejected by the SSRF check before NewRequest runs.
+func TestDownloadFromURLUnparseableURLRedactsAccessToken(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	rawURL := "https://qyapi.weixin.qq.com/cgi-bin/media/get?access_token=" + sentinel + "&media_id=m1\n"
+	_, _, err := downloadFromURL(context.Background(), rawURL, "a.bin", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error contains access token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "URL rejected for security reasons:") {
+		t.Fatalf("error = %v, want the SSRF rejection", err)
+	}
+}
+
 func TestSendReplyAppChatFailureLogOmitsAccessToken(t *testing.T) {
 	var buf bytes.Buffer
 	logger.SetOutput(&buf)
