@@ -469,3 +469,26 @@ func TestAccessLogOmitsPrincipalAndCredentialWithoutAuth(t *testing.T) {
 		}
 	}
 }
+
+// An external user id is chosen by the caller and may be an email, so the access
+// log keeps the principal type and the id length only.
+func TestAccessLogExternalPrincipalOmitsID(t *testing.T) {
+	const externalID = "7:alice-S3NT1NEL@example.com"
+	logText := serveAccessLog(t, func(c *gin.Context) {
+		c.Set(types.PrincipalContextKey.String(), types.Principal{
+			Type: types.PrincipalAPIExternalUser, ID: externalID,
+		})
+		c.Next()
+	})
+	if strings.Contains(logText, "S3NT1NEL") {
+		t.Fatalf("access log contains the external user id:\n%s", logText)
+	}
+	for _, want := range []string{
+		"principal=api_external_user",
+		fmt.Sprintf("principal_id_len=%d", len(externalID)),
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("access log missing %q:\n%s", want, logText)
+		}
+	}
+}
