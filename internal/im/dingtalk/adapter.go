@@ -832,7 +832,9 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	if a.cardTemplateID != "" {
 		outTrackID, err := a.createAndDeliverCard(ctx, incoming)
 		if err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to create AI card, falling back to sessionWebhook: %v", err)
+			logger.Warnf(ctx,
+				"[DingTalk] Failed to create AI card, falling back to sessionWebhook: error_len=%d error_type=%T",
+				len(err.Error()), err)
 		} else {
 			state.outTrackID = outTrackID
 		}
@@ -877,7 +879,8 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	state.mu.Unlock()
 
 	if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, false); err != nil {
-		logger.Warnf(ctx, "[DingTalk] Failed to update card stream: %v", err)
+		logger.Warnf(ctx, "[DingTalk] Failed to update card stream: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 	return nil
 }
@@ -898,7 +901,8 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 
 	if outTrackID != "" {
 		if err := a.streamingUpdateCard(ctx, outTrackID, finalContent, false); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
+			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: error_len=%d error_type=%T",
+				len(err.Error()), err)
 		}
 	}
 	return nil
@@ -926,15 +930,18 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 
 	if outTrackID != "" {
 		if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, true); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
+			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: error_len=%d error_type=%T",
+				len(err.Error()), err)
 		}
 	} else if sessionWebhook != "" {
 		if err := a.replyViaSessionWebhook(ctx, sessionWebhook, fullContent); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to end stream: %v", err)
+			logger.Warnf(ctx, "[DingTalk] Failed to end stream: error_len=%d error_type=%T",
+				len(err.Error()), err)
 		}
 	} else {
 		if err := a.replyViaOpenAPI(ctx, incoming, fullContent); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to end stream via OpenAPI: %v", err)
+			logger.Warnf(ctx, "[DingTalk] Failed to end stream via OpenAPI: error_len=%d error_type=%T",
+				len(err.Error()), err)
 		}
 	}
 

@@ -284,7 +284,8 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("do request: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes the bot token in the path.
+		return fmt.Errorf("do request: %w", im.RedactRequestError(err))
 	}
 	defer resp.Body.Close()
 
@@ -422,7 +423,8 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	state.mu.Unlock()
 
 	if err := a.editMessage(ctx, chatID, msgID, fullContent, ""); err != nil {
-		logger.Warnf(ctx, "[Telegram] Failed to update stream content: %v", err)
+		logger.Warnf(ctx, "[Telegram] Failed to update stream content: error_len=%d error_type=%T",
+			len(err.Error()), err)
 	}
 	return nil
 }
@@ -443,9 +445,11 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 	state.mu.Unlock()
 
 	if err := a.editMessage(ctx, chatID, msgID, finalContent, "Markdown"); err != nil {
-		logger.Warnf(ctx, "[Telegram] Markdown finalize failed, retrying plain: %v", err)
+		logger.Warnf(ctx, "[Telegram] Markdown finalize failed, retrying plain: error_len=%d error_type=%T",
+			len(err.Error()), err)
 		if retryErr := a.editMessage(ctx, chatID, msgID, finalContent, ""); retryErr != nil {
-			logger.Warnf(ctx, "[Telegram] Failed to finalize stream: %v", retryErr)
+			logger.Warnf(ctx, "[Telegram] Failed to finalize stream: error_len=%d error_type=%T",
+				len(retryErr.Error()), retryErr)
 		}
 	}
 	return nil
@@ -494,7 +498,8 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("download file: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes the bot token in the file path.
+		return nil, "", fmt.Errorf("download file: %w", im.RedactRequestError(err))
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()

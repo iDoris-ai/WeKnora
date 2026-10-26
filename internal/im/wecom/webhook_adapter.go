@@ -333,7 +333,8 @@ func (a *WebhookAdapter) sendToAppChat(ctx context.Context, accessToken, chatID 
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send appchat message: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes access_token in the query.
+		return fmt.Errorf("send appchat message: %w", im.RedactRequestError(err))
 	}
 	defer resp.Body.Close()
 
@@ -377,7 +378,8 @@ func (a *WebhookAdapter) sendToUser(ctx context.Context, accessToken, userID str
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send message: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes access_token in the query.
+		return fmt.Errorf("send message: %w", im.RedactRequestError(err))
 	}
 	defer resp.Body.Close()
 
@@ -415,7 +417,8 @@ func (a *WebhookAdapter) getAccessToken(ctx context.Context) (string, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request access token: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes corpsecret in the query.
+		return "", fmt.Errorf("request access token: %w", im.RedactRequestError(err))
 	}
 	defer resp.Body.Close()
 
@@ -592,7 +595,8 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("download: %w", err)
+		// Agent24 KB-OBS-01: Do's *url.Error quotes the URL (access_token in the query).
+		return nil, "", fmt.Errorf("download: %w", im.RedactRequestError(err))
 	}
 
 	if resp.StatusCode != http.StatusOK {

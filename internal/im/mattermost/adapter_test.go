@@ -6,6 +6,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -191,5 +192,20 @@ func TestParseFileIDs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The Content-Type comes from an unauthenticated request and the error is logged, so it carries the length only.
+func TestParseOutgoingBodyUnsupportedContentTypeOmitsValue(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	_, err := parseOutgoingBody("text/"+sentinel, []byte("not json"))
+	if err == nil {
+		t.Fatal("expected an error for an unsupported content type")
+	}
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("error carries the content type: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unsupported content-type (len=") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
