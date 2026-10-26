@@ -187,7 +187,8 @@ func runSync[N any](
 			processed++
 			if processed%FeishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= FeishuStreamCheckpointMaxInterval {
 				if cerr := h.Checkpoint(ctx, ops.EncodeCursor(newTimes, lastSync)); cerr != nil {
-					logger.Warnf(ctx, "%s stream Checkpoint failed: %v", ops.LogTag(), cerr)
+					logger.Warnf(ctx, "%s stream Checkpoint failed: error_len=%d error_type=%T",
+						ops.LogTag(), len(fmt.Sprint(cerr)), cerr)
 				}
 				lastCheckpoint = time.Now()
 			}

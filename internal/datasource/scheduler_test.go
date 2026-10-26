@@ -1,12 +1,16 @@
 package datasource
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
 )
@@ -461,5 +465,74 @@ func TestScheduler_TriggerSync_NotFound(t *testing.T) {
 
 	if enqueuer.count.Load() != 0 {
 		t.Error("should not enqueue for non-existent data source")
+	}
+}
+
+// syncLogCreateFailRepo fails Create and otherwise behaves like the in-memory repo.
+type syncLogCreateFailRepo struct {
+	*fakeSyncLogRepo
+	err error
+}
+
+func (r *syncLogCreateFailRepo) Create(context.Context, *types.SyncLog) error {
+	return r.err
+}
+
+type enqueueFailer struct {
+	err error
+}
+
+func (e *enqueueFailer) Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error) {
+	return nil, e.err
+}
+
+func activeDataSourceRepo() *fakeDataSourceRepo {
+	repo := newFakeDataSourceRepo()
+	_ = repo.Create(context.Background(), &types.DataSource{
+		ID:       "ds-1",
+		TenantID: 1,
+		Status:   types.DataSourceStatusActive,
+	})
+	return repo
+}
+
+func TestTriggerSyncCreateLogFailureOmitsDBError(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	logs := &syncLogCreateFailRepo{
+		fakeSyncLogRepo: newFakeSyncLogRepo(),
+		err:             errors.New("pq: duplicate key detail " + sentinel),
+	}
+	NewScheduler(activeDataSourceRepo(), logs, &fakeTaskEnqueuer{}).triggerSync("ds-1", 1)
+
+	out := buf.String()
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log contains sentinel:\n%s", out)
+	}
+	if !strings.Contains(out, "failed to create sync log for ds=ds-1: error_len=") {
+		t.Fatalf("log missing create sync log line:\n%s", out)
+	}
+}
+
+func TestTriggerSyncEnqueueFailureOmitsDBError(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	enqueuer := &enqueueFailer{err: errors.New("asynq: queue detail " + sentinel)}
+	NewScheduler(activeDataSourceRepo(), newFakeSyncLogRepo(), enqueuer).triggerSync("ds-1", 1)
+
+	out := buf.String()
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log contains sentinel:\n%s", out)
+	}
+	if !strings.Contains(out, "failed to enqueue sync task for ds=ds-1: error_len=") {
+		t.Fatalf("log missing enqueue line:\n%s", out)
 	}
 }

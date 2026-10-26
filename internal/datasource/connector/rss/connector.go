@@ -87,14 +87,16 @@ func (c *Connector) ListResources(
 		}
 		data, err := cli.fetchFeed(ctx, feedURL)
 		if err != nil {
-			logger.Warnf(ctx, "[RSS] list: fetch %s failed: %v", feedURL, err)
+			logger.Warnf(ctx, "[RSS] list: fetch url_len=%d failed: error_len=%d error_type=%T",
+				len(feedURL), len(fmt.Sprint(err)), err)
 			res.Description = "fetch failed: " + err.Error()
 			out = append(out, res)
 			continue
 		}
 		feed, err := parser.Parse(bytes.NewReader(data))
 		if err != nil {
-			logger.Warnf(ctx, "[RSS] list: parse %s failed: %v", feedURL, err)
+			logger.Warnf(ctx, "[RSS] list: parse url_len=%d failed: error_len=%d error_type=%T",
+				len(feedURL), len(fmt.Sprint(err)), err)
 			res.Description = "parse failed: " + err.Error()
 			out = append(out, res)
 			continue
@@ -135,9 +137,11 @@ func (c *Connector) FetchIncremental(
 		var p rssCursor
 		b, err := json.Marshal(cursor.ConnectorCursor)
 		if err != nil {
-			logger.Warnf(ctx, "[RSS] marshal connector cursor: %v", err)
+			logger.Warnf(ctx, "[RSS] marshal connector cursor: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		} else if err := json.Unmarshal(b, &p); err != nil {
-			logger.Warnf(ctx, "[RSS] unmarshal connector cursor: %v", err)
+			logger.Warnf(ctx, "[RSS] unmarshal connector cursor: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		} else {
 			prev = &p
 		}
@@ -152,9 +156,11 @@ func (c *Connector) FetchIncremental(
 	if newCursor != nil {
 		b, marshalErr := json.Marshal(newCursor)
 		if marshalErr != nil {
-			logger.Warnf(ctx, "[RSS] marshal new cursor: %v", marshalErr)
+			logger.Warnf(ctx, "[RSS] marshal new cursor: error_len=%d error_type=%T",
+				len(fmt.Sprint(marshalErr)), marshalErr)
 		} else if unmarshalErr := json.Unmarshal(b, &cursorMap); unmarshalErr != nil {
-			logger.Warnf(ctx, "[RSS] unmarshal new cursor to map: %v", unmarshalErr)
+			logger.Warnf(ctx, "[RSS] unmarshal new cursor to map: error_len=%d error_type=%T",
+				len(fmt.Sprint(unmarshalErr)), unmarshalErr)
 		}
 	}
 
@@ -207,14 +213,16 @@ func (c *Connector) walk(
 	for _, feedURL := range feedURLs {
 		data, err := cli.fetchFeed(ctx, feedURL)
 		if err != nil {
-			logger.Warnf(ctx, "[RSS] sync: fetch %s failed: %v", feedURL, err)
+			logger.Warnf(ctx, "[RSS] sync: fetch url_len=%d failed: error_len=%d error_type=%T",
+				len(feedURL), len(fmt.Sprint(err)), err)
 			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
 			copyFeedCursor(newCursor, prev, feedURL)
 			continue
 		}
 		feed, err := parser.Parse(bytes.NewReader(data))
 		if err != nil {
-			logger.Warnf(ctx, "[RSS] sync: parse %s failed: %v", feedURL, err)
+			logger.Warnf(ctx, "[RSS] sync: parse url_len=%d failed: error_len=%d error_type=%T",
+				len(feedURL), len(fmt.Sprint(err)), err)
 			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
 			copyFeedCursor(newCursor, prev, feedURL)
 			continue
@@ -296,8 +304,8 @@ func (c *Connector) walk(
 			out = append(out, resolved.item)
 		}
 
-		logger.Infof(ctx, "[RSS] feed %s: items=%d fetched=%d skipped=%d",
-			feedURL, len(feed.Items), kept, skipped)
+		logger.Infof(ctx, "[RSS] feed url_len=%d: items=%d fetched=%d skipped=%d",
+			len(feedURL), len(feed.Items), kept, skipped)
 	}
 
 	if len(feedErrors) > 0 {
@@ -339,7 +347,9 @@ func (c *Connector) resolveItem(
 			}
 		} else {
 			articleFailed = true
-			logger.Warnf(ctx, "[RSS] full-text fetch failed for %s (using feed content): %v", item.Link, err)
+			logger.Warnf(ctx, "[RSS] full-text fetch failed for url_len=%d (using feed content): "+
+				"error_len=%d error_type=%T",
+				len(item.Link), len(fmt.Sprint(err)), err)
 		}
 	}
 

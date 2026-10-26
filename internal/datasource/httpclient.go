@@ -3,6 +3,7 @@ package datasource
 import (
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -23,6 +24,17 @@ func ValidateConnectorBaseURL(rawURL string) error {
 		return fmt.Errorf("base_url SSRF validation failed: %w", err)
 	}
 	return nil
+}
+
+// ConnectorBaseURLForLog keeps only the scheme and host of a connector base URL.
+// ValidateConnectorBaseURL accepts userinfo and a query, so a configured base_url
+// may carry a credential that must not reach the log.
+func ConnectorBaseURLForLog(rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return fmt.Sprintf("(unparsed len=%d)", len(rawURL))
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // NewConnectorHTTPClient returns an HTTP client with redirect and dial-time SSRF guards.
