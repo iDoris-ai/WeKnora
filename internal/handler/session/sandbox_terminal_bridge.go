@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,8 +96,8 @@ func (b *terminalBridge) sendControl(frame terminalControlFrame) {
 	// state, and the output pump shares this connection.
 	_ = b.conn.SetWriteDeadline(time.Now().Add(terminalWriteTimeout))
 	if werr := b.conn.WriteMessage(websocket.TextMessage, payload); werr != nil {
-		logger.Debugf(b.ctx, "[sandbox-terminal] control write failed session=%s: %v",
-			b.session, werr)
+		logger.Debugf(b.ctx, "[sandbox-terminal] control write failed session=%s: error_len=%d error_type=%T",
+			b.session, len(fmt.Sprint(werr)), werr)
 	}
 }
 
@@ -111,8 +112,8 @@ func (b *terminalBridge) pumpOutput(done chan struct{}) {
 	for event := range b.terminal.Session.Output() {
 		switch {
 		case event.Err != nil:
-			logger.Warnf(b.ctx, "[sandbox-terminal] stream error session=%s: %v",
-				b.session, event.Err)
+			logger.Warnf(b.ctx, "[sandbox-terminal] stream error session=%s: error_len=%d error_type=%T",
+				b.session, len(fmt.Sprint(event.Err)), event.Err)
 			b.sendControl(terminalControlFrame{
 				Type:    "error",
 				Code:    terminalErrInternal,
@@ -131,8 +132,8 @@ func (b *terminalBridge) pumpOutput(done chan struct{}) {
 			_ = b.conn.SetWriteDeadline(time.Now().Add(terminalWriteTimeout))
 			if err := b.conn.WriteMessage(websocket.BinaryMessage, event.Data); err != nil {
 				b.writeMu.Unlock()
-				logger.Debugf(b.ctx, "[sandbox-terminal] output write failed session=%s: %v",
-					b.session, err)
+				logger.Debugf(b.ctx, "[sandbox-terminal] output write failed session=%s: error_len=%d error_type=%T",
+					b.session, len(fmt.Sprint(err)), err)
 				b.teardownWith("output_write_failed")
 				return
 			}
@@ -158,8 +159,8 @@ func (b *terminalBridge) pumpInput() {
 			werr := b.terminal.Session.Write(writeCtx, payload)
 			cancel()
 			if werr != nil {
-				logger.Debugf(b.ctx, "[sandbox-terminal] input failed session=%s: %v",
-					b.session, werr)
+				logger.Debugf(b.ctx, "[sandbox-terminal] input failed session=%s: error_len=%d error_type=%T",
+					b.session, len(fmt.Sprint(werr)), werr)
 			}
 		case websocket.TextMessage:
 			var frame terminalControlFrame
@@ -177,8 +178,8 @@ func (b *terminalBridge) pumpInput() {
 				rerr := b.terminal.Session.Resize(resizeCtx, uint32(cols), uint32(rows))
 				cancel()
 				if rerr != nil {
-					logger.Debugf(b.ctx, "[sandbox-terminal] resize failed session=%s: %v",
-						b.session, rerr)
+					logger.Debugf(b.ctx, "[sandbox-terminal] resize failed session=%s: error_len=%d error_type=%T",
+						b.session, len(fmt.Sprint(rerr)), rerr)
 				}
 			case "ping":
 				b.sendControl(terminalControlFrame{Type: "pong"})
@@ -278,8 +279,8 @@ func (b *terminalBridge) watchAuth(done <-chan struct{}) {
 				b.disconnectAuth()
 				return
 			}
-			logger.Warnf(b.ctx, "[sandbox-terminal] auth recheck failed session=%s: %v",
-				b.session, err)
+			logger.Warnf(b.ctx, "[sandbox-terminal] auth recheck failed session=%s: error_len=%d error_type=%T",
+				b.session, len(fmt.Sprint(err)), err)
 		}
 	}
 }
@@ -334,8 +335,8 @@ func (b *terminalBridge) teardownLocked() {
 	// On Cube/E2B Close only disconnects WeKnora from the PTY and the shell
 	// stays reattachable; Docker cannot reattach, so its Close ends the shell.
 	if err := b.terminal.Session.Close(); err != nil {
-		logger.Debugf(b.ctx, "[sandbox-terminal] close failed session=%s: %v",
-			b.session, err)
+		logger.Debugf(b.ctx, "[sandbox-terminal] close failed session=%s: error_len=%d error_type=%T",
+			b.session, len(fmt.Sprint(err)), err)
 	}
 	_ = b.conn.Close()
 	logger.Infof(b.ctx, "[sandbox-terminal] closed session=%s reason=%s",

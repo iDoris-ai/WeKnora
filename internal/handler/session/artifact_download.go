@@ -2,6 +2,7 @@ package session
 
 import (
 	stderrors "errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -69,7 +70,8 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 
 	artifacts, err := h.messageService.GetSessionArtifacts(ctx, sessionID)
 	if err != nil {
-		logger.Errorf(ctx, "list session artifacts failed: session=%s err=%v", sessionID, err)
+		logger.Errorf(ctx, "list session artifacts failed: session=%s error_len=%d error_type=%T",
+			sessionID, len(fmt.Sprint(err)), err)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -223,8 +225,9 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 	}
 	reader, err := fileService.GetFile(ctx, file.Path)
 	if err != nil {
-		logger.Warnf(ctx, "artifact download read failed: session=%s message=%s idx=%d err=%v",
-			sessionID, messageID, index, err)
+		logger.Warnf(ctx,
+			"artifact download read failed: session=%s message=%s idx=%d error_len=%d error_type=%T",
+			sessionID, messageID, index, len(fmt.Sprint(err)), err)
 		_ = c.Error(errors.NewNotFoundError("artifact blob missing"))
 		return
 	}
@@ -236,10 +239,11 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 	}); err != nil {
 		logger.Warnf(
 			ctx,
-			"artifact download stream failed: session=%s message=%s idx=%d err=%v",
+			"artifact download stream failed: session=%s message=%s idx=%d error_len=%d error_type=%T",
 			sessionID,
 			messageID,
 			index,
+			len(fmt.Sprint(err)),
 			err,
 		)
 	}

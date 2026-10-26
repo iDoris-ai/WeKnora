@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -57,13 +59,17 @@ func (s *stubMessageServiceForArtifacts) GetSessionArtifacts(ctx context.Context
 // fakeArtifactFileService serves canned bytes for a single URL.
 type fakeArtifactFileService struct {
 	interfaces.FileService
-	url   string
-	data  []byte
-	calls int
+	url    string
+	data   []byte
+	calls  int
+	getErr error
 }
 
 func (f *fakeArtifactFileService) GetFile(_ context.Context, url string) (io.ReadCloser, error) {
 	f.calls++
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
 	if url != f.url {
 		return nil, stderrors.New("not found")
 	}
@@ -352,6 +358,75 @@ func TestListSessionArtifacts_StripsURL(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "a.txt") {
 		t.Fatalf("response body missing file name: %s", w.Body.String())
+	}
+}
+
+func TestListSessionArtifacts_LogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	h := &Handler{
+		sessionService: &stubSessionServiceForArtifacts{
+			getSession: func(context.Context, string) (*types.Session, error) {
+				return &types.Session{ID: "sess-1", TenantID: 42}, nil
+			},
+		},
+		messageService: &stubMessageServiceForArtifacts{
+			getSessionArtifact: func(context.Context, string) (types.MessageArtifacts, error) {
+				return nil, stderrors.New("list failed " + sentinel)
+			},
+		},
+	}
+	w := httptest.NewRecorder()
+	newArtifactTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/sess-1/artifacts", nil))
+
+	out := buf.String()
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log carries the error text: %s", out)
+	}
+	if !strings.Contains(out, "list session artifacts failed") || !strings.Contains(out, "error_len=") {
+		t.Fatalf("expected redacted list log, got %s", out)
+	}
+}
+
+func TestDownloadMessageArtifact_ReadErrorLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	h := &Handler{
+		sessionService: &stubSessionServiceForArtifacts{
+			getSession: func(context.Context, string) (*types.Session, error) {
+				return &types.Session{ID: "sess-1", TenantID: 42}, nil
+			},
+		},
+		messageService: &stubMessageServiceForArtifacts{
+			getMessage: func(context.Context, string, string) (*types.Message, error) {
+				return &types.Message{
+					ID: "msg-1", SessionID: "sess-1",
+					Artifacts: types.MessageArtifacts{{
+						URL: "local://42/exports/report.pptx", FileName: "report.pptx", FileSize: 4,
+					}},
+				}, nil
+			},
+		},
+		fileService: &fakeArtifactFileService{getErr: stderrors.New("read " + sentinel)},
+	}
+	w := httptest.NewRecorder()
+	newArtifactTestRouter(h).ServeHTTP(w,
+		httptest.NewRequest(http.MethodGet, "/sessions/sess-1/messages/msg-1/artifacts/0/download", nil))
+
+	out := buf.String()
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("log carries the error text: %s", out)
+	}
+	if !strings.Contains(out, "artifact download read failed") || !strings.Contains(out, "error_len=") {
+		t.Fatalf("expected redacted download log, got %s", out)
 	}
 }
 

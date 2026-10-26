@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -46,7 +47,8 @@ func (h *Handler) ListArtifactLibrary(c *gin.Context) {
 		PageSize:  pagination.PageSize,
 	})
 	if err != nil {
-		logger.Errorf(ctx, "list artifact library failed: %v", err)
+		logger.Errorf(ctx, "list artifact library failed: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}

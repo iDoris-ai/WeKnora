@@ -59,7 +59,8 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// is still reportable as a normal 400 JSON error.
 	resourceRewriter, err := h.resolveStreamRewriter(c)
 	if err != nil {
-		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		logger.Warnf(ctx, "Rejected resource URL mode: error_len=%d error_type=%T",
+			len(fmt.Sprint(err)), err)
 		_ = c.Error(err)
 		return
 	}
@@ -175,7 +176,8 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			// Get new events from current offset
 			newEvents, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, messageID, currentOffset)
 			if err != nil {
-				logger.Errorf(ctx, "Failed to get new events: %v", err)
+				logger.Errorf(ctx, "Failed to get new events: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 				flushHeldStreamContent(ctx, c, message.RequestID, resourceRewriter)
 				return
 			}
@@ -359,7 +361,8 @@ func (h *Handler) handleAgentEventsForSSE(
 			// Get new events from StreamManager using offset
 			events, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, assistantMessageID, lastOffset)
 			if err != nil {
-				log.Warnf("Failed to get events from stream: %v", err)
+				log.Warnf("Failed to get events from stream: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
 				continue
 			}
 
@@ -445,7 +448,9 @@ func (h *Handler) handleAgentEventsForSSE(
 							// Check for new events (title event)
 							events, newOff, err := h.streamManager.GetEvents(c.Request.Context(), sessionID, assistantMessageID, lastOffset)
 							if err != nil {
-								log.Warnf("Error getting events while waiting for title: %v", err)
+								log.Warnf(
+									"Error getting events while waiting for title: error_len=%d error_type=%T",
+									len(fmt.Sprint(err)), err)
 								break titleWaitLoop
 							}
 							if len(events) > 0 {

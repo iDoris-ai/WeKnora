@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -132,4 +133,20 @@ func TestForkSessionPassesTitleThrough(t *testing.T) {
 	performFork(t, forker, `{"message_id":"u-2","title":"我的分支"}`)
 
 	require.Equal(t, "我的分支", forker.gotTit)
+}
+
+func TestForkSessionLogOmitsErrorText(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	w := performFork(t, &stubForker{err: errors.New("fork failed " + sentinel)}, `{"message_id":"u-2"}`)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	out := buf.String()
+	require.NotContains(t, out, sentinel)
+	require.Contains(t, out, "fork session")
+	require.Contains(t, out, "error_len=")
 }
