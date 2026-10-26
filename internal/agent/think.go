@@ -559,7 +559,7 @@ func (e *AgentEngine) callLLMWithRetry(
 	if err != nil && !e.overflowRecovered && compaction.IsOverflowError(err) {
 		e.overflowRecovered = true
 		logger.Warnf(ctx, "[Agent][Round-%d] Provider rejected the request as too large; "+
-			"compacting and retrying once: %v", round, err)
+			"compacting and retrying once: error_len=%d error_type=%T", round, len(fmt.Sprint(err)), err)
 		// The engine's copy stays unsanitized. Sanitizing merges consecutive
 		// same-role messages, and the summary is a `user` message that can end
 		// up adjacent to a real one — merging them folds live conversation
