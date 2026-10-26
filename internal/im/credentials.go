@@ -96,10 +96,15 @@ func (e redactedRequestCause) Error() string {
 
 func (e redactedRequestCause) Unwrap() error { return e.cause }
 
-// Timeout lets url.Error.Timeout see through the wrapper.
+// Timeout and Temporary let url.Error's methods of the same name see through the wrapper.
 func (e redactedRequestCause) Timeout() bool {
 	t, ok := e.cause.(interface{ Timeout() bool })
 	return ok && t.Timeout()
+}
+
+func (e redactedRequestCause) Temporary() bool {
+	t, ok := e.cause.(interface{ Temporary() bool })
+	return ok && t.Temporary()
 }
 
 // requestURLSchemeHost returns scheme://host. Parse failure, or a URL with no

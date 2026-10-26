@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -111,3 +113,31 @@ func TestRedactRequestError(t *testing.T) {
 		require.Nil(t, RedactRequestError(nil))
 	})
 }
+
+// http.Client.Timeout reports its own timeout error as the cause; once wrapped, the *url.Error still says
+// Timeout and Temporary.
+func TestRedactRequestErrorKeepsClientTimeoutClassification(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	client := &http.Client{
+		Timeout: 20 * time.Millisecond,
+		Transport: redactTestRoundTripper(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}),
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://api.telegram.org/bot"+sentinel+"/getUpdates", nil)
+	require.NoError(t, err)
+	_, err = client.Do(req) // Do fails, there is no body to close
+	require.Error(t, err)
+
+	got := RedactRequestError(err)
+	require.NotContains(t, got.Error(), sentinel)
+	var uerr *url.Error
+	require.ErrorAs(t, got, &uerr)
+	require.True(t, uerr.Timeout(), "Timeout: %v", got)
+	require.True(t, uerr.Temporary(), "Temporary: %v", got)
+}
+
+type redactTestRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f redactTestRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
