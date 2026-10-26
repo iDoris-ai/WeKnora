@@ -180,3 +180,30 @@ func TestAuthMembershipListLogOmitsSentinel(t *testing.T) {
 	}
 	assertAuthLogOmitsSentinel(t, buf.String(), "Failed to list memberships for tenantless user user-1")
 }
+
+// A valid X-Tenant-ID still parses with leading zeros, so the raw header differs
+// from the resolved tenant id. The success log keeps only its length.
+func TestAuthResolvedRoleLogOmitsTenantHeader(t *testing.T) {
+	buf := captureAuthLogs(t)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/knowledge-bases", nil)
+	c.Request.Header.Set("X-Tenant-ID", "0007")
+	members := newFakeMemberService()
+	members.seedActive("user-1", 7, types.TenantRoleAdmin)
+
+	ok := authenticateJWTUser(
+		c, &fakeTenantService{tenant: &types.Tenant{ID: 7}}, members, cfgWithRBAC(true),
+		&types.User{ID: "user-1", TenantID: 7}, 7,
+	)
+	if !ok {
+		t.Fatal("authenticateJWTUser rejected a member of the requested tenant")
+	}
+	logs := buf.String()
+	if strings.Contains(logs, "0007") {
+		t.Fatalf("log contains the raw X-Tenant-ID header:\n%s", logs)
+	}
+	if !strings.Contains(logs, "header_len=4") {
+		t.Fatalf("log missing header_len:\n%s", logs)
+	}
+}
