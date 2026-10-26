@@ -1,10 +1,15 @@
 package notion
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -297,5 +302,55 @@ func TestPropertyToString(t *testing.T) {
 				t.Errorf("propertyToString() = %q, want %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestAttachmentDownloadFailureLogOmitsFileName(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	allowNotionTestServer(t)
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/search":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"results":[],"has_more":false}`)
+		case "/v1/pages/page":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"id":"page","object":"page","url":"https://notion.so/page",`+
+				`"last_edited_time":"2026-09-26T10:00:00Z","parent":{"type":"workspace"},`+
+				`"properties":{"title":{"type":"title","title":[{"plain_text":"Notes"}]}}}`)
+		case "/v1/blocks/page/children":
+			w.Header().Set("Content-Type", "application/json")
+			// file-2's URL fails to parse; the parse error quotes the URL, sentinel included.
+			_, _ = fmt.Fprintf(w, `{"results":[{"id":"file-1","type":"file","file":{"type":"external",`+
+				`"name":"%s.pdf","external":{"url":"%s/download"}}},`+
+				`{"id":"file-2","type":"file","file":{"type":"external",`+
+				`"name":"b.pdf","external":{"url":"%s/%%zz%s"}}}],"has_more":false}`,
+				sentinel, serverURL, serverURL, sentinel)
+		case "/download":
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = server.URL
+	t.Cleanup(server.Close)
+
+	config := makeNotionConfig(&Config{APIKey: "test-token"}, server.URL, []string{"page"})
+	if _, err := NewConnector().FetchAll(context.Background(), config, []string{"page"}); err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel:\n%s", logs)
+	}
+	if !strings.Contains(logs, "failed to download attachment name_len=") ||
+		!strings.Contains(logs, "error_len=") {
+		t.Fatalf("log missing attachment download line:\n%s", logs)
 	}
 }

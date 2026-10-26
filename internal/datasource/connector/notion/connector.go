@@ -426,7 +426,8 @@ func (c *Connector) fetchPage(
 		}
 		data, err := client.DownloadFile(ctx, att.URL)
 		if err != nil {
-			logger.Warnf(ctx, "[Notion] failed to download attachment %s: %v", att.FileName, err)
+			logger.Warnf(ctx, "[Notion] failed to download attachment name_len=%d: error_len=%d error_type=%T",
+				len(att.FileName), len(fmt.Sprint(err)), err)
 			continue
 		}
 		items = append(items, types.FetchedItem{

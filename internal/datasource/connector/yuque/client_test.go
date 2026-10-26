@@ -82,6 +82,29 @@ func TestClient_Ping_SendsAuthHeader(t *testing.T) {
 	}
 }
 
+// A configured base_url may carry a query token; the client log keeps only scheme and host.
+func TestClientLogOmitsBaseURLQuery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(401)
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	c := newClient(&Config{APIToken: "bad", BaseURL: srv.URL + "/?token=S3NT1NEL"})
+	_ = c.Ping(context.Background())
+	out := buf.String()
+	if strings.Contains(out, "S3NT1NEL") {
+		t.Fatalf("log contains base_url query:\n%s", out)
+	}
+	if !strings.Contains(out, "base="+srv.URL) {
+		t.Fatalf("log = %s, want base=%s", out, srv.URL)
+	}
+}
+
 func TestClient_Ping_401(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)

@@ -2021,3 +2021,41 @@ func TestSupportedImageExt(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveAncestorsGetNodeFailureLogOmitsErrorBody(t *testing.T) {
+	const sentinel = "S3NT1NEL"
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, core.TokenResponse{
+			ApiResponse:       core.ApiResponse{Code: 0},
+			TenantAccessToken: "fake-token",
+			Expire:            7200,
+		})
+	})
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/get_node", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(sentinel))
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	cfg := &core.Config{AppID: "test-app-id", AppSecret: "test-app-secret", BaseURL: ts.URL}
+	_, err := NewConnector(core.RegionFeishu).ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"space1:nt-child"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors: %v", err)
+	}
+	logs := buf.String()
+	if strings.Contains(logs, sentinel) {
+		t.Fatalf("log contains sentinel:\n%s", logs)
+	}
+	if !strings.Contains(logs, "resolve ancestors: get node space1:nt-child: error_len=") {
+		t.Fatalf("log missing ancestor get-node line:\n%s", logs)
+	}
+}
