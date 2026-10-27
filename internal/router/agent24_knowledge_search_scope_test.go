@@ -90,6 +90,23 @@ func agent24SearchScopeDB(t *testing.T) *gorm.DB {
 // Through the registered route and the API key gate, a KB-restricted retrieve key searches only its allowed
 // KBs: an allowed and a disallowed KB in one request search the allowed one only, a disallowed KB alone is
 // empty_scope, and a key without retrieve stops at the gate. An unrestricted retrieve key searches both.
+// agent24RecheckServices stand behind the pre-response credential recheck (A24-KB-23) for a request whose
+// key scope the test puts on the context directly: the key the header names is that scope's, in tenant 1,
+// and the tenant has no principal config.
+func agent24RecheckServices(scope types.TenantAPIKeyScope) (agent24FakeTenantSvc, agent24FakeKeySvc) {
+	tenantID := uint64(1)
+	return agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}}, agent24FakeKeySvc{key: &types.TenantAPIKey{
+		ID: scope.KeyID, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID, FullAccess: scope.FullAccess,
+		KnowledgeBaseIDs: scope.KnowledgeBaseIDs, Capabilities: scope.Capabilities,
+	}}
+}
+
+// agent24RecheckEntryContext adds what Auth binds at entry for a tenant key in tenant 1: the tenant
+// principal, which the recheck compares against.
+func agent24RecheckEntryContext(ctx context.Context) context.Context {
+	return types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalAPITenant, ID: "1"})
+}
+
 func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
@@ -135,18 +152,21 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 			v1 := engine.Group("/api/v1")
 			v1.Use(func(c *gin.Context) {
 				ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
+				ctx = agent24RecheckEntryContext(ctx)
 				c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(ctx, tc.scope))
 				c.Next()
 			}, g.apiKeyAuthorizer.Middleware())
+			tenants, keys := agent24RecheckServices(tc.scope)
 			RegisterAgent24KnowledgeRoutes(v1, nil,
-				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs), nil, g)
+				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs, tenants, keys, nil), nil, g)
 
 			body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},` +
 				`"budget":{"deadline_ms":5000,"max_results":5,"max_concurrency":1}}`
 			w := httptest.NewRecorder()
-			engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search",
-				strings.NewReader(body)))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", strings.NewReader(body))
+			req.Header.Set("X-API-Key", "sk-test")
+			engine.ServeHTTP(w, req)
 			if w.Code != tc.status {
 				t.Fatalf("status %d body %s, want %d", w.Code, w.Body.String(), tc.status)
 			}
@@ -208,17 +228,22 @@ func TestAgent24KnowledgeReadRouteKBAllowList(t *testing.T) {
 			v1 := engine.Group("/api/v1")
 			v1.Use(func(c *gin.Context) {
 				ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(1))
+				ctx = agent24RecheckEntryContext(ctx)
 				c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(ctx, scope))
 				c.Next()
 			}, g.apiKeyAuthorizer.Middleware())
+			tenants, keys := agent24RecheckServices(scope)
 			RegisterAgent24KnowledgeRoutes(v1, nil, nil,
-				handler.NewAgent24KnowledgeReadHandler(agent24SearchScopeDB(t), &agent24SearchScopeKBs{}), g)
+				handler.NewAgent24KnowledgeReadHandler(
+					agent24SearchScopeDB(t), &agent24SearchScopeKBs{}, tenants, keys, nil,
+				), g)
 
 			body := `{"protocol_version":1,"request_id":"r1","generation":7,` +
 				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},"knowledge_id":"` + tc.knowledge + `"}`
 			w := httptest.NewRecorder()
-			engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/read",
-				strings.NewReader(body)))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/read", strings.NewReader(body))
+			req.Header.Set("X-API-Key", "sk-test")
+			engine.ServeHTTP(w, req)
 			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
 				t.Fatalf("status %d body %s, want %d with %s", w.Code, w.Body.String(), tc.status, tc.want)
 			}

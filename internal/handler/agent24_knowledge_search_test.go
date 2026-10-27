@@ -141,7 +141,7 @@ func newAgent24SearchEnv() *agent24SearchEnv {
 	return &agent24SearchEnv{
 		h: &Agent24KnowledgeSearchHandler{
 			key: agent24TestKey, probe: fakeAgent24ReadyProbe{}, scope: scope, index: facts,
-			search: searcher, hits: hits,
+			search: searcher, hits: hits, recheck: agent24FixedRecheck{},
 		},
 		scope: scope, searcher: searcher, hits: hits,
 	}
@@ -615,7 +615,7 @@ func TestAgent24KnowledgeTagKeyReadOnce(t *testing.T) {
 			t.Setenv(Agent24KnowledgeTagKeyEnv, tc.later)
 			ops := BuildAgent24KnowledgeCapability().SupportedOperations
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
+			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil)
 			assert.Equal(t, []bool{tc.enabled, !tc.enabled, tc.enabled},
 				[]bool{slices.Contains(ops, "search"), ready.keyMissing, search.key != nil})
 		})
@@ -635,7 +635,7 @@ func TestAgent24KnowledgeSearchKeyAgreement(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			agent24SetTagKey(t, tc.env)
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil)
+			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil)
 			assert.Equal(t, !tc.enabled, ready.keyMissing)
 			if tc.enabled {
 				assert.Equal(t, agent24TestKey, search.key)
@@ -644,4 +644,75 @@ func TestAgent24KnowledgeSearchKeyAgreement(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAgent24KnowledgeSearchRecheck(t *testing.T) {
+	body := agent24SearchBody(`"b","a"`, agent24Budget)
+
+	t.Run("credential revoked", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.recheck = agent24FixedRecheck{reason: "credential_revoked"}
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "unauthorized", "credential_revoked")
+	})
+	t.Run("recheck error", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.recheck = agent24FixedRecheck{err: errors.New("recheck-down")}
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "internal", "")
+		assert.NotContains(t, w.Body.String(), "recheck-down")
+	})
+	t.Run("scope narrows", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		wrap := &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}, {ID: "z"}}}
+		e.h.scope = wrap
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, 2, wrap.calls)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var got agent24SearchResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		assert.Equal(t, []string{"a"}, got.EffectiveScope.KnowledgeBaseIDs)
+		require.Len(t, got.Hits, 1)
+		assert.Equal(t, []any{1, "c1", "a"}, []any{got.Hits[0].Rank, got.Hits[0].ChunkID, got.Hits[0].KnowledgeBaseID})
+		assert.NotContains(t, w.Body.String(), `"knowledge_base_id":"z"`)
+		assert.NotContains(t, w.Body.String(), `"chunk_id":"c2"`)
+	})
+	t.Run("failure outside the new scope", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
+		w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a","d"`, agent24Budget))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var got agent24SearchResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		assert.Equal(t, "complete", got.Completeness)
+		assert.NotContains(t, w.Body.String(), "partial_failures")
+	})
+	t.Run("only failed KBs left", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "d"}}}
+		w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a","d"`, agent24Budget))
+		require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "unavailable", "index_building")
+		assert.Contains(t, w.Body.String(), `"knowledge_base_id":"d"`)
+		assert.NotContains(t, w.Body.String(), `"knowledge_base_id":"a"`)
+		assert.NotContains(t, w.Body.String(), `"chunk_id":"c1"`)
+	})
+	t.Run("scope empty", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		wrap := &agent24ScopeThen{inner: e.scope}
+		e.h.scope = wrap
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, 2, wrap.calls)
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "forbidden", "empty_scope")
+	})
+	t.Run("recheck nil", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.recheck = nil
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "internal", "")
+	})
 }

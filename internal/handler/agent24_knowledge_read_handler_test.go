@@ -65,6 +65,9 @@ func (f *fakeAgent24Reads) Snapshot(ctx context.Context, tenantID uint64, kbIDs 
 			snap.Chunks[i].Content = ""
 		}
 	}
+	if snap.Found {
+		snap.KnowledgeBaseID = f.kbOf[knowledgeID]
+	}
 	return snap, nil
 }
 
@@ -98,7 +101,9 @@ func newAgent24ReadEnv() *agent24ReadEnv {
 		kbOf: map[string]string{"doc-1": "a", "doc-2": "a", "doc-z": "z"},
 	}
 	return &agent24ReadEnv{
-		h:     &Agent24KnowledgeReadHandler{key: agent24TestKey, scope: scope, reads: reads},
+		h: &Agent24KnowledgeReadHandler{
+			key: agent24TestKey, scope: scope, reads: reads, recheck: agent24FixedRecheck{},
+		},
 		scope: scope, reads: reads,
 	}
 }
@@ -306,7 +311,7 @@ func TestAgent24KnowledgeReadKeyAgreement(t *testing.T) {
 			agent24SetTagKey(t, tc.env)
 			ops := BuildAgent24KnowledgeCapability().SupportedOperations
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			read := NewAgent24KnowledgeReadHandler(nil, nil)
+			read := NewAgent24KnowledgeReadHandler(nil, nil, nil, nil, nil)
 			assert.Equal(t, []bool{tc.enabled, !tc.enabled, tc.enabled},
 				[]bool{slices.Contains(ops, "read"), ready.keyMissing, read.key != nil})
 
@@ -322,4 +327,99 @@ func TestAgent24KnowledgeReadKeyAgreement(t *testing.T) {
 			assert.Contains(t, w.Body.String(), want)
 		})
 	}
+}
+
+func TestAgent24KnowledgeReadRecheck(t *testing.T) {
+	body := agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`, `"knowledge_id":"doc-1"`)
+
+	t.Run("document outside the new scope", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		wrap := &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "b"}}}
+		e.h.scope = wrap
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, 2, wrap.calls)
+		require.Len(t, e.reads.calls, 1)
+		assert.Equal(t, []string{"a", "b"}, e.reads.calls[0].kbIDs)
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "not_found", "")
+	})
+	t.Run("scope empty", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		wrap := &agent24ScopeThen{inner: e.scope}
+		e.h.scope = wrap
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, 2, wrap.calls)
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "forbidden", "empty_scope")
+	})
+	stale := agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`, `"knowledge_id":"doc-1"`,
+		`"chunk_id":"c1"`, `"expected_revision":{"content_tag":"old"}`)
+	t.Run("stale after the credential stopped", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.recheck = agent24FixedRecheck{reason: "credential_revoked"}
+		w := e.run(agent24TenantCtx(), t, stale)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "unauthorized", "credential_revoked")
+		assert.NotContains(t, w.Body.String(), "current_content_tag")
+	})
+	t.Run("stale for a document outside the new scope", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "b"}}}
+		w := e.run(agent24TenantCtx(), t, stale)
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "not_found", "")
+		assert.NotContains(t, w.Body.String(), "current_content_tag")
+	})
+	t.Run("deadline passed while a stale read was rechecked", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.scope = &agent24ResolveWaitSecond{inner: e.scope}
+		w := e.run(agent24TenantCtx(), t, agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`,
+			`"knowledge_id":"doc-1"`, `"chunk_id":"c1"`, `"expected_revision":{"content_tag":"old"}`,
+			`"deadline_ms":30`))
+		require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "timeout", "")
+		assert.NotContains(t, w.Body.String(), "current_content_tag")
+	})
+	t.Run("deadline passed while the read was judged", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.judge = func(key []byte, req agent24ReadRequest, snap agent24ReadSnapshot) (
+			agent24ReadPage, *agent24KnowledgeError,
+		) {
+			time.Sleep(50 * time.Millisecond)
+			return agent24JudgeRead(key, req, snap)
+		}
+		w := e.run(agent24TenantCtx(), t, agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`,
+			`"knowledge_id":"doc-1"`, `"deadline_ms":30`))
+		require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "timeout", "")
+	})
+	t.Run("stale inside the new scope", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
+		w := e.run(agent24TenantCtx(), t, stale)
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "current_content_tag")
+	})
+	t.Run("credential expired", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.recheck = agent24FixedRecheck{reason: "credential_expired"}
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "unauthorized", "credential_expired")
+	})
+}
+
+// agent24ResolveWaitSecond resolves through inner, and on the second call (the recheck) waits for the
+// request's deadline first: the recheck is the last step before a read answers.
+type agent24ResolveWaitSecond struct {
+	inner agent24ScopeResolver
+	calls int
+}
+
+func (s *agent24ResolveWaitSecond) Resolve(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+	s.calls++
+	if s.calls == 2 {
+		<-ctx.Done()
+	}
+	return s.inner.Resolve(ctx, ids)
 }

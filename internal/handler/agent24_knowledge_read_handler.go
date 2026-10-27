@@ -8,6 +8,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,19 +20,26 @@ import (
 
 // Agent24KnowledgeReadHandler serves POST /agent24/knowledge/read.
 type Agent24KnowledgeReadHandler struct {
-	key   []byte // nil: read is disabled
-	scope agent24ScopeResolver
-	reads agent24ReadReader
+	key     []byte // nil: read is disabled
+	scope   agent24ScopeResolver
+	reads   agent24ReadReader
+	recheck agent24CredentialRechecker
+	// judge is agent24JudgeRead when nil; a test sets it to end the request while the judgement runs.
+	judge func(key []byte, req agent24ReadRequest, snap agent24ReadSnapshot) (agent24ReadPage, *agent24KnowledgeError)
 }
 
 // NewAgent24KnowledgeReadHandler builds the handler with the default dependencies; the key is the
 // process-wide read of agent24SearchTagKey, as for search and ready.
-func NewAgent24KnowledgeReadHandler(db *gorm.DB, kbService interfaces.KnowledgeBaseService,
+func NewAgent24KnowledgeReadHandler(
+	db *gorm.DB, kbService interfaces.KnowledgeBaseService,
+	tenants interfaces.TenantService, keys interfaces.TenantAPIKeyService,
+	revocations interfaces.Agent24CredentialRevocationStore,
 ) *Agent24KnowledgeReadHandler {
 	return &Agent24KnowledgeReadHandler{
-		key:   agent24SearchTagKey(),
-		scope: agent24DefaultScopeResolver{kbs: kbService},
-		reads: agent24DBReadReader{db: db},
+		key:     agent24SearchTagKey(),
+		scope:   agent24DefaultScopeResolver{kbs: kbService},
+		reads:   agent24DBReadReader{db: db},
+		recheck: newAgent24Rechecker(tenants, keys, revocations),
 	}
 }
 
@@ -98,18 +106,42 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 		}
 		return
 	}
-	page, kerr := agent24JudgeRead(h.key, req, snap)
+	// The judgement is written only after the recheck: a stale answer carries the current revisions (R4.5),
+	// which a credential that no longer stands, or a document whose KB left E, must not see (R7.6). The
+	// recheck stays the last step before writing, so its deadline check covers the judgement too.
+	judge := h.judge
+	if judge == nil {
+		judge = agent24JudgeRead
+	}
+	page, judged := judge(h.key, req, snap)
+	newScope, kerr, gone := agent24RecheckScope(ctx, h.recheck, h.scope, c.Request.Header, req.KBIDs, scope)
+	if gone {
+		agent24NoteCancelled(c, echo, scope)
+		return
+	}
 	if kerr != nil {
-		agent24NoteScope(c, scope)
+		if kerr.Code == agent24CodeInternal || kerr.Code == agent24CodeTimeout || kerr.Code == agent24CodeUnavailable {
+			agent24NoteScope(c, scope)
+		}
 		writeAgent24KnowledgeError(c, kerr, echo)
+		return
+	}
+	if !slices.Contains(newScope, snap.KnowledgeBaseID) {
+		agent24NoteScope(c, newScope)
+		writeAgent24KnowledgeError(c, agent24NotFound(), echo)
+		return
+	}
+	if judged != nil {
+		agent24NoteScope(c, newScope)
+		writeAgent24KnowledgeError(c, judged, echo)
 		return
 	}
 	resource, revision := agent24ReadAuditResource(req.KnowledgeID, page.Revision, page.Segments)
 	agent24NoteAudit(c, func(f *agent24AuditFacts) {
 		f.Echo = echo
 		f.Outcome = agent24AuditOK
-		if len(scope) > 0 {
-			f.EffectiveScope = append([]string(nil), scope...)
+		if len(newScope) > 0 {
+			f.EffectiveScope = append([]string(nil), newScope...)
 		}
 		f.Resource = resource
 		f.Revision = revision
@@ -117,7 +149,7 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 	})
 	c.JSON(http.StatusOK, agent24ReadResponse{
 		ProtocolVersion: agent24KnowledgeProtocolVersion, RequestID: *echo.RequestID, Generation: *echo.Generation,
-		EffectiveScope: agent24EffectiveScope{KnowledgeBaseIDs: scope}, KnowledgeID: req.KnowledgeID,
+		EffectiveScope: agent24EffectiveScope{KnowledgeBaseIDs: newScope}, KnowledgeID: req.KnowledgeID,
 		Revision: page.Revision, Display: page.Display, Segments: page.Segments, Truncated: page.Truncated,
 		NextCursor: page.NextCursor,
 	})

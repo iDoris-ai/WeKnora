@@ -92,7 +92,7 @@ func agent24ReadTestD1(loaded ...string) agent24ReadSnapshot {
 		}
 	}
 	return agent24ReadSnapshot{
-		Found: true, ParseStatus: types.ParseStatusCompleted, Title: "T1", FileName: "f1.pdf",
+		Found: true, KnowledgeBaseID: "a", ParseStatus: types.ParseStatusCompleted, Title: "T1", FileName: "f1.pdf",
 		Fingerprint: agent24SourceFingerprint{FileHash: "h1", FilePath: "p1", Source: "s1"}, Chunks: chunks,
 	}
 }
@@ -119,11 +119,12 @@ func TestAgent24DBReadSnapshot(t *testing.T) {
 	}
 
 	// No build: found, no servable set; a build with no servable chunk: an empty, non-nil set.
-	assert.Equal(t, agent24ReadSnapshot{Found: true, ParseStatus: types.ParseStatusProcessing},
-		snap("d2", agent24ReadWindow{ChunkID: "c20"}))
+	assert.Equal(t, agent24ReadSnapshot{
+		Found: true, KnowledgeBaseID: "a", ParseStatus: types.ParseStatusProcessing,
+	}, snap("d2", agent24ReadWindow{ChunkID: "c20"}))
 	d9 := snap("d9", agent24ReadWindow{Limit: 100})
 	assert.Equal(t, agent24ReadSnapshot{
-		Found: true, ParseStatus: types.ParseStatusCompleted, Chunks: []agent24ReadChunk{},
+		Found: true, KnowledgeBaseID: "a", ParseStatus: types.ParseStatusCompleted, Chunks: []agent24ReadChunk{},
 	}, d9)
 	assert.NotNil(t, d9.Chunks)
 
@@ -137,7 +138,7 @@ func TestAgent24DBReadSnapshot(t *testing.T) {
 	s, err = r.Snapshot(ctx, 2, kbs, "d7", agent24ReadWindow{Limit: 100})
 	require.NoError(t, err)
 	assert.Equal(t, agent24ReadSnapshot{
-		Found: true, ParseStatus: types.ParseStatusCompleted, Chunks: []agent24ReadChunk{},
+		Found: true, KnowledgeBaseID: "a", ParseStatus: types.ParseStatusCompleted, Chunks: []agent24ReadChunk{},
 	}, s)
 
 	// Manual knowledge: the version from metadata, 1 without metadata; unreadable metadata is an error.

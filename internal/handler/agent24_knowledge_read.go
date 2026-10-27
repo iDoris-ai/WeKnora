@@ -24,11 +24,12 @@ type agent24ReadChunk struct {
 
 // agent24ReadSnapshot holds the rows of one database snapshot (R4.4, R4.5).
 type agent24ReadSnapshot struct {
-	Found       bool // the document is in the tenant, lies in E, and is not deleting, draft or unknown (R2.6)
-	ParseStatus string
-	Title       string
-	FileName    string
-	Fingerprint agent24SourceFingerprint
+	Found           bool   // the document is in the tenant, lies in E, and is not deleting, draft or unknown (R2.6)
+	KnowledgeBaseID string // the document's knowledge base when Found
+	ParseStatus     string
+	Title           string
+	FileName        string
+	Fingerprint     agent24SourceFingerprint
 	// Chunks is the document's whole servable set in document order (chunk_index, then id): nil without a
 	// build, non-nil (possibly empty) with one. The same set as agent24DBHitReader's, so index_build_id
 	// agrees between search and read.
@@ -94,7 +95,8 @@ func (r agent24DBReadReader) Snapshot(ctx context.Context, tenantID uint64, kbID
 			return err
 		}
 		snap = agent24ReadSnapshot{
-			Found: true, ParseStatus: row.ParseStatus, Title: row.Title, FileName: row.FileName,
+			Found: true, KnowledgeBaseID: row.KnowledgeBaseID, ParseStatus: row.ParseStatus,
+			Title: row.Title, FileName: row.FileName,
 			Fingerprint: agent24SourceFingerprint{
 				FileHash: row.FileHash, FilePath: row.FilePath, Source: row.Source, ManualVersion: version,
 			},
