@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -72,6 +73,7 @@ func NewAgent24KnowledgeSearchHandler(
 	kbService interfaces.KnowledgeBaseService,
 	tenants interfaces.TenantService, keys interfaces.TenantAPIKeyService,
 	revocations interfaces.Agent24CredentialRevocationStore,
+	users interfaces.UserService, members interfaces.TenantMemberService, cfg *config.Config,
 ) *Agent24KnowledgeSearchHandler {
 	return &Agent24KnowledgeSearchHandler{
 		key:     agent24SearchTagKey(),
@@ -80,7 +82,7 @@ func NewAgent24KnowledgeSearchHandler(
 		index:   agent24DBIndexReader{db: db},
 		search:  kbService,
 		hits:    agent24DBHitReader{db: db},
-		recheck: newAgent24Rechecker(tenants, keys, revocations),
+		recheck: newAgent24Rechecker(tenants, keys, revocations, users, members, cfg),
 	}
 }
 

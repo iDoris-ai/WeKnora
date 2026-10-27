@@ -1,5 +1,6 @@
 // Agent24 fork product patch A24-KB-23 (KB-C1-03 C3-d, WeKnora#41, CONTRACT-READONLY-v1 R7.6): the
-// credential is checked again before a search or read response is assembled.
+// credential is checked again before a search or read response is assembled. A24-KB-25 (C3-d2) adds the
+// Bearer user JWT channel.
 
 package handler
 
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -29,6 +31,9 @@ type agent24DefaultRechecker struct {
 	tenants     interfaces.TenantService
 	keys        interfaces.TenantAPIKeyService
 	revocations interfaces.Agent24CredentialRevocationStore // nil outside integration mode: no jti list
+	users       interfaces.UserService                      // Bearer channel
+	members     interfaces.TenantMemberService              // Bearer channel
+	cfg         *config.Config                              // Bearer channel: RBAC and cross-tenant flags
 }
 
 // newAgent24Rechecker consults the jti list only in integration mode: the table exists only there
@@ -36,21 +41,26 @@ type agent24DefaultRechecker struct {
 func newAgent24Rechecker(
 	tenants interfaces.TenantService, keys interfaces.TenantAPIKeyService,
 	revocations interfaces.Agent24CredentialRevocationStore,
+	users interfaces.UserService, members interfaces.TenantMemberService, cfg *config.Config,
 ) agent24DefaultRechecker {
 	if mode, err := Agent24KnowledgeModeFromEnv(); err != nil || mode != Agent24KnowledgeModeIntegration {
 		revocations = nil
 	}
-	return agent24DefaultRechecker{tenants: tenants, keys: keys, revocations: revocations}
+	return agent24DefaultRechecker{
+		tenants: tenants, keys: keys, revocations: revocations, users: users, members: members, cfg: cfg,
+	}
 }
 
-// Recheck covers X-API-Key credentials: tenant keys with the tenant's principal mode, and platform keys. A request
-// without an API key scope (a session JWT) is passed with its context unchanged; E is still resolved
-// again by the caller. The key's grant is checked as the route's policy does (retrieve, or full access):
-// a key that lost it is credential_invalid, as Auth's 403 is under the integration envelope.
+// Recheck covers X-API-Key credentials (tenant keys with the tenant's principal mode, and platform keys) and
+// Bearer user JWTs. A request without an API key scope came through Auth's Bearer channel, the only other
+// one that reaches these routes: it must carry the web user principal Auth binds there, and is rechecked
+// by middleware.Agent24RecheckBearer; its context is returned unchanged, as E for it depends only on the
+// caller tenant. The key's grant is checked as the route's policy does (retrieve, or full access): a key
+// that lost it is credential_invalid, as Auth's 403 is under the integration envelope.
 func (r agent24DefaultRechecker) Recheck(ctx context.Context, header http.Header) (context.Context, string, error) {
 	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
 	if !ok {
-		return ctx, "", nil
+		return r.recheckBearer(ctx, header)
 	}
 	if r.tenants == nil || r.keys == nil {
 		return ctx, "", errAgent24RecheckUnwired
@@ -81,4 +91,20 @@ func (r agent24DefaultRechecker) Recheck(ctx context.Context, header http.Header
 		return ctx, "credential_invalid", nil
 	}
 	return types.WithTenantAPIKeyScope(ctx, fresh), "", nil
+}
+
+func (r agent24DefaultRechecker) recheckBearer(ctx context.Context, header http.Header) (context.Context, string, error) {
+	if r.users == nil || r.members == nil || r.tenants == nil {
+		return ctx, "", errAgent24RecheckUnwired
+	}
+	p, ok := types.PrincipalFromContext(ctx)
+	if !ok || p.Type != types.PrincipalWebUser || p.ID == "" {
+		return ctx, "credential_invalid", nil
+	}
+	entry := middleware.Agent24RecheckBearerEntry{UserID: p.ID, TenantID: types.CallerFromContext(ctx).TenantID}
+	res, err := middleware.Agent24RecheckBearer(ctx, r.users, r.members, r.tenants, r.cfg, header, entry)
+	if err != nil {
+		return ctx, "", err
+	}
+	return ctx, res.Reason, nil
 }

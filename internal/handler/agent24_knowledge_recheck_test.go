@@ -283,11 +283,11 @@ func TestAgent24RecheckNarrowsAudit(t *testing.T) {
 func TestNewAgent24Rechecker(t *testing.T) {
 	store := &agent24RecheckList{}
 	t.Setenv(Agent24KnowledgeModeEnv, Agent24KnowledgeModeStandalone)
-	standalone := newAgent24Rechecker(nil, nil, store)
+	standalone := newAgent24Rechecker(nil, nil, store, nil, nil, nil)
 	require.Nil(t, standalone.revocations)
 
 	t.Setenv(Agent24KnowledgeModeEnv, Agent24KnowledgeModeIntegration)
-	integration := newAgent24Rechecker(nil, nil, store)
+	integration := newAgent24Rechecker(nil, nil, store, nil, nil, nil)
 	if integration.revocations != store {
 		t.Fatalf("revocations = %#v, want the store passed in", integration.revocations)
 	}

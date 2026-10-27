@@ -130,8 +130,8 @@ func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 			assert.Equal(t, tc.want, BuildAgent24KnowledgeCapability().SupportedOperations)
 			declared := len(tc.want) > 0
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil)
-			read := NewAgent24KnowledgeReadHandler(nil, nil, nil, nil, nil)
+			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			read := NewAgent24KnowledgeReadHandler(nil, nil, nil, nil, nil, nil, nil, nil)
 			assert.Equal(t, []bool{!declared, declared, declared},
 				[]bool{ready.keyMissing, search.key != nil, read.key != nil})
 		})

@@ -311,7 +311,7 @@ func TestAgent24KnowledgeReadKeyAgreement(t *testing.T) {
 			agent24SetTagKey(t, tc.env)
 			ops := BuildAgent24KnowledgeCapability().SupportedOperations
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			read := NewAgent24KnowledgeReadHandler(nil, nil, nil, nil, nil)
+			read := NewAgent24KnowledgeReadHandler(nil, nil, nil, nil, nil, nil, nil, nil)
 			assert.Equal(t, []bool{tc.enabled, !tc.enabled, tc.enabled},
 				[]bool{slices.Contains(ops, "read"), ready.keyMissing, read.key != nil})
 

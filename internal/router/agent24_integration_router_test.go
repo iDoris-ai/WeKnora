@@ -756,7 +756,7 @@ func TestAgent24IntegrationRecheckRevokedInFlight(t *testing.T) {
 	tenants := agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}}
 	audit := &agent24KnowledgeAuditStub{}
 	search := handler.NewAgent24KnowledgeSearchHandler(
-		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, keys, nil,
+		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, keys, nil, nil, nil, nil,
 	)
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
