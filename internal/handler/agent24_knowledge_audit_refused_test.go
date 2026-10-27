@@ -212,9 +212,10 @@ func TestAgent24KnowledgeAuditDefaultRefusedKeyBurst(t *testing.T) {
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", nil))
 		require.Equal(t, http.StatusUnauthorized, w.Code)
 	}
-	refilled := int(time.Since(started) / agent24AuditRefusedKeyEvery)
-	require.GreaterOrEqual(t, len(stub.entries), agent24AuditRefusedKeyBurst)
-	require.LessOrEqual(t, len(stub.entries), agent24AuditRefusedKeyBurst+refilled)
+	// The decided burst is 10 and the refill one row per 10 s; a slow run may earn a row per 10 s it took.
+	refilled := int(time.Since(started) / (10 * time.Second))
+	require.GreaterOrEqual(t, len(stub.entries), 10)
+	require.LessOrEqual(t, len(stub.entries), 10+refilled)
 }
 
 // An anonymous row goes to the anonymous bucket only, even when a refused key's rejection is on the context.
