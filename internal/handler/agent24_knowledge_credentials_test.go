@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -184,8 +186,12 @@ func TestAgent24IntegrationCredentialGateRevocation(t *testing.T) {
 		require.Equal(t, []agent24RevocationCall{{tenantID: tenantID, jti: jti}}, stub.calls)
 	})
 	t.Run("list error", func(t *testing.T) {
+		logs := agent24CaptureCredentialLogs(t)
 		stub := &agent24RevocationStub{err: errors.New("db down")}
 		code, called, body := serve(stub, ready, jti, signed, true)
+		require.Contains(t, logs.String(), "error_len=7 error_type=*errors.errorString")
+		require.NotContains(t, logs.String(), "db down")
+		require.NotContains(t, logs.String(), jti)
 		require.False(t, called)
 		require.Equal(t, http.StatusInternalServerError, code)
 		e := body["error"].(map[string]any)
@@ -193,7 +199,10 @@ func TestAgent24IntegrationCredentialGateRevocation(t *testing.T) {
 		require.Equal(t, []agent24RevocationCall{{tenantID: tenantID, jti: jti}}, stub.calls)
 	})
 	t.Run("nil store with jti", func(t *testing.T) {
+		logs := agent24CaptureCredentialLogs(t)
 		code, called, body := serve(nil, ready, jti, signed, true)
+		require.Contains(t, logs.String(), "store=unwired")
+		require.NotContains(t, logs.String(), "error_type")
 		require.False(t, called)
 		require.Equal(t, http.StatusInternalServerError, code)
 		e := body["error"].(map[string]any)
@@ -208,4 +217,13 @@ func TestAgent24IntegrationCredentialGateRevocation(t *testing.T) {
 		require.Equal(t, http.StatusOK, code)
 		require.Equal(t, true, body["ok"])
 	})
+}
+
+// agent24CaptureCredentialLogs sends the logger to a buffer for one test.
+func agent24CaptureCredentialLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(logger.ConfigureFromEnv)
+	return &buf
 }
