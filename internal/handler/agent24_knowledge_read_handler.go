@@ -24,6 +24,8 @@ type Agent24KnowledgeReadHandler struct {
 	scope   agent24ScopeResolver
 	reads   agent24ReadReader
 	recheck agent24CredentialRechecker
+	// judge is agent24JudgeRead when nil; a test sets it to end the request while the judgement runs.
+	judge func(key []byte, req agent24ReadRequest, snap agent24ReadSnapshot) (agent24ReadPage, *agent24KnowledgeError)
 }
 
 // NewAgent24KnowledgeReadHandler builds the handler with the default dependencies; the key is the
@@ -107,7 +109,11 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 	// The judgement is written only after the recheck: a stale answer carries the current revisions (R4.5),
 	// which a credential that no longer stands, or a document whose KB left E, must not see (R7.6). The
 	// recheck stays the last step before writing, so its deadline check covers the judgement too.
-	page, judged := agent24JudgeRead(h.key, req, snap)
+	judge := h.judge
+	if judge == nil {
+		judge = agent24JudgeRead
+	}
+	page, judged := judge(h.key, req, snap)
 	newScope, kerr, gone := agent24RecheckScope(ctx, h.recheck, h.scope, c.Request.Header, req.KBIDs, scope)
 	if gone {
 		agent24NoteCancelled(c, echo, scope)

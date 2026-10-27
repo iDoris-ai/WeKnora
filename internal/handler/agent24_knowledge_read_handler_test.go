@@ -380,6 +380,19 @@ func TestAgent24KnowledgeReadRecheck(t *testing.T) {
 		agent24RequireErrorCode(t, w.Body.Bytes(), "timeout", "")
 		assert.NotContains(t, w.Body.String(), "current_content_tag")
 	})
+	t.Run("deadline passed while the read was judged", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.judge = func(key []byte, req agent24ReadRequest, snap agent24ReadSnapshot) (
+			agent24ReadPage, *agent24KnowledgeError,
+		) {
+			time.Sleep(50 * time.Millisecond)
+			return agent24JudgeRead(key, req, snap)
+		}
+		w := e.run(agent24TenantCtx(), t, agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`,
+			`"knowledge_id":"doc-1"`, `"deadline_ms":30`))
+		require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "timeout", "")
+	})
 	t.Run("stale inside the new scope", func(t *testing.T) {
 		e := newAgent24ReadEnv()
 		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
