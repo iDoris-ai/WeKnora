@@ -36,8 +36,10 @@ func TestAgent24IntegrationModeNewRouter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+	// AuditLogHandler is set so the audit reads (upstream and A24-KB-19) are among the routes checked.
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		AuditLogHandler: handler.NewAuditLogHandler(nil),
 	})
 	checked := 0
 	for _, rt := range r.Routes() {
@@ -604,6 +606,19 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_expired", false)
 		require.NotContains(t, w.Body.String(), "invalid API key")
+	})
+	t.Run("revoked platform key", func(t *testing.T) {
+		// Only a tenant key with a tenant notes a rejection: a revoked platform key stays credential_invalid.
+		platformKey := &types.TenantAPIKey{ID: 8, ScopeType: types.APIKeyScopePlatform}
+		w := serve(agent24UnusableKeySvc{key: platformKey, revoked: true}, plain, "")
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
+	})
+	t.Run("revoked key without a tenant", func(t *testing.T) {
+		orphan := &types.TenantAPIKey{ID: 9, ScopeType: types.APIKeyScopeTenant}
+		w := serve(agent24UnusableKeySvc{key: orphan, revoked: true}, plain, "")
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
 	t.Run("missing key", func(t *testing.T) {
 		w := serve(agent24MissingKeySvc{}, plain, "", nil)
