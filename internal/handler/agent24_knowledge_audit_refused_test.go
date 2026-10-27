@@ -4,9 +4,12 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -234,6 +237,38 @@ func TestAgent24KnowledgeAuditAnonymousRowSkipsRefusedKeyBucket(t *testing.T) {
 	}
 	require.Len(t, stub.entries, 3)
 	require.Empty(t, refused.buckets)
+}
+
+// Concurrent admits of one key share its bucket: exactly the burst is admitted, every other call is counted,
+// and the next admitted row after a refill reports them all. Other keys admitted at the same time each get a
+// bucket of their own.
+func TestAgent24RefusedKeyAuditLimiterConcurrent(t *testing.T) {
+	refused, clock := newAgent24TestRefusedLimiter(time.Hour, 5, 64)
+	const calls = 50
+	var admitted, others atomic.Int64
+	var wg sync.WaitGroup
+	for i := range calls {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if ok, _ := refused.admit("key:1"); ok {
+				admitted.Add(1)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if ok, _ := refused.admit(fmt.Sprintf("key:%d", 100+i)); ok {
+				others.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, int64(5), admitted.Load())
+	require.Equal(t, int64(calls), others.Load())
+	clock.t = clock.t.Add(time.Hour)
+	ok, n := refused.admit("key:1")
+	require.True(t, ok)
+	require.Equal(t, int64(calls-5), n)
 }
 
 // Authenticated rows are not limited by the refused-key buckets.
