@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,56 @@ func TestEnsureAgent24CredentialRevocationTable(t *testing.T) {
 	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
 	require.True(t, db.Migrator().HasTable(&types.Agent24CredentialRevocation{}))
 	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
+}
+
+// agent24RevocationCreateHook runs fn just before the CREATE TABLE for agent24_credential_revocations is
+// executed, standing in for what a concurrent replica does between the first HasTable and CreateTable.
+func agent24RevocationCreateHook(t *testing.T, db *gorm.DB, fn func(tx *gorm.DB)) {
+	t.Helper()
+	require.NoError(t, db.Callback().Raw().Before("gorm:raw").Register("test:agent24_revocation_create",
+		func(tx *gorm.DB) {
+			sql := tx.Statement.SQL.String()
+			if strings.HasPrefix(sql, "CREATE TABLE") && strings.Contains(sql, "agent24_credential_revocations") {
+				fn(tx)
+			}
+		}))
+}
+
+func TestEnsureAgent24CredentialRevocationTableLostRace(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	raced := false
+	agent24RevocationCreateHook(t, db, func(tx *gorm.DB) {
+		if raced {
+			return
+		}
+		raced = true
+		_, err := tx.Statement.ConnPool.ExecContext(tx.Statement.Context, tx.Statement.SQL.String(),
+			tx.Statement.Vars...)
+		require.NoError(t, err)
+	})
+
+	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
+	require.True(t, raced)
+	require.True(t, db.Migrator().HasTable(&types.Agent24CredentialRevocation{}))
+}
+
+func TestEnsureAgent24CredentialRevocationTableCreateFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	agent24RevocationCreateHook(t, db, func(tx *gorm.DB) { _ = tx.AddError(errors.New("create refused")) })
+
+	err = EnsureAgent24CredentialRevocationTable(db)
+	require.ErrorContains(t, err, "create refused")
+	require.False(t, db.Migrator().HasTable(&types.Agent24CredentialRevocation{}))
 }
 
 func TestAgent24CredentialRevocationRevokeAndIsRevoked(t *testing.T) {
