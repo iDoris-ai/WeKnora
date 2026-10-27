@@ -14,12 +14,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// Agent24RecheckEntry is what Auth established at entry for an X-API-Key request: the key (and whether
-// it is a platform key), the request's tenant, that tenant's principal mode, the bound principal and the
-// signed_token jti ("" for none).
+// Agent24RecheckEntry is what Auth established at entry for an X-API-Key request: the key, the request's
+// tenant, that tenant's principal mode, the bound principal and the signed_token jti ("" for none).
 type Agent24RecheckEntry struct {
 	KeyID     uint64
-	Platform  bool
 	TenantID  uint64
 	Mode      types.APIPrincipalMode
 	Principal types.Principal
@@ -81,8 +79,9 @@ func Agent24RecheckAPIKey(
 	case err != nil:
 		return Agent24RecheckResult{}, err
 	}
-	if key == nil || key.ID != entry.KeyID || key.IsPlatform() != entry.Platform ||
-		(!key.IsPlatform() && key.TenantIDValue() != entry.TenantID) {
+	// A key that turned from tenant to platform (or back) fails the principal comparison below: the two
+	// kinds bind different principal types.
+	if key == nil || key.ID != entry.KeyID || (!key.IsPlatform() && key.TenantIDValue() != entry.TenantID) {
 		return invalid, nil
 	}
 	tenant, err := tenants.GetTenantByID(ctx, entry.TenantID)

@@ -7,10 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -173,6 +177,94 @@ func TestAgent24DefaultRechecker(t *testing.T) {
 			KnowledgeBaseIDs: types.StringArray{"kb-new"},
 		}).Normalize(), fresh)
 	})
+	t.Run("signed_token entry", func(t *testing.T) {
+		// The entry's mode, principal and jti come from the context Auth left: a signed_token request
+		// passes only when all three are carried over.
+		const secret = "test-secret"
+		signed := &types.Tenant{ID: tid, APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode: types.APIPrincipalModeSignedToken, HMACSecret: secret,
+		}}
+		token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub": "external-u1", "tenant_id": float64(tid), "aud": "weknora",
+			"exp": time.Now().Add(time.Minute).Unix(), "jti": "jti-1",
+		}).SignedString([]byte(secret))
+		require.NoError(t, err)
+		sctx := context.WithValue(ctx, types.TenantInfoContextKey, signed)
+		sctx = types.WithPrincipal(sctx, types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:external-u1"})
+		sctx = types.WithAgent24TokenJTI(sctx, "jti-1")
+		header := agent24RecheckHeader()
+		header.Set("X-External-User-Token", token)
+		r := agent24DefaultRechecker{
+			tenants: agent24RecheckTenantStub{tenant: signed},
+			keys: agent24RecheckKeyStub{key: &types.TenantAPIKey{
+				ID: 4, ScopeType: types.APIKeyScopeTenant, TenantID: &tid,
+				Capabilities: types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+			}},
+		}
+		_, reason, err := r.Recheck(sctx, header)
+		require.NoError(t, err)
+		require.Empty(t, reason)
+	})
+	t.Run("platform key full access is not a grant", func(t *testing.T) {
+		// Auth drops FullAccess for platform keys; the recheck must too, so retrieve is still required.
+		pctx := types.WithCaller(context.Background(), types.Caller{TenantID: tid})
+		pctx = types.WithPrincipal(pctx, types.Principal{Type: types.PrincipalAPIPlatform, ID: "5"})
+		pctx = types.WithTenantAPIKeyScope(pctx, types.TenantAPIKeyScope{
+			KeyID: 5, ScopeType: types.APIKeyScopePlatform,
+			Capabilities: types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+		})
+		r := agent24DefaultRechecker{tenants: matching, keys: agent24RecheckKeyStub{key: &types.TenantAPIKey{
+			ID: 5, ScopeType: types.APIKeyScopePlatform, FullAccess: true,
+		}}}
+		_, reason, err := r.Recheck(pctx, agent24RecheckHeader())
+		require.NoError(t, err)
+		require.Equal(t, "credential_invalid", reason)
+	})
+}
+
+// agent24RunWithContext runs h like the envs' run, and returns the gin context too, so a test can read
+// the audit facts the handler noted.
+func agent24RunWithContext(
+	ctx context.Context, body string, h func(*gin.Context),
+) (*httptest.ResponseRecorder, *gin.Context) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(body))
+	h(c)
+	return w, c
+}
+
+func agent24NotedScope(t *testing.T, c *gin.Context) []string {
+	t.Helper()
+	v, ok := c.Get(agent24AuditFactsKey)
+	require.True(t, ok)
+	return v.(*agent24AuditFacts).EffectiveScope
+}
+
+func TestAgent24RecheckNarrowsAudit(t *testing.T) {
+	t.Run("search", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
+		w, c := agent24RunWithContext(agent24TenantCtx(), agent24SearchBody(`"b","a"`, agent24Budget), e.h.Search)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, []string{"a"}, agent24NotedScope(t, c))
+	})
+	t.Run("read keeps the document", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
+		body := agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`, `"knowledge_id":"doc-1"`)
+		w, c := agent24RunWithContext(agent24TenantCtx(), body, e.h.Read)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var got struct {
+			EffectiveScope struct {
+				KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+			} `json:"effective_scope"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		require.Equal(t, []string{"a"}, got.EffectiveScope.KnowledgeBaseIDs)
+		require.Equal(t, []string{"a"}, agent24NotedScope(t, c))
+	})
 }
 
 func TestNewAgent24Rechecker(t *testing.T) {
@@ -200,6 +292,15 @@ func TestAgent24RecheckScope(t *testing.T) {
 		require.Nil(t, got)
 		require.NotNil(t, kerr)
 		require.Equal(t, agent24CodeInternal, kerr.Code)
+	})
+	t.Run("recheck error after the caller left", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		got, kerr, gone := agent24RecheckScope(ctx, agent24FixedRecheck{err: errors.New("boom")},
+			okResolver, header, ids, scope)
+		require.True(t, gone)
+		require.Nil(t, got)
+		require.Nil(t, kerr)
 	})
 	t.Run("recheck error", func(t *testing.T) {
 		got, kerr, gone := agent24RecheckScope(context.Background(), agent24FixedRecheck{err: errors.New("boom")},

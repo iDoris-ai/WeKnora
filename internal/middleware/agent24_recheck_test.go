@@ -108,7 +108,7 @@ func TestAgent24RecheckAPIKey(t *testing.T) {
 		KeyID: 5, ScopeType: types.APIKeyScopePlatform, Capabilities: types.StringArray{"retrieve"},
 	}
 	platformEntry := Agent24RecheckEntry{
-		KeyID: 5, Platform: true, TenantID: tenantID,
+		KeyID: 5, TenantID: tenantID,
 		Principal: types.Principal{Type: types.PrincipalAPIPlatform, ID: "5"},
 	}
 	otherTenant := uint64(8)
@@ -212,7 +212,7 @@ func TestAgent24RecheckAPIKey(t *testing.T) {
 			header: header(""), tenants: agent24RecheckTenants{tenant: plainTenant},
 			keys: agent24RecheckKeys{key: platformKey},
 			entry: Agent24RecheckEntry{
-				KeyID: 5, Platform: true, TenantID: tenantID,
+				KeyID: 5, TenantID: tenantID,
 				Principal: types.Principal{Type: types.PrincipalAPIPlatform, ID: "6"},
 			},
 			wantReason: "credential_invalid",
@@ -224,6 +224,33 @@ func TestAgent24RecheckAPIKey(t *testing.T) {
 				ID: 5, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID,
 			}},
 			entry: platformEntry, wantReason: "credential_invalid",
+		},
+		{
+			name:   "revoked key is another key",
+			header: header(""), tenants: agent24RecheckTenants{tenant: plainTenant},
+			keys: agent24RecheckKeys{err: &apprepo.APIKeyUnusableError{
+				Key: &types.TenantAPIKey{ID: 9, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID}, Revoked: true,
+			}},
+			entry: tenantEntry, wantReason: "credential_invalid",
+		},
+		{
+			// Without a direct header the direct mode falls back to the tenant principal, the entry's: only
+			// the mode comparison refuses it, as the integration gate refuses direct mode on the next request.
+			name:   "mode changed from tenant to direct",
+			header: header(""),
+			tenants: agent24RecheckTenants{tenant: &types.Tenant{
+				ID: tenantID, APIPrincipalConfig: &types.APIPrincipalConfig{Mode: types.APIPrincipalModeDirect},
+			}},
+			keys: agent24RecheckKeys{key: passKey}, entry: tenantEntry, wantReason: "credential_invalid",
+		},
+		{
+			// An entry without a bound principal or jti must not match the empty identity a failed
+			// resolution returns.
+			name:    "resolution fails against an empty entry identity",
+			header:  header(signedExternalUserToken(t, "other-secret", claims("external-u1", "jti-1", validAt))),
+			tenants: agent24RecheckTenants{tenant: signedTenant}, keys: agent24RecheckKeys{key: passKey},
+			entry:      Agent24RecheckEntry{KeyID: 4, TenantID: tenantID, Mode: types.APIPrincipalModeSignedToken},
+			wantReason: "credential_invalid",
 		},
 		{
 			name:   "key tenant differs",

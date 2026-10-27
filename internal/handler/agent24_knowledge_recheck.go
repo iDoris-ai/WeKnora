@@ -57,7 +57,6 @@ func (r agent24DefaultRechecker) Recheck(ctx context.Context, header http.Header
 	}
 	entry := middleware.Agent24RecheckEntry{
 		KeyID:    scope.KeyID,
-		Platform: scope.IsPlatform(),
 		TenantID: types.CallerFromContext(ctx).TenantID,
 	}
 	if t, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); t != nil {
