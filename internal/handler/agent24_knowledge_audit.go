@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -47,9 +48,16 @@ const (
 	// Anonymous rows (R10.2) come from requests without a credential, which anyone can send. They share one
 	// process-wide token bucket: a burst of agent24AuditAnonymousBurst, then one row per
 	// agent24AuditAnonymousEvery. The bucket belongs to the middleware, so each server process has its own.
-	// Authenticated rows are not limited.
+	// Authenticated rows are not limited, except agent24AuditRefusedKeyOf's.
 	agent24AuditAnonymousBurst = 60
 	agent24AuditAnonymousEvery = time.Second
+	// Rows of a tenant key Auth refused as revoked or expired (agent24AuditRefusedKeyOf) anyone holding its
+	// text can send forever: revoking is final and the key row stays. Each such key has its own token bucket,
+	// a burst of agent24AuditRefusedKeyBurst, then one row per agent24AuditRefusedKeyEvery, and a process
+	// tracks at most agent24AuditRefusedKeyBuckets keys (F3 on #119, WeKnora#41).
+	agent24AuditRefusedKeyBurst   = 10
+	agent24AuditRefusedKeyEvery   = 10 * time.Second
+	agent24AuditRefusedKeyBuckets = 1024
 
 	// agent24AuditFactsKey is the gin-context key for *agent24AuditFacts, used only by agent24NoteAudit
 	// (handlers record through it) and agent24KnowledgeAuditEntry (the middleware reads the facts back).
@@ -96,8 +104,9 @@ type agent24AuditDetails struct {
 	Outcome        string                 `json:"outcome"`
 	Reason         string                 `json:"reason,omitempty"`
 	Metering       agent24AuditMetering   `json:"metering"`
-	// Suppressed is set on an anonymous row only: how many anonymous rows the token bucket dropped since the
-	// previous anonymous row was written.
+	// Suppressed is set on an anonymous row, or on a refused key's row (agent24AuditRefusedKeyOf): how many
+	// rows of the same kind (anonymous, or that key's) the token bucket dropped since the previous one was
+	// written.
 	Suppressed int64 `json:"suppressed,omitempty"`
 }
 
@@ -119,6 +128,76 @@ func (l *agent24AnonymousAuditLimiter) admit() (bool, int64) {
 		return false, 0
 	}
 	return true, l.suppressed.Swap(0)
+}
+
+// agent24RefusedKeyAuditLimiter holds one token bucket per refused key, with the count each has dropped. A full
+// table makes room only by removing a bucket that has refilled and owes no count, which loses nothing: a new
+// bucket starts the same way. When none can go, the row is written without a limit.
+type agent24RefusedKeyAuditLimiter struct {
+	mu      sync.Mutex
+	every   time.Duration
+	burst   int
+	max     int
+	now     func() time.Time
+	buckets map[string]*agent24RefusedKeyBucket
+}
+
+type agent24RefusedKeyBucket struct {
+	bucket     *rate.Limiter
+	suppressed int64
+}
+
+func newAgent24RefusedKeyAuditLimiter(every time.Duration, burst, size int) *agent24RefusedKeyAuditLimiter {
+	return &agent24RefusedKeyAuditLimiter{
+		every: every, burst: burst, max: size, now: time.Now, buckets: map[string]*agent24RefusedKeyBucket{},
+	}
+}
+
+// admit reports whether a row of credential may be written and, when it may, how many of its rows were dropped
+// before it. The count is taken when the row is admitted; giveBack returns it when the write fails.
+func (l *agent24RefusedKeyAuditLimiter) admit(credential string) (bool, int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	b, ok := l.buckets[credential]
+	if !ok {
+		if len(l.buckets) >= l.max && !l.removeIdle(now) {
+			return true, 0
+		}
+		b = &agent24RefusedKeyBucket{bucket: rate.NewLimiter(rate.Every(l.every), l.burst)}
+		l.buckets[credential] = b
+	}
+	if !b.bucket.AllowN(now, 1) {
+		b.suppressed++
+		return false, 0
+	}
+	n := b.suppressed
+	b.suppressed = 0
+	return true, n
+}
+
+// removeIdle removes one bucket that is full and owes no count, and reports whether it found one.
+func (l *agent24RefusedKeyAuditLimiter) removeIdle(now time.Time) bool {
+	for credential, b := range l.buckets {
+		if b.suppressed == 0 && b.bucket.TokensAt(now) >= float64(l.burst) {
+			delete(l.buckets, credential)
+			return true
+		}
+	}
+	return false
+}
+
+// giveBack adds n back to credential's count after its row failed to write. A bucket removed meanwhile is
+// created again to hold it, even past the table's size: the count is not dropped.
+func (l *agent24RefusedKeyAuditLimiter) giveBack(credential string, n int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[credential]
+	if !ok {
+		b = &agent24RefusedKeyBucket{bucket: rate.NewLimiter(rate.Every(l.every), l.burst)}
+		l.buckets[credential] = b
+	}
+	b.suppressed += n
 }
 
 // agent24NoteAudit creates the request's facts on first use, then lets f update them.
@@ -201,7 +280,8 @@ func agent24ReadAuditResource(knowledgeID string, rev agent24DocRevision, segs [
 }
 
 // Agent24KnowledgeAudit writes one audit row for the three knowledge endpoints; anonymous rows go through a
-// token bucket (see agent24AuditAnonymousBurst). A nil service, and every other request, is passed through.
+// token bucket (see agent24AuditAnonymousBurst), and a refused key's rows through that key's own (see
+// agent24AuditRefusedKeyBurst). A nil service, and every other request, is passed through.
 // Mount it outside Auth: the row is built after the handler chain, the response is flushed, and only then is
 // the row written, on a context that ignores client cancellation and ends after agent24AuditWriteTimeout;
 // Log's own error is ignored. Mount it outside Recovery too: a panic further down then reaches here as
@@ -209,10 +289,14 @@ func agent24ReadAuditResource(knowledgeID string, rev agent24DocRevision, segs [
 // here: the row is lost, the response already written is kept.
 func Agent24KnowledgeAudit(svc interfaces.AuditLogService) gin.HandlerFunc {
 	return agent24KnowledgeAudit(svc,
-		newAgent24AnonymousAuditLimiter(agent24AuditAnonymousEvery, agent24AuditAnonymousBurst))
+		newAgent24AnonymousAuditLimiter(agent24AuditAnonymousEvery, agent24AuditAnonymousBurst),
+		newAgent24RefusedKeyAuditLimiter(
+			agent24AuditRefusedKeyEvery, agent24AuditRefusedKeyBurst, agent24AuditRefusedKeyBuckets))
 }
 
-func agent24KnowledgeAudit(svc interfaces.AuditLogService, anonymous *agent24AnonymousAuditLimiter) gin.HandlerFunc {
+func agent24KnowledgeAudit(
+	svc interfaces.AuditLogService, anonymous *agent24AnonymousAuditLimiter, refused *agent24RefusedKeyAuditLimiter,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if svc == nil || !agent24KnowledgeAuditPath(c) {
 			c.Next()
@@ -220,12 +304,13 @@ func agent24KnowledgeAudit(svc interfaces.AuditLogService, anonymous *agent24Ano
 		}
 		started := time.Now()
 		c.Next()
-		agent24WriteKnowledgeAudit(c, svc, anonymous, started)
+		agent24WriteKnowledgeAudit(c, svc, anonymous, refused, started)
 	}
 }
 
 func agent24WriteKnowledgeAudit(
-	c *gin.Context, svc interfaces.AuditLogService, anonymous *agent24AnonymousAuditLimiter, started time.Time,
+	c *gin.Context, svc interfaces.AuditLogService, anonymous *agent24AnonymousAuditLimiter,
+	refused *agent24RefusedKeyAuditLimiter, started time.Time,
 ) {
 	base := context.WithoutCancel(c.Request.Context())
 	defer func() {
@@ -233,7 +318,7 @@ func agent24WriteKnowledgeAudit(
 			logger.Errorf(base, "agent24 knowledge audit: panic while writing the row: %s", logger.PanicValue(r))
 		}
 	}()
-	entry, suppressed := agent24KnowledgeAuditEntry(c, started, anonymous)
+	entry, giveBack := agent24KnowledgeAuditEntry(c, started, anonymous, refused)
 	if entry == nil {
 		return
 	}
@@ -242,10 +327,10 @@ func agent24WriteKnowledgeAudit(
 	// headers, and a client that stalls that body must not run the row's time out.
 	ctx, cancel := context.WithTimeout(base, agent24AuditWriteTimeout)
 	defer cancel()
-	if err := svc.Log(ctx, entry); err != nil && suppressed > 0 {
+	if err := svc.Log(ctx, entry); err != nil && giveBack != nil {
 		// The row may not have landed: the next one carries its count. When the store committed but the
 		// reply was lost, the count is reported twice; suppressed errs on the high side.
-		anonymous.suppressed.Add(suppressed)
+		giveBack()
 	}
 }
 
@@ -339,11 +424,22 @@ func agent24AuditAnonymous(outcome, reason string) bool {
 		(reason == "" || reason == "credential_missing" || reason == "credential_invalid")
 }
 
-// agent24KnowledgeAuditEntry builds the row and returns the suppressed count it carries, or returns nil when
-// the row is anonymous and the token bucket drops it.
+// agent24AuditRefusedKeyOf returns the credential ID of a tenant key Auth refused as revoked or expired. A
+// rejection without a jti is that key's: a signed_token rejection that agent24CredentialRejectionOf keeps
+// always has one.
+func agent24AuditRefusedKeyOf(c *gin.Context) (string, bool) {
+	r, ok := agent24CredentialRejectionOf(c)
+	if !ok || r.JTI != "" {
+		return "", false
+	}
+	return r.CredentialID, true
+}
+
+// agent24KnowledgeAuditEntry builds the row, or returns nil when a token bucket drops it. When the row carries
+// a suppressed count, giveBack returns the count to its bucket and is meant for a failed write.
 func agent24KnowledgeAuditEntry(
-	c *gin.Context, started time.Time, limiter *agent24AnonymousAuditLimiter,
-) (*types.AuditLog, int64) {
+	c *gin.Context, started time.Time, limiter *agent24AnonymousAuditLimiter, refused *agent24RefusedKeyAuditLimiter,
+) (entry *types.AuditLog, giveBack func()) {
 	var facts *agent24AuditFacts
 	if v, ok := c.Get(agent24AuditFactsKey); ok {
 		facts, _ = v.(*agent24AuditFacts)
@@ -362,10 +458,23 @@ func agent24KnowledgeAuditEntry(
 	}
 	anonymous := agent24AuditAnonymous(outcome, reason)
 	var suppressed int64
-	if anonymous && limiter != nil {
+	if anonymous {
+		if limiter != nil {
+			var ok bool
+			if ok, suppressed = limiter.admit(); !ok {
+				return nil, nil
+			}
+			if n := suppressed; n > 0 {
+				giveBack = func() { limiter.suppressed.Add(n) }
+			}
+		}
+	} else if credential, isRefused := agent24AuditRefusedKeyOf(c); isRefused && refused != nil {
 		var ok bool
-		if ok, suppressed = limiter.admit(); !ok {
-			return nil, 0
+		if ok, suppressed = refused.admit(credential); !ok {
+			return nil, nil
+		}
+		if n := suppressed; n > 0 {
+			giveBack = func() { refused.giveBack(credential, n) }
 		}
 	}
 	details := agent24AuditDetail(c, facts, outcome, reason, started, anonymous)
@@ -391,7 +500,7 @@ func agent24KnowledgeAuditEntry(
 		RequestMethod: c.Request.Method,
 		Outcome:       agent24AuditColumnOutcome(outcome),
 		Details:       types.JSON(raw),
-	}, suppressed
+	}, giveBack
 }
 
 // agent24AuditTenantColumn is the caller's tenant after authentication, otherwise 0 (the column is NOT NULL;

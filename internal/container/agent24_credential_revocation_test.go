@@ -99,6 +99,46 @@ func TestBuildContainerInvokesAgent24CredentialRevocations(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, found, "BuildContainer must invoke ensureAgent24CredentialRevocations once, unconditionally")
+	require.Equal(t, 1, agent24CountInvokes(build.Body, "ensureAgent24CredentialRevocations"),
+		"no other Invoke of ensureAgent24CredentialRevocations, in a block, defer, go or function literal")
+	require.False(t, agent24HasGoto(build.Body), "a goto in BuildContainer could jump over the call")
+}
+
+// agent24CountInvokes counts the calls X.Invoke(name) anywhere under n, function literals included.
+func agent24CountInvokes(n ast.Node, name string) int {
+	count := 0
+	ast.Inspect(n, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Invoke" {
+			return true
+		}
+		if arg, ok := call.Args[0].(*ast.Ident); ok && arg.Name == name {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
+// agent24HasGoto reports whether n holds a goto outside a function literal.
+func agent24HasGoto(n ast.Node) bool {
+	found := false
+	ast.Inspect(n, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.BranchStmt:
+			if n.Tok == token.GOTO {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 // agent24ReturnsEarly reports whether stmt holds a return of BuildContainer itself, that is, one outside a

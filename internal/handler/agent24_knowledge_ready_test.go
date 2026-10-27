@@ -935,7 +935,7 @@ func TestAgent24KnowledgeAuditRateLimitsAnonymousRows(t *testing.T) {
 	stub := &agent24AuditStub{}
 	limiter := newAgent24AnonymousAuditLimiter(time.Hour, 2)
 	r := gin.New()
-	r.Use(agent24KnowledgeAudit(stub, limiter))
+	r.Use(agent24KnowledgeAudit(stub, limiter, nil))
 	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
 		c.AbortWithStatus(http.StatusUnauthorized)
 	})
@@ -1005,7 +1005,7 @@ func TestAgent24KnowledgeAuditFailedWriteKeepsSuppressedCount(t *testing.T) {
 	stub := &agent24FlakyAudit{}
 	limiter := newAgent24AnonymousAuditLimiter(time.Hour, 1)
 	r := gin.New()
-	r.Use(agent24KnowledgeAudit(stub, limiter))
+	r.Use(agent24KnowledgeAudit(stub, limiter, nil))
 	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
 		c.AbortWithStatus(http.StatusUnauthorized)
 	})
