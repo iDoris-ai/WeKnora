@@ -48,6 +48,19 @@ func (s *agent24ScopeThen) Resolve(ctx context.Context, ids []string) ([]*types.
 	return s.then, nil
 }
 
+// agent24ResolveThen resolves through inner, then runs after: the caller leaving, or the deadline
+// passing, just as the recheck's last query answered.
+type agent24ResolveThen struct {
+	inner agent24ScopeResolver
+	after func()
+}
+
+func (s agent24ResolveThen) Resolve(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+	kbs, err := s.inner.Resolve(ctx, ids)
+	s.after()
+	return kbs, err
+}
+
 // agent24RecheckKeyStub embeds TenantAPIKeyService and answers only AuthenticateAPIKey.
 type agent24RecheckKeyStub struct {
 	interfaces.TenantAPIKeyService
@@ -301,6 +314,25 @@ func TestAgent24RecheckScope(t *testing.T) {
 		require.True(t, gone)
 		require.Nil(t, got)
 		require.Nil(t, kerr)
+	})
+	t.Run("caller left during a recheck that succeeded", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		got, kerr, gone := agent24RecheckScope(ctx, agent24FixedRecheck{},
+			agent24ResolveThen{inner: okResolver, after: cancel}, header, ids, scope)
+		require.True(t, gone)
+		require.Nil(t, got)
+		require.Nil(t, kerr)
+	})
+	t.Run("deadline passed during a recheck that succeeded", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		got, kerr, gone := agent24RecheckScope(ctx, agent24FixedRecheck{}, agent24ResolveThen{
+			inner: okResolver, after: func() { <-ctx.Done() },
+		}, header, ids, scope)
+		require.False(t, gone)
+		require.Nil(t, got)
+		require.NotNil(t, kerr)
+		require.Equal(t, agent24CodeTimeout, kerr.Code)
 	})
 	t.Run("recheck error", func(t *testing.T) {
 		got, kerr, gone := agent24RecheckScope(context.Background(), agent24FixedRecheck{err: errors.New("boom")},

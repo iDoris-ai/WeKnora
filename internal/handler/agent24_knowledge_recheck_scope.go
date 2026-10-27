@@ -34,6 +34,9 @@ func agent24RecheckScope(
 		return nil, agent24Unauthorized(reason), false
 	}
 	kbs, err := resolver.Resolve(rctx, ids)
+	if err == nil {
+		err = ctx.Err() // a recheck that answered as the caller left or the deadline passed
+	}
 	if err != nil {
 		e, gone := agent24StorageError(ctx, err)
 		return nil, e, gone
