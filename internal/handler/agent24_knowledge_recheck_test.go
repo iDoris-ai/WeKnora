@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -89,6 +92,35 @@ func (s agent24RecheckTenantStub) GetTenantByID(context.Context, uint64) (*types
 	return s.tenant, nil
 }
 
+// agent24BearerUserStub embeds UserService and answers only ValidateToken and GetUserByID.
+type agent24BearerUserStub struct {
+	interfaces.UserService
+	user        *types.User
+	jwtTenantID uint64
+	err         error
+}
+
+func (s agent24BearerUserStub) ValidateToken(context.Context, string) (*types.User, uint64, error) {
+	if s.err != nil {
+		return nil, 0, s.err
+	}
+	return s.user, s.jwtTenantID, nil
+}
+
+func (s agent24BearerUserStub) GetUserByID(context.Context, string) (*types.User, error) {
+	return s.user, nil
+}
+
+// agent24BearerMemberStub embeds TenantMemberService and answers only GetMembership.
+type agent24BearerMemberStub struct {
+	interfaces.TenantMemberService
+	member *types.TenantMember
+}
+
+func (s agent24BearerMemberStub) GetMembership(context.Context, string, uint64) (*types.TenantMember, error) {
+	return s.member, nil
+}
+
 // agent24RecheckList is a revocation store kept only so newAgent24Rechecker can hold it.
 type agent24RecheckList struct{}
 
@@ -139,15 +171,72 @@ func agent24RequireErrorCode(t *testing.T, body []byte, code, reason string) {
 
 func TestAgent24DefaultRechecker(t *testing.T) {
 	t.Run("no api key scope", func(t *testing.T) {
-		ctx := context.Background()
-		r := agent24DefaultRechecker{
-			tenants: agent24RecheckTenantStub{err: errors.New("called")},
-			keys:    agent24RecheckKeyStub{err: errors.New("called")},
+		user := &types.User{ID: "u1", TenantID: 7}
+		passUsers := agent24BearerUserStub{user: user, jwtTenantID: 7}
+		passMembers := agent24BearerMemberStub{member: &types.TenantMember{
+			UserID: "u1", TenantID: 7, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive,
+		}}
+		passTenants := agent24RecheckTenantStub{tenant: &types.Tenant{ID: 7}}
+		rbac := true
+		cfg := &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &rbac}}
+		header := http.Header{}
+		header.Set("Authorization", "Bearer tok")
+		wired := func(users interfaces.UserService, members interfaces.TenantMemberService) agent24DefaultRechecker {
+			return agent24DefaultRechecker{tenants: passTenants, users: users, members: members, cfg: cfg}
 		}
-		got, reason, err := r.Recheck(ctx, agent24RecheckHeader())
-		require.NoError(t, err)
-		require.Empty(t, reason)
-		require.True(t, got == ctx)
+		webCtx := types.WithCaller(context.Background(), types.Caller{TenantID: 7})
+		webCtx = types.WithPrincipal(webCtx, types.Principal{Type: types.PrincipalWebUser, ID: "u1"})
+
+		t.Run("users nil", func(t *testing.T) {
+			_, reason, err := wired(nil, passMembers).Recheck(context.Background(), header)
+			require.ErrorIs(t, err, errAgent24RecheckUnwired)
+			require.Empty(t, reason)
+		})
+		t.Run("members nil", func(t *testing.T) {
+			_, reason, err := wired(passUsers, nil).Recheck(context.Background(), header)
+			require.ErrorIs(t, err, errAgent24RecheckUnwired)
+			require.Empty(t, reason)
+		})
+		t.Run("no principal", func(t *testing.T) {
+			_, reason, err := wired(passUsers, passMembers).Recheck(context.Background(), header)
+			require.NoError(t, err)
+			require.Equal(t, "credential_invalid", reason)
+		})
+		t.Run("tenants nil", func(t *testing.T) {
+			r := agent24DefaultRechecker{users: passUsers, members: passMembers, cfg: cfg}
+			_, reason, err := r.Recheck(webCtx, header)
+			require.ErrorIs(t, err, errAgent24RecheckUnwired)
+			require.Empty(t, reason)
+		})
+		t.Run("api tenant principal", func(t *testing.T) {
+			// The id and the caller tenant match what the stubs would pass: only the type refuses.
+			ctx := types.WithCaller(context.Background(), types.Caller{TenantID: 7})
+			ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalAPITenant, ID: "u1"})
+			_, reason, err := wired(passUsers, passMembers).Recheck(ctx, header)
+			require.NoError(t, err)
+			require.Equal(t, "credential_invalid", reason)
+		})
+		t.Run("web user passes", func(t *testing.T) {
+			got, reason, err := wired(passUsers, passMembers).Recheck(webCtx, header)
+			require.NoError(t, err)
+			require.Empty(t, reason)
+			require.Equal(t, webCtx, got)
+		})
+		t.Run("token not found", func(t *testing.T) {
+			users := passUsers
+			users.err = apprepo.ErrTokenNotFound
+			_, reason, err := wired(users, passMembers).Recheck(webCtx, header)
+			require.NoError(t, err)
+			require.Equal(t, "credential_invalid", reason)
+		})
+		t.Run("token lookup error", func(t *testing.T) {
+			dbDown := errors.New("db down")
+			users := passUsers
+			users.err = fmt.Errorf("look up token: %w", dbDown)
+			_, reason, err := wired(users, passMembers).Recheck(webCtx, header)
+			require.ErrorIs(t, err, dbDown)
+			require.Empty(t, reason)
+		})
 	})
 
 	tid := uint64(7)

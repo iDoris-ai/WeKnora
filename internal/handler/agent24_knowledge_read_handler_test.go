@@ -396,9 +396,10 @@ func TestAgent24KnowledgeReadRecheck(t *testing.T) {
 	t.Run("stale inside the new scope", func(t *testing.T) {
 		e := newAgent24ReadEnv()
 		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
-		w := e.run(agent24TenantCtx(), t, stale)
+		w, c := agent24RunWithContext(agent24TenantCtx(), stale, e.h.Read)
 		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 		assert.Contains(t, w.Body.String(), "current_content_tag")
+		assert.Equal(t, []string{"a"}, agent24NotedScope(t, c)) // the audit row carries the new E
 	})
 	t.Run("credential expired", func(t *testing.T) {
 		e := newAgent24ReadEnv()
