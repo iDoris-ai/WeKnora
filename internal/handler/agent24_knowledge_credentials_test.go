@@ -219,11 +219,16 @@ func TestAgent24IntegrationCredentialGateRevocation(t *testing.T) {
 	})
 }
 
-// agent24CaptureCredentialLogs sends the logger to a buffer for one test.
+// agent24CaptureCredentialLogs sends the logger to a buffer for one test, at info level and in the default
+// format, so LOG_LEVEL or LOG_FORMAT set for the test run cannot hide the warning.
 func agent24CaptureCredentialLogs(t *testing.T) *bytes.Buffer {
 	t.Helper()
+	// Registered before t.Setenv, so it runs after the variables are restored.
+	t.Cleanup(logger.ConfigureFromEnv)
+	t.Setenv("LOG_LEVEL", "info")
+	t.Setenv("LOG_FORMAT", "")
+	logger.ConfigureFromEnv()
 	var buf bytes.Buffer
 	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
 	return &buf
 }
