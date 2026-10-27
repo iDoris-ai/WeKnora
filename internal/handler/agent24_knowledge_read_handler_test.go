@@ -65,6 +65,9 @@ func (f *fakeAgent24Reads) Snapshot(ctx context.Context, tenantID uint64, kbIDs 
 			snap.Chunks[i].Content = ""
 		}
 	}
+	if snap.Found {
+		snap.KnowledgeBaseID = f.kbOf[knowledgeID]
+	}
 	return snap, nil
 }
 
@@ -98,7 +101,9 @@ func newAgent24ReadEnv() *agent24ReadEnv {
 		kbOf: map[string]string{"doc-1": "a", "doc-2": "a", "doc-z": "z"},
 	}
 	return &agent24ReadEnv{
-		h:     &Agent24KnowledgeReadHandler{key: agent24TestKey, scope: scope, reads: reads},
+		h: &Agent24KnowledgeReadHandler{
+			key: agent24TestKey, scope: scope, reads: reads, recheck: agent24FixedRecheck{},
+		},
 		scope: scope, reads: reads,
 	}
 }
@@ -306,7 +311,7 @@ func TestAgent24KnowledgeReadKeyAgreement(t *testing.T) {
 			agent24SetTagKey(t, tc.env)
 			ops := BuildAgent24KnowledgeCapability().SupportedOperations
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			read := NewAgent24KnowledgeReadHandler(nil, nil)
+			read := NewAgent24KnowledgeReadHandler(nil, nil, nil, nil, nil)
 			assert.Equal(t, []bool{tc.enabled, !tc.enabled, tc.enabled},
 				[]bool{slices.Contains(ops, "read"), ready.keyMissing, read.key != nil})
 
@@ -322,4 +327,36 @@ func TestAgent24KnowledgeReadKeyAgreement(t *testing.T) {
 			assert.Contains(t, w.Body.String(), want)
 		})
 	}
+}
+
+func TestAgent24KnowledgeReadRecheck(t *testing.T) {
+	body := agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`, `"knowledge_id":"doc-1"`)
+
+	t.Run("document outside the new scope", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		wrap := &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "b"}}}
+		e.h.scope = wrap
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, 2, wrap.calls)
+		require.Len(t, e.reads.calls, 1)
+		assert.Equal(t, []string{"a", "b"}, e.reads.calls[0].kbIDs)
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "not_found", "")
+	})
+	t.Run("scope empty", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		wrap := &agent24ScopeThen{inner: e.scope}
+		e.h.scope = wrap
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, 2, wrap.calls)
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "forbidden", "empty_scope")
+	})
+	t.Run("credential expired", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.recheck = agent24FixedRecheck{reason: "credential_expired"}
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "unauthorized", "credential_expired")
+	})
 }

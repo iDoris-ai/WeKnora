@@ -56,12 +56,13 @@ type agent24Searcher interface {
 
 // Agent24KnowledgeSearchHandler serves POST /agent24/knowledge/search.
 type Agent24KnowledgeSearchHandler struct {
-	key    []byte // nil: search is disabled
-	probe  Agent24KnowledgeReadyProbe
-	scope  agent24ScopeResolver
-	index  agent24IndexReader
-	search agent24Searcher
-	hits   agent24HitReader
+	key     []byte // nil: search is disabled
+	probe   Agent24KnowledgeReadyProbe
+	scope   agent24ScopeResolver
+	index   agent24IndexReader
+	search  agent24Searcher
+	hits    agent24HitReader
+	recheck agent24CredentialRechecker
 }
 
 // NewAgent24KnowledgeSearchHandler builds the handler with the default dependencies; the key is taken once,
@@ -69,14 +70,17 @@ type Agent24KnowledgeSearchHandler struct {
 func NewAgent24KnowledgeSearchHandler(
 	db *gorm.DB, registry interfaces.RetrieveEngineRegistry,
 	kbService interfaces.KnowledgeBaseService,
+	tenants interfaces.TenantService, keys interfaces.TenantAPIKeyService,
+	revocations interfaces.Agent24CredentialRevocationStore,
 ) *Agent24KnowledgeSearchHandler {
 	return &Agent24KnowledgeSearchHandler{
-		key:    agent24SearchTagKey(),
-		probe:  agent24DefaultReadyProbe{db: db, registry: registry},
-		scope:  agent24DefaultScopeResolver{kbs: kbService},
-		index:  agent24DBIndexReader{db: db},
-		search: kbService,
-		hits:   agent24DBHitReader{db: db},
+		key:     agent24SearchTagKey(),
+		probe:   agent24DefaultReadyProbe{db: db, registry: registry},
+		scope:   agent24DefaultScopeResolver{kbs: kbService},
+		index:   agent24DBIndexReader{db: db},
+		search:  kbService,
+		hits:    agent24DBHitReader{db: db},
+		recheck: newAgent24Rechecker(tenants, keys, revocations),
 	}
 }
 
@@ -160,6 +164,19 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
 	}
+	scope, kerr, gone := agent24RecheckScope(ctx, h.recheck, h.scope, c.Request.Header, req.KBIDs, plan.Scope)
+	if gone {
+		agent24NoteCancelled(c, echo, plan.Scope)
+		return
+	}
+	if kerr != nil {
+		if kerr.Code == agent24CodeInternal || kerr.Code == agent24CodeTimeout || kerr.Code == agent24CodeUnavailable {
+			agent24NoteScope(c, plan.Scope)
+		}
+		writeAgent24KnowledgeError(c, kerr, echo)
+		return
+	}
+	completeness, hits, failures = agent24NarrowSearch(scope, completeness, hits, failures)
 	outcome := completeness
 	if completeness == "complete" {
 		outcome = agent24AuditOK
@@ -168,8 +185,8 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 	agent24NoteAudit(c, func(f *agent24AuditFacts) {
 		f.Echo = echo
 		f.Outcome = outcome
-		if len(plan.Scope) > 0 {
-			f.EffectiveScope = append([]string(nil), plan.Scope...)
+		if len(scope) > 0 {
+			f.EffectiveScope = append([]string(nil), scope...)
 		}
 		f.Resource = resource
 		f.Revision = revision
@@ -177,7 +194,7 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 	})
 	c.JSON(http.StatusOK, agent24SearchResponse{
 		ProtocolVersion: agent24KnowledgeProtocolVersion, RequestID: *echo.RequestID, Generation: *echo.Generation,
-		Completeness: completeness, EffectiveScope: agent24EffectiveScope{KnowledgeBaseIDs: plan.Scope},
+		Completeness: completeness, EffectiveScope: agent24EffectiveScope{KnowledgeBaseIDs: scope},
 		AppliedBudget: req.Budget, Hits: hits, PartialFailures: failures,
 	})
 }

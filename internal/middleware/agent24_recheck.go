@@ -14,10 +14,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// Agent24RecheckEntry is what Auth established at entry for an X-API-Key request: the key, its tenant,
-// that tenant's principal mode, the bound principal and the signed_token jti ("" for none).
+// Agent24RecheckEntry is what Auth established at entry for an X-API-Key request: the key (and whether
+// it is a platform key), the request's tenant, that tenant's principal mode, the bound principal and the
+// signed_token jti ("" for none).
 type Agent24RecheckEntry struct {
 	KeyID     uint64
+	Platform  bool
 	TenantID  uint64
 	Mode      types.APIPrincipalMode
 	Principal types.Principal
@@ -37,6 +39,10 @@ type Agent24RecheckResult struct {
 // is now, and the principal resolved from that row (for signed_token: the signature under the current
 // HMAC secret, exp, nbf, TTL, tenant_id and sub), then the jti revocation list when revocations is
 // non-nil. It writes no response and does not touch the request context.
+//
+// A platform key (standalone mode only: the integration credential gate refuses it) keeps the machine
+// identity Auth gives it and selects the tenant through X-Tenant-ID, so for it the key and the tenant's
+// existence are checked, not the tenant's principal mode.
 //
 // The entry identity is the baseline: a different key, tenant, principal mode, principal or jti is
 // credential_invalid, never a re-resolved identity. A tenant switched from signed_token to tenant mode
@@ -75,7 +81,8 @@ func Agent24RecheckAPIKey(
 	case err != nil:
 		return Agent24RecheckResult{}, err
 	}
-	if key == nil || key.ID != entry.KeyID || key.IsPlatform() || key.TenantIDValue() != entry.TenantID {
+	if key == nil || key.ID != entry.KeyID || key.IsPlatform() != entry.Platform ||
+		(!key.IsPlatform() && key.TenantIDValue() != entry.TenantID) {
 		return invalid, nil
 	}
 	tenant, err := tenants.GetTenantByID(ctx, entry.TenantID)
@@ -85,7 +92,16 @@ func Agent24RecheckAPIKey(
 	if err != nil {
 		return Agent24RecheckResult{}, err
 	}
-	if tenant == nil || Agent24PrincipalMode(tenant) != entry.Mode {
+	if tenant == nil {
+		return invalid, nil
+	}
+	if key.IsPlatform() {
+		if p, _ := platformAPIKeyIdentity(key); p.Normalize() != entry.Principal.Normalize() {
+			return invalid, nil
+		}
+		return Agent24RecheckResult{Scope: agent24KeyScope(key)}, nil
+	}
+	if Agent24PrincipalMode(tenant) != entry.Mode {
 		return invalid, nil
 	}
 	principal, jti, err := resolveAPIPrincipal(ctx, tenant, header)
@@ -108,14 +124,19 @@ func Agent24RecheckAPIKey(
 			return Agent24RecheckResult{Reason: "credential_revoked"}, nil
 		}
 	}
-	return Agent24RecheckResult{Scope: types.TenantAPIKeyScope{
+	return Agent24RecheckResult{Scope: agent24KeyScope(key)}, nil
+}
+
+// agent24KeyScope is the scope attachAPIKeyAuthContext builds from a key row, before its full-access rule.
+func agent24KeyScope(key *types.TenantAPIKey) types.TenantAPIKeyScope {
+	return types.TenantAPIKeyScope{
 		KeyID:            key.ID,
 		Name:             key.Name,
 		ScopeType:        key.ScopeType,
 		FullAccess:       key.FullAccess,
 		KnowledgeBaseIDs: key.KnowledgeBaseIDs,
 		Capabilities:     key.Capabilities,
-	}}, nil
+	}
 }
 
 // Agent24PrincipalMode is the tenant's principal mode as resolveAPIPrincipal reads it: "" for no config.

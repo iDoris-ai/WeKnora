@@ -43,7 +43,7 @@ func newAgent24Rechecker(
 	return agent24DefaultRechecker{tenants: tenants, keys: keys, revocations: revocations}
 }
 
-// Recheck covers X-API-Key credentials (tenant keys, with the tenant's principal mode). A request
+// Recheck covers X-API-Key credentials: tenant keys with the tenant's principal mode, and platform keys. A request
 // without an API key scope (a session JWT) is passed with its context unchanged; E is still resolved
 // again by the caller. The key's grant is checked as the route's policy does (retrieve, or full access):
 // a key that lost it is credential_invalid, as Auth's 403 is under the integration envelope.
@@ -57,6 +57,7 @@ func (r agent24DefaultRechecker) Recheck(ctx context.Context, header http.Header
 	}
 	entry := middleware.Agent24RecheckEntry{
 		KeyID:    scope.KeyID,
+		Platform: scope.IsPlatform(),
 		TenantID: types.CallerFromContext(ctx).TenantID,
 	}
 	if t, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); t != nil {

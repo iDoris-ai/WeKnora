@@ -709,3 +709,73 @@ func TestAgent24IntegrationRevokedJTIAuditsIdentity(t *testing.T) {
 	require.NotNil(t, details.TenantID)
 	require.Equal(t, tenantID, *details.TenantID)
 }
+
+// agent24RevokeOnSecondKey accepts the key on the first AuthenticateAPIKey and reports it revoked after that.
+type agent24RevokeOnSecondKey struct {
+	interfaces.TenantAPIKeyService
+	key   *types.TenantAPIKey
+	calls int
+}
+
+func (s *agent24RevokeOnSecondKey) AuthenticateAPIKey(context.Context, string) (*types.TenantAPIKey, error) {
+	s.calls++
+	if s.calls == 1 {
+		return s.key, nil
+	}
+	return nil, &apprepo.APIKeyUnusableError{Key: s.key, Revoked: true}
+}
+
+// The key is accepted at entry and revoked before the search response is assembled, so the handler's
+// recheck answers 401 and the audit row keeps the identity Auth bound.
+func TestAgent24IntegrationRecheckRevokedInFlight(t *testing.T) {
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+
+	tenantID := uint64(1)
+	key := &types.TenantAPIKey{
+		ID: 7, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID, FullAccess: true,
+	}
+	keys := &agent24RevokeOnSecondKey{key: key}
+	tenants := agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}}
+	audit := &agent24KnowledgeAuditStub{}
+	search := handler.NewAgent24KnowledgeSearchHandler(
+		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, keys, nil,
+	)
+	r := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		TenantAPIKeyService:           keys,
+		TenantService:                 tenants,
+		UserService:                   agent24FakeUserSvc{},
+		AuditLogService:               audit,
+		Agent24KnowledgeSearchHandler: search,
+	})
+	body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
+		`"scope":{"knowledge_base_ids":["kb-a"]},` +
+		`"budget":{"deadline_ms":5000,"max_results":5,"max_concurrency":1}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "sk-test")
+	req.Header.Set("X-Tenant-ID", "1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_revoked", false)
+	require.Equal(t, 2, keys.calls)
+	require.Len(t, audit.entries, 1)
+	var details struct {
+		Outcome      string  `json:"outcome"`
+		Reason       string  `json:"reason"`
+		CredentialID *string `json:"credential_id"`
+		TenantID     *uint64 `json:"tenant_id"`
+	}
+	require.NoError(t, json.Unmarshal(audit.entries[0].Details, &details))
+	require.Equal(t, "unauthorized", details.Outcome)
+	require.Equal(t, "credential_revoked", details.Reason)
+	require.NotNil(t, details.CredentialID)
+	require.Equal(t, "key:7", *details.CredentialID)
+	require.NotNil(t, details.TenantID)
+	require.Equal(t, tenantID, *details.TenantID)
+}
