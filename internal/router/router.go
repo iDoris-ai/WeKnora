@@ -98,6 +98,8 @@ type RouterParams struct {
 
 	Agent24KnowledgeSearchHandler *handler.Agent24KnowledgeSearchHandler // A24-KB-10
 	Agent24KnowledgeReadHandler   *handler.Agent24KnowledgeReadHandler   // A24-KB-15
+
+	Agent24CredentialRevocations interfaces.Agent24CredentialRevocationStore // A24-KB-22
 }
 
 // NewRouter 创建新的路由
@@ -222,7 +224,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 	// Agent24 A24-KB-05: integration mode rejects platform API keys and direct principals.
-	installAgent24IntegrationCredentialGate(r)
+	installAgent24IntegrationCredentialGate(r, params.Agent24CredentialRevocations)
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
 	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog)

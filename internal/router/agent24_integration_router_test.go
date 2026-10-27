@@ -512,6 +512,32 @@ func (agent24MissingKeySvc) AuthenticateAPIKey(context.Context, string) (*types.
 	return nil, apprepo.ErrTenantAPIKeyNotFound
 }
 
+// agent24RevocationList is a jti list. The zero value lists nothing, so a signed_token Auth accepted
+// still passes the credential gate. A nil list would refuse that jti.
+type agent24RevocationList struct {
+	revoked bool
+	calls   []struct {
+		tenantID uint64
+		jti      string
+	}
+}
+
+func (s *agent24RevocationList) Revoke(context.Context, uint64, string, time.Time) error { return nil }
+
+func (s *agent24RevocationList) IsRevoked(
+	_ context.Context, tenantID uint64, jti string, _ time.Time,
+) (bool, error) {
+	s.calls = append(s.calls, struct {
+		tenantID uint64
+		jti      string
+	}{tenantID, jti})
+	return s.revoked, nil
+}
+
+func (s *agent24RevocationList) PurgeExpired(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
 // TestAgent24IntegrationCredentialExpiryAndJTI guards A24-KB-18: Knowledge endpoints distinguish a
 // hash-matched key that is revoked or expired, and a signed_token must carry a jti.
 func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
@@ -546,6 +572,7 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 	}
 	serve := func(
 		keys interfaces.TenantAPIKeyService, tenant *types.Tenant, externalToken string,
+		revocations interfaces.Agent24CredentialRevocationStore,
 	) *httptest.ResponseRecorder {
 		t.Helper()
 		r := NewRouter(RouterParams{
@@ -554,6 +581,7 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 			TenantService:                agent24FakeTenantSvc{tenant: tenant},
 			UserService:                  agent24FakeUserSvc{},
 			Agent24KnowledgeReadyHandler: &handler.Agent24KnowledgeReadyHandler{},
+			Agent24CredentialRevocations: revocations,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", strings.NewReader("{}"))
 		req.Header.Set("Content-Type", "application/json")
@@ -568,13 +596,13 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 	}
 
 	t.Run("revoked key", func(t *testing.T) {
-		w := serve(agent24UnusableKeySvc{key: fullKey, revoked: true}, plain, "")
+		w := serve(agent24UnusableKeySvc{key: fullKey, revoked: true}, plain, "", nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_revoked", false)
 		require.NotContains(t, w.Body.String(), "invalid API key")
 	})
 	t.Run("expired key", func(t *testing.T) {
-		w := serve(agent24UnusableKeySvc{key: fullKey, revoked: false}, plain, "")
+		w := serve(agent24UnusableKeySvc{key: fullKey, revoked: false}, plain, "", nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_expired", false)
 		require.NotContains(t, w.Body.String(), "invalid API key")
@@ -582,18 +610,18 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 	t.Run("revoked platform key", func(t *testing.T) {
 		// Only a tenant key with a tenant notes a rejection: a revoked platform key stays credential_invalid.
 		platformKey := &types.TenantAPIKey{ID: 8, ScopeType: types.APIKeyScopePlatform}
-		w := serve(agent24UnusableKeySvc{key: platformKey, revoked: true}, plain, "")
+		w := serve(agent24UnusableKeySvc{key: platformKey, revoked: true}, plain, "", nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
 	t.Run("revoked key without a tenant", func(t *testing.T) {
 		orphan := &types.TenantAPIKey{ID: 9, ScopeType: types.APIKeyScopeTenant}
-		w := serve(agent24UnusableKeySvc{key: orphan, revoked: true}, plain, "")
+		w := serve(agent24UnusableKeySvc{key: orphan, revoked: true}, plain, "", nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
 	t.Run("missing key", func(t *testing.T) {
-		w := serve(agent24MissingKeySvc{}, plain, "")
+		w := serve(agent24MissingKeySvc{}, plain, "", nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
@@ -601,23 +629,98 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 	expiredAt := time.Now().Add(-time.Minute)
 	validAt := time.Now().Add(time.Minute)
 	t.Run("expired token with jti", func(t *testing.T) {
-		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(expiredAt, "tok-jti")))
+		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(expiredAt, "tok-jti")), nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_expired", false)
 	})
 	t.Run("expired token without jti", func(t *testing.T) {
-		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(expiredAt, "")))
+		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(expiredAt, "")), nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
 	t.Run("valid token without jti", func(t *testing.T) {
-		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(validAt, "")))
+		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(validAt, "")), nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
 	t.Run("valid token with jti", func(t *testing.T) {
-		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(validAt, "tok-jti")))
+		w := serve(agent24FakeKeySvc{key: fullKey}, signedTenant, sign(baseClaims(validAt, "tok-jti")),
+			&agent24RevocationList{})
 		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "invalid_request", "", true)
 	})
+}
+
+// A signed_token that Auth has already accepted is refused when its jti is listed. The audit row is not
+// anonymous: Auth bound the principal, the jti and the caller before the gate ran.
+func TestAgent24IntegrationRevokedJTIAuditsIdentity(t *testing.T) {
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+
+	tenantID := uint64(1)
+	const jti = "revoked-jti"
+	secret := "test-secret"
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": "external-u1", "tenant_id": float64(tenantID), "aud": "weknora",
+		"exp": time.Now().Add(time.Minute).Unix(), "jti": jti,
+	}).SignedString([]byte(secret))
+	require.NoError(t, err)
+
+	audit := &agent24KnowledgeAuditStub{}
+	list := &agent24RevocationList{revoked: true}
+	r := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		TenantAPIKeyService: agent24FakeKeySvc{key: &types.TenantAPIKey{
+			ID: 7, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID, FullAccess: true,
+		}},
+		TenantService: agent24FakeTenantSvc{tenant: &types.Tenant{
+			ID: tenantID, APIPrincipalConfig: &types.APIPrincipalConfig{
+				Mode: types.APIPrincipalModeSignedToken, HMACSecret: secret,
+			},
+		}},
+		UserService:                  agent24FakeUserSvc{},
+		AuditLogService:              audit,
+		Agent24KnowledgeReadyHandler: &handler.Agent24KnowledgeReadyHandler{},
+		Agent24CredentialRevocations: list,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/ready", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "sk-test")
+	req.Header.Set("X-Tenant-ID", "1")
+	req.Header.Set("X-External-User-Token", token)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_revoked", false)
+	require.Equal(t, []struct {
+		tenantID uint64
+		jti      string
+	}{{tenantID: tenantID, jti: jti}}, list.calls)
+
+	require.Len(t, audit.entries, 1)
+	entry := audit.entries[0]
+	require.Equal(t, tenantID, entry.TenantID)
+	var details struct {
+		Outcome   string `json:"outcome"`
+		Reason    string `json:"reason"`
+		Principal *struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"principal"`
+		CredentialID *string `json:"credential_id"`
+		TenantID     *uint64 `json:"tenant_id"`
+	}
+	require.NoError(t, json.Unmarshal(entry.Details, &details))
+	require.Equal(t, "unauthorized", details.Outcome)
+	require.Equal(t, "credential_revoked", details.Reason)
+	require.NotNil(t, details.Principal)
+	require.Equal(t, types.PrincipalAPIExternalUser, details.Principal.Type)
+	require.Equal(t, "1:external-u1", details.Principal.ID)
+	require.NotNil(t, details.CredentialID)
+	require.Equal(t, "jti:"+jti, *details.CredentialID)
+	require.NotNil(t, details.TenantID)
+	require.Equal(t, tenantID, *details.TenantID)
 }

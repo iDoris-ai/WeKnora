@@ -139,7 +139,7 @@ func TestAgent24KnowledgeAuthEnvelope(t *testing.T) {
 			r.Use(gin.Recovery())
 			r.Use(Agent24KnowledgeAuthEnvelope())
 			r.Use(tc.auth)
-			r.Use(Agent24IntegrationCredentialGate())
+			r.Use(Agent24IntegrationCredentialGate(nil))
 			r.POST(readyPath, ready)
 			r.POST(otherPath, func(*gin.Context) {})
 
