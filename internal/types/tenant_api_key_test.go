@@ -48,3 +48,19 @@ func TestCredentialIDFromContext(t *testing.T) {
 		t.Fatalf("key id 42: got %q, %v", got, ok)
 	}
 }
+
+func TestCredentialIDFromContextPrefersJTI(t *testing.T) {
+	ctx := WithAgent24TokenJTI(context.Background(), "abc")
+	ctx = WithTenantAPIKeyScope(ctx, TenantAPIKeyScope{KeyID: 42})
+	got, ok := CredentialIDFromContext(ctx)
+	if !ok || got != "jti:abc" {
+		t.Fatalf("jti: got %q, %v", got, ok)
+	}
+
+	empty := WithAgent24TokenJTI(context.Background(), "")
+	empty = WithTenantAPIKeyScope(empty, TenantAPIKeyScope{KeyID: 42})
+	got, ok = CredentialIDFromContext(empty)
+	if !ok || got != "key:42" {
+		t.Fatalf("empty jti: got %q, %v", got, ok)
+	}
+}

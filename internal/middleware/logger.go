@@ -192,6 +192,23 @@ func withAccessLogPrincipal(entry *logrus.Entry, p types.Principal) *logrus.Entr
 	})
 }
 
+// withAccessLogCredential records a server-issued key id verbatim. A jti is chosen by the token issuer, so,
+// like a caller-chosen principal id, the log keeps only credential_type=jti and the length of the jti
+// (without the "jti:" prefix).
+func withAccessLogCredential(entry *logrus.Entry, id string) *logrus.Entry {
+	const jtiPrefix = "jti:"
+	if strings.HasPrefix(id, jtiPrefix) {
+		return entry.WithFields(logrus.Fields{
+			"credential_type":   "jti",
+			"credential_id_len": len(id) - len(jtiPrefix),
+		})
+	}
+	if strings.HasPrefix(id, "key:") {
+		return entry.WithField("credential_id", id)
+	}
+	return entry
+}
+
 // Logger middleware logs request details with request ID, input and output
 func Logger() gin.HandlerFunc {
 	bodyFlag := os.Getenv(agent24LogHTTPBodyEnv)
@@ -298,7 +315,7 @@ func Logger() gin.HandlerFunc {
 			}
 		}
 		if credentialID, ok := types.CredentialIDFromContext(c.Request.Context()); ok {
-			logMsg = logMsg.WithField("credential_id", credentialID)
+			logMsg = withAccessLogCredential(logMsg, credentialID)
 		}
 
 		// 添加请求体（如果有）

@@ -359,3 +359,49 @@ func TestTenantAPIKeyServiceAuthenticateRejectsExpiredKey(t *testing.T) {
 		t.Fatal("expired key should not authenticate")
 	}
 }
+
+func TestTenantAPIKeyServiceAuthenticateUnusableKey(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+
+	revoked, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID: 42, Name: "revoked",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+	if err := svc.RevokeAPIKey(ctx, 42, revoked.APIKey.ID); err != nil {
+		t.Fatalf("RevokeAPIKey returned error: %v", err)
+	}
+	key, err := svc.AuthenticateAPIKey(ctx, revoked.Token)
+	if key != nil {
+		t.Fatal("revoked key pointer must be nil")
+	}
+	var unusable *apprepo.APIKeyUnusableError
+	if !errors.As(err, &unusable) || unusable == nil || !unusable.Revoked {
+		t.Fatalf("revoked err = %v, want *APIKeyUnusableError Revoked", err)
+	}
+	if !errors.Is(err, apprepo.ErrTenantAPIKeyNotFound) {
+		t.Fatalf("errors.Is(revoked, ErrTenantAPIKeyNotFound) = false: %v", err)
+	}
+
+	expiredAt := time.Now().UTC().Add(-time.Minute)
+	expired, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID: 42, Name: "expired", ExpiresAt: &expiredAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+	key, err = svc.AuthenticateAPIKey(ctx, expired.Token)
+	if key != nil {
+		t.Fatal("expired key pointer must be nil")
+	}
+	unusable = nil
+	if !errors.As(err, &unusable) || unusable == nil || unusable.Revoked {
+		t.Fatalf("expired err = %v, want *APIKeyUnusableError not revoked", err)
+	}
+	if !errors.Is(err, apprepo.ErrTenantAPIKeyNotFound) {
+		t.Fatalf("errors.Is(expired, ErrTenantAPIKeyNotFound) = false: %v", err)
+	}
+}

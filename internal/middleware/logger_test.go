@@ -492,3 +492,26 @@ func TestAccessLogExternalPrincipalOmitsID(t *testing.T) {
 		}
 	}
 }
+
+// A jti is chosen by the token issuer, so the access log keeps the type and the length only.
+func TestAccessLogJTICredentialOmitsValue(t *testing.T) {
+	const jti = "jti-S3NT1NEL-value"
+	logText := serveAccessLog(t, func(c *gin.Context) {
+		c.Request = c.Request.WithContext(types.WithAgent24TokenJTI(c.Request.Context(), jti))
+		c.Next()
+	})
+	if strings.Contains(logText, "S3NT1NEL") {
+		t.Fatalf("access log contains the jti:\n%s", logText)
+	}
+	for _, want := range []string{
+		"credential_type=jti",
+		fmt.Sprintf("credential_id_len=%d", len(jti)),
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("access log missing %q:\n%s", want, logText)
+		}
+	}
+	if strings.Contains(logText, "credential_id=") {
+		t.Fatalf("access log contains credential_id:\n%s", logText)
+	}
+}

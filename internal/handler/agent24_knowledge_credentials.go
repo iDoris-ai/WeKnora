@@ -49,5 +49,12 @@ func agent24CredentialAccepted(c *gin.Context) bool {
 	if tenant == nil {
 		return false
 	}
+	// R1.6: in integration mode a signed_token credential must carry a jti. Without one the
+	// credential is not accepted, and the gate's existing credential_invalid branch answers.
+	if tenant.APIPrincipalConfig != nil && tenant.APIPrincipalConfig.Mode == types.APIPrincipalModeSignedToken {
+		if _, ok := types.Agent24TokenJTIFromContext(ctx); !ok {
+			return false
+		}
+	}
 	return tenant.APIPrincipalConfig == nil || tenant.APIPrincipalConfig.Mode != types.APIPrincipalModeDirect
 }

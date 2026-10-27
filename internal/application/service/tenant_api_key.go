@@ -93,10 +93,10 @@ func (s *tenantAPIKeyService) AuthenticateAPIKey(ctx context.Context, token stri
 		return nil, err
 	}
 	if key.RevokedAt != nil {
-		return nil, apprepo.ErrTenantAPIKeyNotFound
+		return nil, &apprepo.APIKeyUnusableError{Key: key, Revoked: true}
 	}
 	if key.ExpiresAt != nil && time.Now().UTC().After(key.ExpiresAt.UTC()) {
-		return nil, apprepo.ErrTenantAPIKeyNotFound
+		return nil, &apprepo.APIKeyUnusableError{Key: key, Revoked: false}
 	}
 	s.touchAPIKeyLastUsedAsync(key.ID)
 	return key, nil

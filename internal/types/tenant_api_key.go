@@ -290,9 +290,13 @@ func TenantAPIKeyScopeFromContext(ctx context.Context) (TenantAPIKeyScope, bool)
 	return scope.Normalize(), true
 }
 
-// CredentialIDFromContext returns the credential identifier bound to the request: "key:<id>" for a
-// tenant API key. ok is false when no credential identifier is bound.
+// CredentialIDFromContext returns the credential identifier bound to the request: "jti:<jti>" for a
+// signed_token that carries a jti, otherwise "key:<id>" for a tenant API key. ok is false when no
+// credential identifier is bound.
 func CredentialIDFromContext(ctx context.Context) (string, bool) {
+	if jti, ok := Agent24TokenJTIFromContext(ctx); ok {
+		return "jti:" + jti, true
+	}
 	scope, ok := TenantAPIKeyScopeFromContext(ctx)
 	if !ok || scope.KeyID == 0 {
 		return "", false
