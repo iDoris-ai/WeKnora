@@ -756,7 +756,7 @@ func TestAgent24IntegrationRecheckRevokedInFlight(t *testing.T) {
 	tenants := agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}}
 	audit := &agent24KnowledgeAuditStub{}
 	search := handler.NewAgent24KnowledgeSearchHandler(
-		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, keys, nil,
+		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, keys, nil, nil, nil, nil,
 	)
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
@@ -793,4 +793,117 @@ func TestAgent24IntegrationRecheckRevokedInFlight(t *testing.T) {
 	require.Equal(t, "key:7", *details.CredentialID)
 	require.NotNil(t, details.TenantID)
 	require.Equal(t, tenantID, *details.TenantID)
+}
+
+// agent24BearerInFlightUser accepts the bearer on the first ValidateToken. revoke makes the second call
+// report the token revoked. GetUserByTenantID comes from the embedded fake; Auth's other paths use it.
+type agent24BearerInFlightUser struct {
+	agent24FakeUserSvc
+	user   *types.User
+	calls  int
+	revoke bool
+}
+
+func (s *agent24BearerInFlightUser) ValidateToken(context.Context, string) (*types.User, uint64, error) {
+	s.calls++
+	if s.revoke && s.calls > 1 {
+		return nil, 0, errors.New("token is revoked")
+	}
+	return s.user, s.user.TenantID, nil
+}
+
+func (s *agent24BearerInFlightUser) GetUserByID(context.Context, string) (*types.User, error) {
+	return s.user, nil
+}
+
+// agent24BearerInFlightMembers returns an active viewer for (u1, 1). drop makes the second GetMembership
+// miss, as the row was removed while the request was in flight.
+type agent24BearerInFlightMembers struct {
+	interfaces.TenantMemberService
+	calls int
+	drop  bool
+}
+
+func (s *agent24BearerInFlightMembers) GetMembership(
+	_ context.Context, userID string, tenantID uint64,
+) (*types.TenantMember, error) {
+	s.calls++
+	if s.drop && s.calls > 1 {
+		return nil, nil
+	}
+	if userID == "u1" && tenantID == 1 {
+		return &types.TenantMember{
+			UserID: "u1", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive,
+		}, nil
+	}
+	return nil, nil
+}
+
+// The bearer is accepted at entry. Before the search response is assembled it is checked again: a revoked
+// token, or a membership removed in flight under enforced RBAC, is credential_invalid. The user JWT has no
+// credential id, so the audit row is anonymous (R10.2).
+func TestAgent24IntegrationRecheckBearerInFlight(t *testing.T) {
+	t.Run("token revoked", func(t *testing.T) {
+		agent24RequireBearerInFlight(t, true)
+	})
+	t.Run("membership removed", func(t *testing.T) {
+		agent24RequireBearerInFlight(t, false)
+	})
+}
+
+func agent24RequireBearerInFlight(t *testing.T, revoke bool) {
+	t.Helper()
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+
+	rbac := true
+	cfg := &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &rbac}}
+	user := &types.User{ID: "u1", TenantID: 1}
+	users := &agent24BearerInFlightUser{user: user, revoke: revoke}
+	members := &agent24BearerInFlightMembers{drop: !revoke}
+	tenants := agent24FakeTenantSvc{tenant: &types.Tenant{ID: 1}}
+	audit := &agent24KnowledgeAuditStub{}
+	search := handler.NewAgent24KnowledgeSearchHandler(
+		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, nil, nil, users, members, cfg,
+	)
+	r := NewRouter(RouterParams{
+		Config: cfg, SystemHandler: &handler.SystemHandler{},
+		TenantService: tenants, UserService: users, TenantMemberService: members,
+		AuditLogService:               audit,
+		Agent24KnowledgeSearchHandler: search,
+	})
+	body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
+		`"scope":{"knowledge_base_ids":["kb-a"]},` +
+		`"budget":{"deadline_ms":5000,"max_results":5,"max_concurrency":1}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
+	require.Equal(t, 2, users.calls)
+	if !revoke {
+		require.Equal(t, 2, members.calls)
+	}
+	require.Len(t, audit.entries, 1)
+	var details struct {
+		Outcome   string `json:"outcome"`
+		Reason    string `json:"reason"`
+		Principal *struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"principal"`
+		CredentialID *string `json:"credential_id"`
+		TenantID     *uint64 `json:"tenant_id"`
+	}
+	require.NoError(t, json.Unmarshal(audit.entries[0].Details, &details))
+	require.Equal(t, "unauthorized", details.Outcome)
+	require.Equal(t, "credential_invalid", details.Reason)
+	require.Nil(t, details.Principal)
+	require.Nil(t, details.CredentialID)
+	require.Nil(t, details.TenantID)
 }

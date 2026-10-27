@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -34,12 +35,13 @@ func NewAgent24KnowledgeReadHandler(
 	db *gorm.DB, kbService interfaces.KnowledgeBaseService,
 	tenants interfaces.TenantService, keys interfaces.TenantAPIKeyService,
 	revocations interfaces.Agent24CredentialRevocationStore,
+	users interfaces.UserService, members interfaces.TenantMemberService, cfg *config.Config,
 ) *Agent24KnowledgeReadHandler {
 	return &Agent24KnowledgeReadHandler{
 		key:     agent24SearchTagKey(),
 		scope:   agent24DefaultScopeResolver{kbs: kbService},
 		reads:   agent24DBReadReader{db: db},
-		recheck: newAgent24Rechecker(tenants, keys, revocations),
+		recheck: newAgent24Rechecker(tenants, keys, revocations, users, members, cfg),
 	}
 }
 
