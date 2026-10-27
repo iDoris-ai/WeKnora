@@ -104,12 +104,12 @@ func TestBuildContainerInvokesAgent24CredentialRevocations(t *testing.T) {
 	require.False(t, agent24HasGoto(build.Body), "a goto in BuildContainer could jump over the call")
 }
 
-// agent24CountInvokes counts the calls X.Invoke(name) anywhere under n, function literals included.
+// agent24CountInvokes counts the calls X.Invoke(name, opts...) anywhere under n, function literals included.
 func agent24CountInvokes(n ast.Node, name string) int {
 	count := 0
 	ast.Inspect(n, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) != 1 {
+		if !ok || len(call.Args) == 0 {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)

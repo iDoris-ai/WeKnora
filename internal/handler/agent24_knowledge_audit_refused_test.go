@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -169,17 +170,42 @@ func TestAgent24KnowledgeAuditRefusedKeyTableFull(t *testing.T) {
 	require.Contains(t, refused.buckets, "key:2")
 }
 
-// giveBack keeps a count whose bucket was removed while the row was written.
-func TestAgent24RefusedKeyAuditLimiterGiveBackAfterRemoval(t *testing.T) {
-	refused, _ := newAgent24TestRefusedLimiter(time.Hour, 1, 1)
-	refused.giveBack("key:9", 2)
-	ok, n := refused.admit("key:9")
+// A bucket whose reported count is still being written is not removed for a new key, even once refilled, so a
+// failed write still finds it and the table stays at its size (Codex on F3: a stalled flush outlasting a refill).
+func TestAgent24RefusedKeyAuditLimiterKeepsPendingBucket(t *testing.T) {
+	refused, clock := newAgent24TestRefusedLimiter(time.Hour, 1, 1)
+	ok, _ := refused.admit("key:1")
 	require.True(t, ok)
-	require.Equal(t, int64(2), n)
+	ok, _ = refused.admit("key:1")
+	require.False(t, ok)
+	clock.t = clock.t.Add(time.Hour)
+	ok, n := refused.admit("key:1") // carries 1; its write is still running
+	require.True(t, ok)
+	require.Equal(t, int64(1), n)
+
+	clock.t = clock.t.Add(time.Hour) // key:1 has refilled and owes no suppressed count
+	ok, n = refused.admit("key:2")
+	require.True(t, ok, "no bucket could go, so key:2 is written without a limit")
+	require.Zero(t, n)
+	require.Len(t, refused.buckets, 1)
+	require.Contains(t, refused.buckets, "key:1")
+
+	refused.settle("key:1", 1, false)
+	require.Len(t, refused.buckets, 1)
+	ok, n = refused.admit("key:1")
+	require.True(t, ok)
+	require.Equal(t, int64(1), n, "the failed row's count went back to key:1")
+	refused.settle("key:1", n, true)
+
+	clock.t = clock.t.Add(time.Hour)
+	ok, _ = refused.admit("key:2")
+	require.True(t, ok)
+	require.Contains(t, refused.buckets, "key:2", "once settled, key:1 gave way")
+	require.NotContains(t, refused.buckets, "key:1")
 }
 
-// giveBack adds to the rows dropped while the failed row was being written.
-func TestAgent24RefusedKeyAuditLimiterGiveBackAdds(t *testing.T) {
+// settle adds a failed row's count to the rows dropped while it was being written.
+func TestAgent24RefusedKeyAuditLimiterSettleAdds(t *testing.T) {
 	refused, clock := newAgent24TestRefusedLimiter(time.Hour, 1, 8)
 	ok, _ := refused.admit("key:1")
 	require.True(t, ok)
@@ -191,10 +217,43 @@ func TestAgent24RefusedKeyAuditLimiterGiveBackAdds(t *testing.T) {
 	require.Equal(t, int64(1), n)
 	ok, _ = refused.admit("key:1") // dropped while that row is written
 	require.False(t, ok)
-	refused.giveBack("key:1", n)
+	refused.settle("key:1", n, false)
 	clock.t = clock.t.Add(time.Hour)
 	ok, n = refused.admit("key:1")
 	require.True(t, ok)
+	require.Equal(t, int64(2), n)
+}
+
+// agent24PanicAudit panics on the next Log when boom is set, otherwise records the row.
+type agent24PanicAudit struct {
+	agent24AuditStub
+	boom bool
+}
+
+func (s *agent24PanicAudit) Log(ctx context.Context, entry *types.AuditLog) error {
+	if s.boom {
+		s.boom = false
+		panic("store exploded")
+	}
+	return s.agent24AuditStub.Log(ctx, entry)
+}
+
+// A row whose Log panics returns its count, as a failed write does.
+func TestAgent24KnowledgeAuditRefusedKeyPanickedWriteKeepsCount(t *testing.T) {
+	stub := &agent24PanicAudit{}
+	refused, clock := newAgent24TestRefusedLimiter(time.Hour, 1, 8)
+	r := agent24RefusedKeyRouter(stub, refused)
+	for range 3 {
+		agent24RefusedKeyRequest(t, r, "key:1")
+	}
+	require.Len(t, stub.entries, 1)
+	clock.t = clock.t.Add(time.Hour)
+	stub.boom = true
+	agent24RefusedKeyRequest(t, r, "key:1") // admitted with 2, Log panics
+	clock.t = clock.t.Add(time.Hour)
+	agent24RefusedKeyRequest(t, r, "key:1")
+	require.Len(t, stub.entries, 2)
+	_, n := agent24RefusedRowCredential(t, stub.entries[1])
 	require.Equal(t, int64(2), n)
 }
 
