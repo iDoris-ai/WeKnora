@@ -225,6 +225,15 @@ func TestAgent24RecheckBearer(t *testing.T) {
 			present: []uint64{9}, wantReason: invalid,
 		},
 		{name: "header home tenant fail open", tenantHeader: "7", rbac: &rbacOff},
+		// Each half of the cross-tenant accessibility condition on its own (PR-Daemon B1 on #122).
+		{
+			name: "header tenant superuser flag off", tenantHeader: "9", entry: &entry9, user: super,
+			present: []uint64{9}, wantReason: invalid,
+		},
+		{
+			name: "header tenant cross flag non-superuser fail open", tenantHeader: "9", entry: &entry9,
+			cross: true, rbac: &rbacOff, present: []uint64{9}, wantReason: invalid,
+		},
 		{
 			name: "header tenant active member", tenantHeader: "9", entry: &entry9,
 			members: map[uint64]*types.TenantMember{9: agent24BearerViewer(9)}, present: []uint64{9},
@@ -268,6 +277,16 @@ func TestAgent24RecheckBearer(t *testing.T) {
 		},
 
 		{
+			// A superuser without a membership in the home tenant is not switching: no Admin.
+			name: "superuser home tenant no membership enforced", user: super, wantReason: invalid,
+		},
+		{
+			// The cross-tenant switch grants Admin only to a superuser (PR-Daemon B1 on #122).
+			name: "foreign claim non-superuser no membership enforced", claim: &claim9,
+			entry: &entry9, present: []uint64{9}, wantReason: invalid,
+		},
+
+		{
 			name: "ghost role enforced",
 			members: map[uint64]*types.TenantMember{7: {
 				UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
@@ -279,6 +298,21 @@ func TestAgent24RecheckBearer(t *testing.T) {
 			members: map[uint64]*types.TenantMember{7: {
 				UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
 			}},
+		},
+		// Each half of the Viewer floor's superuser condition on its own (PR-Daemon B1 on #122).
+		{
+			name: "ghost role superuser flag off", user: super,
+			members: map[uint64]*types.TenantMember{7: {
+				UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
+			}},
+			wantReason: invalid,
+		},
+		{
+			name: "ghost role cross flag non-superuser", cross: true,
+			members: map[uint64]*types.TenantMember{7: {
+				UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
+			}},
+			wantReason: invalid,
 		},
 		{
 			name: "ghost role cross superuser", user: super, cross: true,
