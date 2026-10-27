@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // RegisterAgent24KnowledgeRoutes registers the Agent24 knowledge integration
@@ -24,4 +25,19 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 	if rd != nil {
 		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/read", apiKeyRetrieve(apiKeyAny()), g.Viewer(), rd.Read)
 	}
+}
+
+// RegisterAgent24KnowledgeAuditRoutes registers the read paths for the agent24_knowledge audit rows (fork patch
+// A24-KB-19); a nil handler skips them. The tenant route repeats the per-tenant group guard (PathTenantMatch) and
+// is undeclared for API keys; the system route sits behind SystemAdmin and admits platform keys holding
+// system_audit_read. Both handlers check the caller again.
+func RegisterAgent24KnowledgeAuditRoutes(r *gin.RouterGroup, h *handler.AuditLogHandler, g *rbacGuards) {
+	if h == nil {
+		return
+	}
+	tenantByID := r.Group("/tenants/:id", g.PathTenantMatch())
+	tenantByID.GET("/agent24/knowledge/audit", g.Admin(), h.ListAgent24KnowledgeAuditTenant)
+	admin := r.Group("/system/admin", g.SystemAdmin())
+	g.apiKeyRoute(admin, http.MethodGet, "/agent24/knowledge/audit",
+		apiKeyPlatform(types.APIKeyCapabilitySystemAuditRead), h.ListAgent24KnowledgeAuditSystem)
 }
