@@ -610,13 +610,13 @@ func TestAgent24IntegrationCredentialExpiryAndJTI(t *testing.T) {
 	t.Run("revoked platform key", func(t *testing.T) {
 		// Only a tenant key with a tenant notes a rejection: a revoked platform key stays credential_invalid.
 		platformKey := &types.TenantAPIKey{ID: 8, ScopeType: types.APIKeyScopePlatform}
-		w := serve(agent24UnusableKeySvc{key: platformKey, revoked: true}, plain, "")
+		w := serve(agent24UnusableKeySvc{key: platformKey, revoked: true}, plain, "", nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
 	t.Run("revoked key without a tenant", func(t *testing.T) {
 		orphan := &types.TenantAPIKey{ID: 9, ScopeType: types.APIKeyScopeTenant}
-		w := serve(agent24UnusableKeySvc{key: orphan, revoked: true}, plain, "")
+		w := serve(agent24UnusableKeySvc{key: orphan, revoked: true}, plain, "", nil)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 	})
