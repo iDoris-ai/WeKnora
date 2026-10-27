@@ -497,3 +497,15 @@ func TestAgent24RefusedKeyAuditLimiterTwoPendingRows(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(2), n)
 }
+
+// A dropped row ends quietly: nothing to settle, no panic for the write path to log.
+func TestAgent24KnowledgeAuditDroppedRowLogsNothing(t *testing.T) {
+	stub := &agent24AuditStub{}
+	refused, _ := newAgent24TestRefusedLimiter(time.Hour, 1, 8)
+	r := agent24RefusedKeyRouter(stub, refused)
+	agent24RefusedKeyRequest(t, r, "key:1")
+	buf := agent24CaptureCredentialLogs(t)
+	agent24RefusedKeyRequest(t, r, "key:1")
+	require.Len(t, stub.entries, 1)
+	require.NotContains(t, buf.String(), "panic while writing the row")
+}
