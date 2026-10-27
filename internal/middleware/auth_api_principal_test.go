@@ -173,3 +173,36 @@ func TestResolveAPIPrincipalSignedTokenRejectsLongLifetime(t *testing.T) {
 		t.Fatalf("resolveAPIPrincipal error = nil, want error")
 	}
 }
+
+// verifyExternalUserJWT's errors are fixed strings with numbers, so none can
+// carry a sentinel. The test pins the exact error text instead: the rejection
+// log keeps error_len and error_type and drops the text.
+func TestResolveAPIPrincipalSignedTokenRejectionLogOmitsErrorText(t *testing.T) {
+	buf := captureAuthLogs(t)
+	secret := "test-secret"
+	header := http.Header{}
+	header.Set("X-External-User-Token", signedExternalUserToken(t, secret, jwt.MapClaims{
+		"sub":       "external-u1",
+		"tenant_id": float64(8),
+		"aud":       "weknora",
+		"exp":       time.Now().Add(time.Minute).Unix(),
+	}))
+
+	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:       types.APIPrincipalModeSignedToken,
+			HMACSecret: secret,
+		},
+	}, header)
+	if err == nil {
+		t.Fatal("resolveAPIPrincipal error = nil, want workspace mismatch")
+	}
+	logs := buf.String()
+	if strings.Contains(logs, "workspace mismatch") {
+		t.Fatalf("log contains the token error text:\n%s", logs)
+	}
+	if !strings.Contains(logs, "invalid external user token for tenant=7: error_len=") {
+		t.Fatalf("log missing the rejection line:\n%s", logs)
+	}
+}

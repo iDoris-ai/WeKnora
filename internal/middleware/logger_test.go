@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -410,5 +412,83 @@ func TestAccessLogPlainErrorOmitsCode(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// accessLogANSI matches the color codes CustomFormatter inserts around field keys and values.
+var accessLogANSI = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// serveAccessLog runs one GET /api/v1/x through Logger. before, when set, runs inside Logger's Next
+// and attaches identity the way Auth does after it replaces c.Request.
+func serveAccessLog(t *testing.T, before gin.HandlerFunc) string {
+	t.Helper()
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(logger.ConfigureFromEnv)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(Logger())
+	if before != nil {
+		r.Use(before)
+	}
+	r.GET("/api/v1/x", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/x", nil))
+	// Default text format is key=value. ForceColor wraps the key and the value, so strip that before
+	// asserting principal=api_tenant:7 and credential_id=key:42.
+	return accessLogANSI.ReplaceAllString(buf.String(), "")
+}
+
+func TestAccessLogRecordsPrincipalAndCredentialID(t *testing.T) {
+	logText := serveAccessLog(t, func(c *gin.Context) {
+		c.Set(types.PrincipalContextKey.String(), types.Principal{Type: "api_tenant", ID: "7"})
+		c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(
+			c.Request.Context(),
+			types.TenantAPIKeyScope{KeyID: 42},
+		))
+		c.Next()
+	})
+	for _, want := range []string{"principal=api_tenant:7", "credential_id=key:42"} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("access log missing %q:\n%s", want, logText)
+		}
+	}
+}
+
+func TestAccessLogOmitsPrincipalAndCredentialWithoutAuth(t *testing.T) {
+	logText := serveAccessLog(t, nil)
+	if !strings.Contains(logText, "status_code=") {
+		t.Fatalf("access log missing status_code:\n%s", logText)
+	}
+	for _, absent := range []string{"principal=", "credential_id="} {
+		if strings.Contains(logText, absent) {
+			t.Fatalf("access log contains %q:\n%s", absent, logText)
+		}
+	}
+}
+
+// An external user id is chosen by the caller and may be an email, so the access
+// log keeps the principal type and the id length only.
+func TestAccessLogExternalPrincipalOmitsID(t *testing.T) {
+	const externalID = "7:alice-S3NT1NEL@example.com"
+	logText := serveAccessLog(t, func(c *gin.Context) {
+		c.Set(types.PrincipalContextKey.String(), types.Principal{
+			Type: types.PrincipalAPIExternalUser, ID: externalID,
+		})
+		c.Next()
+	})
+	if strings.Contains(logText, "S3NT1NEL") {
+		t.Fatalf("access log contains the external user id:\n%s", logText)
+	}
+	for _, want := range []string{
+		"principal=api_external_user",
+		fmt.Sprintf("principal_id_len=%d", len(externalID)),
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("access log missing %q:\n%s", want, logText)
+		}
 	}
 }

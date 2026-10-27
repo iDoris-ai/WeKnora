@@ -154,7 +154,9 @@ func Auth(
 				}
 				return
 			}
-			logger.Warnf(c.Request.Context(), "[auth] bearer token rejected: %v", err)
+			logger.Warnf(c.Request.Context(),
+				"[auth] bearer token rejected: error_len=%d error_type=%T",
+				len(fmt.Sprint(err)), err)
 		}
 
 		// 尝试X-API-Key认证（兼容模式）
@@ -230,7 +232,9 @@ func authenticateJWTUser(
 		var err error
 		tenant, err = tenantService.GetTenantByID(ctx, targetTenantID)
 		if err != nil || tenant == nil {
-			logger.Warnf(ctx, "[auth] tenant lookup failed: tenant=%d user=%s err=%v", targetTenantID, user.ID, err)
+			logger.Warnf(ctx,
+				"[auth] tenant lookup failed: tenant=%d user=%s error_len=%d error_type=%T",
+				targetTenantID, user.ID, len(fmt.Sprint(err)), err)
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Unauthorized: invalid workspace",
 			})
@@ -253,8 +257,8 @@ func authenticateJWTUser(
 	}
 
 	logger.Infof(ctx,
-		"[auth] resolved role=%s for user=%s in tenant=%d (jwt_tenant=%d, header=%q, cross_switch=%v)",
-		role, user.ID, targetTenantID, jwtTenantID, c.GetHeader("X-Tenant-ID"), crossTenantSwitch)
+		"[auth] resolved role=%s for user=%s in tenant=%d (jwt_tenant=%d, header_len=%d, cross_switch=%v)",
+		role, user.ID, targetTenantID, jwtTenantID, len(c.GetHeader("X-Tenant-ID")), crossTenantSwitch)
 	applyAuthSession(c, authSession{
 		User:        user,
 		Principal:   types.Principal{Type: types.PrincipalWebUser, ID: user.ID},
@@ -304,7 +308,9 @@ func resolveTargetTenant(
 		// 中对 :id 的校验保持一致（非空、可解析、>0）。
 		parsedTenantID, err := strconv.ParseUint(tenantHeader, 10, 64)
 		if err != nil || parsedTenantID == 0 {
-			logger.Warnf(ctx, "Invalid X-Tenant-ID header from user=%s: %q (err=%v)", user.ID, tenantHeader, err)
+			logger.Warnf(ctx,
+				"Invalid X-Tenant-ID header from user=%s: header_len=%d error_len=%d error_type=%T",
+				user.ID, len(tenantHeader), len(fmt.Sprint(err)), err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid X-Tenant-ID header"})
 			c.Abort()
 			return 0, nil, false, false
@@ -322,7 +328,9 @@ func resolveTargetTenant(
 		// 验证目标空间是否存在
 		targetTenant, err := tenantService.GetTenantByID(ctx, parsedTenantID)
 		if err != nil || targetTenant == nil {
-			logger.Warnf(ctx, "Error getting target tenant by ID: %v, tenantID: %d", err, parsedTenantID)
+			logger.Warnf(ctx,
+				"Error getting target tenant by ID: error_len=%d error_type=%T, tenantID: %d",
+				len(fmt.Sprint(err)), err, parsedTenantID)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid target workspace ID"})
 			c.Abort()
 			return 0, nil, false, false
@@ -353,7 +361,9 @@ func resolveFirstMembershipTarget(
 	}
 	members, err := memberService.ListByUser(ctx, user.ID)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to list memberships for tenantless user %s: %v", user.ID, err)
+		logger.Warnf(ctx,
+			"Failed to list memberships for tenantless user %s: error_len=%d error_type=%T",
+			user.ID, len(fmt.Sprint(err)), err)
 		return 0
 	}
 	for _, member := range members {
@@ -495,7 +505,9 @@ func attachAPIKeyAuthContext(
 ) {
 	t, err := tenantService.GetTenantByID(c.Request.Context(), tenantID)
 	if err != nil {
-		logger.Warnf(c.Request.Context(), "[auth] API key tenant lookup failed: tenant=%d err=%v", tenantID, err)
+		logger.Warnf(c.Request.Context(),
+			"[auth] API key tenant lookup failed: tenant=%d error_len=%d error_type=%T",
+			tenantID, len(fmt.Sprint(err)), err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key"})
 		c.Abort()
 		return
@@ -595,7 +607,9 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 	case types.APIPrincipalModeSignedToken:
 		externalUserID, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
 		if err != nil || externalUserID == "" {
-			logger.Warnf(ctx, "invalid external user token for tenant=%d: %v", tenantID, err)
+			logger.Warnf(ctx,
+				"invalid external user token for tenant=%d: error_len=%d error_type=%T",
+				tenantID, len(fmt.Sprint(err)), err)
 			return types.Principal{}, fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
 		}
 		if err := validateExternalUserID(externalUserID); err != nil {
@@ -766,8 +780,9 @@ func resolveTenantRole(
 		return member.Role, true
 	}
 	if err != nil {
-		logger.Warnf(ctx, "tenant_members lookup failed user=%s tenant=%d: %v",
-			user.ID, targetTenantID, err)
+		logger.Warnf(ctx,
+			"tenant_members lookup failed user=%s tenant=%d: error_len=%d error_type=%T",
+			user.ID, targetTenantID, len(fmt.Sprint(err)), err)
 		// Fall through; treat lookup errors the same as "no membership
 		// found" so a transient DB hiccup doesn't lock everyone out.
 	} else {
@@ -808,8 +823,9 @@ func resolveTenantRole(
 				)
 				return types.TenantRoleOwner, true
 			} else {
-				logger.Warnf(ctx, "Failed to auto-promote user %s in tenant %d: %v",
-					user.ID, targetTenantID, e)
+				logger.Warnf(ctx,
+					"Failed to auto-promote user %s in tenant %d: error_len=%d error_type=%T",
+					user.ID, targetTenantID, len(fmt.Sprint(e)), e)
 			}
 		}
 	}

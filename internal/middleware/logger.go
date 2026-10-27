@@ -16,6 +16,7 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -169,6 +170,28 @@ func agent24AccessLogPath(c *gin.Context) string {
 	return c.Request.URL.Path
 }
 
+// accessLogSystemPrincipals are the principal types whose ID the server issues (a user row, a tenant or key
+// id, a signed embed session, an MCP endpoint). Any other type, such as api_external_user, carries an ID the
+// caller chose (it may be an email), so the access log keeps its type and length only.
+var accessLogSystemPrincipals = map[string]bool{
+	types.PrincipalWebUser:      true,
+	types.PrincipalAPITenant:    true,
+	types.PrincipalAPIPlatform:  true,
+	types.PrincipalEmbedChannel: true,
+	types.PrincipalEmbedSession: true,
+	types.PrincipalMCPEndpoint:  true,
+}
+
+func withAccessLogPrincipal(entry *logrus.Entry, p types.Principal) *logrus.Entry {
+	if accessLogSystemPrincipals[p.Type] {
+		return entry.WithField("principal", secutils.SanitizeForLog(p.Type+":"+p.ID))
+	}
+	return entry.WithFields(logrus.Fields{
+		"principal":        secutils.SanitizeForLog(p.Type),
+		"principal_id_len": len(p.ID),
+	})
+}
+
 // Logger middleware logs request details with request ID, input and output
 func Logger() gin.HandlerFunc {
 	bodyFlag := os.Getenv(agent24LogHTTPBodyEnv)
@@ -267,6 +290,16 @@ func Logger() gin.HandlerFunc {
 			"latency":     latency.String(),
 			"client_ip":   secutils.SanitizeForLog(clientIP),
 		})
+
+		// Auth replaces c.Request inside Next, so principal and credential_id are read here.
+		if v, ok := c.Get(types.PrincipalContextKey.String()); ok {
+			if p, ok := v.(types.Principal); ok && p.Type != "" {
+				logMsg = withAccessLogPrincipal(logMsg, p)
+			}
+		}
+		if credentialID, ok := types.CredentialIDFromContext(c.Request.Context()); ok {
+			logMsg = logMsg.WithField("credential_id", credentialID)
+		}
 
 		// 添加请求体（如果有）
 		if requestBody != "" {
