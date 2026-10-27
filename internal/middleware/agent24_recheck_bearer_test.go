@@ -418,7 +418,10 @@ func TestAgent24RecheckBearerNilGuards(t *testing.T) {
 	t.Run("nil config fails open on the viewer floor", func(t *testing.T) {
 		require.Empty(t, run(t, users, ghost, nil, header, entry))
 	})
-	t.Run("no tenant settings enforce RBAC", func(t *testing.T) {
+	t.Run("no tenant settings enforce RBAC on the role", func(t *testing.T) {
+		require.Equal(t, "credential_invalid", run(t, users, inactive, &config.Config{}, header, entry))
+	})
+	t.Run("no tenant settings enforce RBAC on the viewer floor", func(t *testing.T) {
 		require.Equal(t, "credential_invalid", run(t, users, ghost, &config.Config{}, header, entry))
 	})
 	t.Run("no tenant settings with a header tenant", func(t *testing.T) {
