@@ -1,13 +1,17 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
@@ -116,6 +120,224 @@ func TestAgent24KnowledgeRouteHandlers(t *testing.T) {
 		engine.ServeHTTP(w, req)
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
 			t.Fatalf("%s: status %d body %s, want %d with %s", tc.op, w.Code, w.Body.String(), tc.status, tc.want)
+		}
+	}
+}
+
+func TestAgent24KnowledgeAuditRoutePolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	engine := gin.New()
+	RegisterAgent24KnowledgeAuditRoutes(engine.Group("/api/v1"), handler.NewAuditLogHandler(nil), g)
+
+	const (
+		systemPath = "/api/v1/system/admin/agent24/knowledge/audit"
+		tenantPath = "/api/v1/tenants/:id/agent24/knowledge/audit"
+	)
+	seen := map[string]int{}
+	for _, rt := range engine.Routes() {
+		if rt.Method == http.MethodGet {
+			seen[rt.Path]++
+		}
+	}
+	if seen[systemPath] != 1 || seen[tenantPath] != 1 || len(engine.Routes()) != 2 {
+		t.Fatalf("routes = %#v, want the tenant and system audit reads", engine.Routes())
+	}
+	policy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, systemPath)
+	want := []types.APIKeyCapability{types.APIKeyCapabilitySystemAuditRead}
+	if len(policy.Capabilities) != len(want) || policy.Capabilities[0] != want[0] {
+		t.Fatalf("%s capabilities = %#v, want %#v", systemPath, policy.Capabilities, want)
+	}
+	if !policy.PlatformOnly {
+		t.Fatalf("%s PlatformOnly = false, want true", systemPath)
+	}
+	if policy.RequireFullAccess {
+		t.Fatalf("%s RequireFullAccess = true, want false", systemPath)
+	}
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodGet, tenantPath); ok {
+		t.Fatalf("tenant route declared an API key policy")
+	}
+	for method, paths := range g.apiKeyAuthorizer.RegisteredRoutes() {
+		for _, p := range paths {
+			if p == tenantPath {
+				t.Fatalf("tenant route declared %s %s", method, p)
+			}
+		}
+	}
+}
+
+func TestAgent24KnowledgeAuditRouteNilHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	engine := gin.New()
+	RegisterAgent24KnowledgeAuditRoutes(engine.Group("/api/v1"), nil, g)
+	if len(engine.Routes()) != 0 {
+		t.Fatalf("routes = %#v, want none", engine.Routes())
+	}
+	if g.apiKeyAuthorizer != nil {
+		if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodGet, "/api/v1/system/admin/agent24/knowledge/audit"); ok {
+			t.Fatal("nil handler registered a system API key policy")
+		}
+	}
+}
+
+// The tenant route reaches ListAgent24KnowledgeAuditTenant (List tenant 7) and the system route reaches
+// ListAgent24KnowledgeAuditSystem (List tenant 0). Guards are satisfied so the handler itself runs.
+func TestAgent24KnowledgeAuditRouteHandlers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24KnowledgeAuditReadStub{}
+	engine := gin.New()
+	engine.Use(middleware.ErrorHandler())
+	engine.Use(func(c *gin.Context) {
+		ctx := c.Request.Context()
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(7))
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
+		ctx = context.WithValue(ctx, types.SystemAdminContextKey, true)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	RegisterAgent24KnowledgeAuditRoutes(engine.Group("/api/v1"), handler.NewAuditLogHandler(stub), &rbacGuards{})
+
+	got := map[string]string{}
+	for _, rt := range engine.Routes() {
+		got[rt.Method+" "+rt.Path] = rt.Handler
+	}
+	want := map[string]string{
+		http.MethodGet + " /api/v1/tenants/:id/agent24/knowledge/audit":  "ListAgent24KnowledgeAuditTenant",
+		http.MethodGet + " /api/v1/system/admin/agent24/knowledge/audit": "ListAgent24KnowledgeAuditSystem",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("routes = %#v", got)
+	}
+	for key, name := range want {
+		handlerName, ok := got[key]
+		if !ok || !strings.Contains(handlerName, name) {
+			t.Fatalf("%s handler = %q, want %s", key, handlerName, name)
+		}
+	}
+
+	for _, path := range []string{
+		"/api/v1/tenants/7/agent24/knowledge/audit",
+		"/api/v1/system/admin/agent24/knowledge/audit",
+	} {
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"success":true`) {
+			t.Fatalf("%s: status %d body %s", path, w.Code, w.Body.String())
+		}
+	}
+	if len(stub.calls) != 2 || stub.calls[0] != 7 || stub.calls[1] != 0 || stub.bad {
+		t.Fatalf("List calls = %#v bad=%v, want [7 0]", stub.calls, stub.bad)
+	}
+}
+
+// agent24KnowledgeAuditReadStub records List. bad is set when the query is not the agent24_knowledge read.
+type agent24KnowledgeAuditReadStub struct {
+	interfaces.AuditLogService
+	calls []uint64
+	bad   bool
+}
+
+func (s *agent24KnowledgeAuditReadStub) List(
+	_ context.Context, tenantID uint64, q *interfaces.AuditLogQuery,
+) ([]*types.AuditLog, error) {
+	s.calls = append(s.calls, tenantID)
+	if q == nil || q.ScopeType != "agent24_knowledge" || q.UnscopedOnly || q.ActorUserID != "" {
+		s.bad = true
+	}
+	scope := ""
+	if q != nil {
+		scope = q.ScopeType
+	}
+	return []*types.AuditLog{{ID: 1, TenantID: tenantID, ScopeType: scope}}, nil
+}
+
+// The tenant route keeps the route guards in front of its own check: with RBAC enforced, a mismatched workspace
+// is refused by PathTenantMatch and a Viewer by Admin, each with that guard's message, before the handler runs.
+func TestAgent24KnowledgeAuditTenantRouteGuards(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cases := []struct {
+		name, path, want string
+		role             types.TenantRole
+	}{
+		{
+			name: "path tenant mismatch", path: "/api/v1/tenants/8/agent24/knowledge/audit",
+			want: "URL workspace does not match the active workspace", role: types.TenantRoleAdmin,
+		},
+		{
+			name: "viewer", path: "/api/v1/tenants/7/agent24/knowledge/audit",
+			want: "insufficient workspace role", role: types.TenantRoleViewer,
+		},
+	}
+	for _, tc := range cases {
+		stub := &agent24KnowledgeAuditReadStub{}
+		engine := gin.New()
+		engine.Use(middleware.ErrorHandler())
+		role := tc.role
+		engine.Use(func(c *gin.Context) {
+			ctx := c.Request.Context()
+			ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(7))
+			ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
+			ctx = types.WithCaller(ctx, types.Caller{TenantID: 7, Role: role})
+			c.Request = c.Request.WithContext(ctx)
+			c.Next()
+		})
+		RegisterAgent24KnowledgeAuditRoutes(engine.Group("/api/v1"), handler.NewAuditLogHandler(stub),
+			&rbacGuards{cfg: &config.Config{}})
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("%s: status %d body %s, want 403 with %q", tc.name, w.Code, w.Body.String(), tc.want)
+		}
+		if len(stub.calls) != 0 {
+			t.Fatalf("%s: List called %d times", tc.name, len(stub.calls))
+		}
+	}
+}
+
+// The system route sits behind SystemAdmin: a signed-in user who is not a system administrator gets that guard's
+// refusal before the handler runs.
+func TestAgent24KnowledgeAuditSystemRouteGuard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24KnowledgeAuditReadStub{}
+	engine := gin.New()
+	engine.Use(middleware.ErrorHandler())
+	RegisterAgent24KnowledgeAuditRoutes(engine.Group("/api/v1"), handler.NewAuditLogHandler(stub),
+		&rbacGuards{cfg: &config.Config{}})
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/agent24/knowledge/audit", nil))
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "system administrator required") {
+		t.Fatalf("status %d body %s, want the SystemAdmin guard's 403", w.Code, w.Body.String())
+	}
+	if len(stub.calls) != 0 {
+		t.Fatalf("List called %d times", len(stub.calls))
+	}
+}
+
+// NewRouter wires the audit reads when an AuditLogHandler is present and leaves them out otherwise.
+func TestNewRouterRegistersAgent24KnowledgeAuditRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "")
+	want := []string{
+		"GET /api/v1/tenants/:id/agent24/knowledge/audit",
+		"GET /api/v1/system/admin/agent24/knowledge/audit",
+	}
+	for _, withHandler := range []bool{true, false} {
+		params := RouterParams{
+			Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		}
+		if withHandler {
+			params.AuditLogHandler = handler.NewAuditLogHandler(nil)
+		}
+		seen := map[string]bool{}
+		for _, rt := range NewRouter(params).Routes() {
+			seen[rt.Method+" "+rt.Path] = true
+		}
+		for _, route := range want {
+			if seen[route] != withHandler {
+				t.Fatalf("handler=%v: %s registered=%v", withHandler, route, seen[route])
+			}
 		}
 	}
 }
