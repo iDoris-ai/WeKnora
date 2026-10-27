@@ -33,8 +33,10 @@ func TestAgent24IntegrationModeNewRouter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+	// AuditLogHandler is set so the audit reads (upstream and A24-KB-19) are among the routes checked.
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		AuditLogHandler: handler.NewAuditLogHandler(nil),
 	})
 	checked := 0
 	for _, rt := range r.Routes() {
