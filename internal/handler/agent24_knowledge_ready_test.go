@@ -346,6 +346,11 @@ func TestAgent24DefaultScopeAndIndex(t *testing.T) {
 	assert.Equal(t, []any{e(), 1, 1, false}, resolve(ctx, ci, "KB"))
 	db, err := gorm.Open(sqlite.Open("file:agent24idx?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
+	// A shared-cache memory database lives while a connection is open; closing them drops it, so -count=N
+	// starts from an empty one each time.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}))
 	rows := []any{ // r9: deleting and draft are not counted; a cancelled doc's chunks are not servable
 		&types.Knowledge{ID: "d", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusDeleting},

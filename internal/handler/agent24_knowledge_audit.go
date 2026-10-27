@@ -467,6 +467,13 @@ func agent24KnowledgeAuditEntry(
 		path = c.Request.URL.Path
 	}
 	anonymous := agent24AuditAnonymous(outcome, reason)
+	// A panic after a bucket admitted the row (building or encoding the details) never hands settle to the
+	// caller; settle here instead, so the count goes back and no pending count is left behind.
+	defer func() {
+		if entry == nil && settle != nil {
+			settle(false)
+		}
+	}()
 	var suppressed int64
 	if anonymous {
 		if limiter != nil {

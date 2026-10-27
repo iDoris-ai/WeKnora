@@ -421,3 +421,91 @@ func TestAgent24KnowledgeAuditAnonymousPanickedWriteKeepsCount(t *testing.T) {
 	require.Len(t, stub.entries, 2)
 	require.Contains(t, string(stub.entries[1].Details), `"suppressed":2`)
 }
+
+// agent24PanicJSON panics when encoded, standing in for a details value that fails after admission.
+type agent24PanicJSON struct{}
+
+func (agent24PanicJSON) MarshalJSON() ([]byte, error) { panic("cannot encode") }
+
+// A panic while the admitted row's details are built returns its count and leaves nothing pending (PR-Daemon
+// L1 on #124): the key's next row reports the count, and the bucket can give way again.
+func TestAgent24KnowledgeAuditRefusedKeyPanicBeforeWriteKeepsCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24AuditStub{}
+	refused, clock := newAgent24TestRefusedLimiter(time.Hour, 1, 1)
+	r := gin.New()
+	r.Use(agent24KnowledgeAudit(stub, nil, refused))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		if c.GetHeader("X-Test-Panic") != "" {
+			agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Revision = agent24PanicJSON{} })
+		}
+		c.Set(types.Agent24CredentialRejectionKey, agent24TestRejection(c.GetHeader("X-Test-Credential")))
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	agent24RefusedKeyRequest(t, r, "key:1")
+	agent24RefusedKeyRequest(t, r, "key:1") // dropped, owes 1
+	clock.t = clock.t.Add(time.Hour)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent24/knowledge/search", nil)
+	req.Header.Set("X-Test-Credential", "key:1")
+	req.Header.Set("X-Test-Panic", "1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req) // admitted with 1, the details panic
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Len(t, stub.entries, 1)
+
+	clock.t = clock.t.Add(time.Hour)
+	agent24RefusedKeyRequest(t, r, "key:1")
+	require.Len(t, stub.entries, 2)
+	_, n := agent24RefusedRowCredential(t, stub.entries[1])
+	require.Equal(t, int64(1), n)
+	require.Zero(t, refused.buckets["key:1"].pending)
+}
+
+// Two rows of one key in flight at once, each with its own count, add up in pending: the bucket stays until
+// both settle, and the failed one's count is what the next row reports (PR-Daemon L2 on #124).
+func TestAgent24RefusedKeyAuditLimiterTwoPendingRows(t *testing.T) {
+	refused, clock := newAgent24TestRefusedLimiter(time.Hour, 1, 1)
+	drop := func(times int) {
+		for range times {
+			ok, _ := refused.admit("key:1")
+			require.False(t, ok)
+		}
+	}
+	ok, _ := refused.admit("key:1")
+	require.True(t, ok)
+	drop(1)
+	clock.t = clock.t.Add(time.Hour)
+	ok, a := refused.admit("key:1") // row A carries 1
+	require.True(t, ok)
+	require.Equal(t, int64(1), a)
+	drop(2)
+	clock.t = clock.t.Add(time.Hour)
+	ok, b := refused.admit("key:1") // row B carries 2 while A is still writing
+	require.True(t, ok)
+	require.Equal(t, int64(2), b)
+
+	refused.settle("key:1", a, true)
+	clock.t = clock.t.Add(time.Hour)
+	ok, n := refused.admit("key:2")
+	require.True(t, ok)
+	require.Zero(t, n)
+	require.Contains(t, refused.buckets, "key:1", "B is still writing its count")
+
+	refused.settle("key:1", b, false)
+	require.Zero(t, refused.buckets["key:1"].pending)
+	ok, n = refused.admit("key:1")
+	require.True(t, ok)
+	require.Equal(t, int64(2), n)
+}
+
+// A dropped row ends quietly: nothing to settle, no panic for the write path to log.
+func TestAgent24KnowledgeAuditDroppedRowLogsNothing(t *testing.T) {
+	stub := &agent24AuditStub{}
+	refused, _ := newAgent24TestRefusedLimiter(time.Hour, 1, 8)
+	r := agent24RefusedKeyRouter(stub, refused)
+	agent24RefusedKeyRequest(t, r, "key:1")
+	buf := agent24CaptureCredentialLogs(t)
+	agent24RefusedKeyRequest(t, r, "key:1")
+	require.Len(t, stub.entries, 1)
+	require.NotContains(t, buf.String(), "panic while writing the row")
+}
