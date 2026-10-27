@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -397,4 +398,26 @@ func TestAgent24AuditRefusedKeyOf(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// An anonymous row whose Log panics returns its count too (the settle shared with refused keys).
+func TestAgent24KnowledgeAuditAnonymousPanickedWriteKeepsCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stub := &agent24PanicAudit{}
+	limiter := newAgent24AnonymousAuditLimiter(time.Hour, 1)
+	r := gin.New()
+	r.Use(agent24KnowledgeAudit(stub, limiter, nil))
+	r.POST("/api/v1/agent24/knowledge/search", func(c *gin.Context) {
+		c.AbortWithStatus(http.StatusUnauthorized)
+	})
+	for range 3 {
+		agent24AuditAnonymousRequest(t, r)
+	}
+	require.Len(t, stub.entries, 1)
+	limiter.bucket.SetLimit(rate.Inf)
+	stub.boom = true
+	agent24AuditAnonymousRequest(t, r) // admitted with 2, Log panics
+	agent24AuditAnonymousRequest(t, r)
+	require.Len(t, stub.entries, 2)
+	require.Contains(t, string(stub.entries[1].Details), `"suppressed":2`)
 }
