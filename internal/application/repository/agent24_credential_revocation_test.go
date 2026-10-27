@@ -36,20 +36,37 @@ func TestEnsureAgent24CredentialRevocationTable(t *testing.T) {
 
 	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
 	require.True(t, db.Migrator().HasTable(&types.Agent24CredentialRevocation{}))
+	requireAgent24RevocationIndexes(t, db)
 	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
 }
 
-// agent24RevocationCreateHook runs fn just before the CREATE TABLE for agent24_credential_revocations is
-// executed, standing in for what a concurrent replica does between the first HasTable and CreateTable.
-func agent24RevocationCreateHook(t *testing.T, db *gorm.DB, fn func(tx *gorm.DB)) {
+// agent24RevocationStatementHook runs fn just before a statement on agent24_credential_revocations that starts
+// with prefix is executed, standing in for what a concurrent replica (or a failing database) does in between.
+func agent24RevocationStatementHook(t *testing.T, db *gorm.DB, prefix string, fn func(tx *gorm.DB)) {
 	t.Helper()
-	require.NoError(t, db.Callback().Raw().Before("gorm:raw").Register("test:agent24_revocation_create",
+	require.NoError(t, db.Callback().Raw().Before("gorm:raw").Register("test:agent24_revocation_"+prefix,
 		func(tx *gorm.DB) {
 			sql := tx.Statement.SQL.String()
-			if strings.HasPrefix(sql, "CREATE TABLE") && strings.Contains(sql, "agent24_credential_revocations") {
+			if strings.HasPrefix(sql, prefix) && strings.Contains(sql, "agent24_credential_revocations") {
 				fn(tx)
 			}
 		}))
+}
+
+func requireAgent24RevocationIndexes(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, name := range []string{"idx_agent24_cred_rev_tenant_jti", "idx_agent24_cred_rev_expires_at"} {
+		require.True(t, db.Migrator().HasIndex(&types.Agent24CredentialRevocation{}, name), name)
+	}
+}
+
+// agent24RevocationBareTable creates the table without its indexes: what CreateTable leaves behind when an
+// index statement fails or the process stops after the CREATE TABLE.
+func agent24RevocationBareTable(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Exec(`CREATE TABLE agent24_credential_revocations (
+		id integer PRIMARY KEY AUTOINCREMENT, tenant_id integer NOT NULL, jti varchar(128) NOT NULL,
+		expires_at datetime NOT NULL, created_at datetime)`).Error)
 }
 
 func TestEnsureAgent24CredentialRevocationTableLostRace(t *testing.T) {
@@ -60,7 +77,7 @@ func TestEnsureAgent24CredentialRevocationTableLostRace(t *testing.T) {
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	raced := false
-	agent24RevocationCreateHook(t, db, func(tx *gorm.DB) {
+	agent24RevocationStatementHook(t, db, "CREATE TABLE", func(tx *gorm.DB) {
 		if raced {
 			return
 		}
@@ -73,6 +90,7 @@ func TestEnsureAgent24CredentialRevocationTableLostRace(t *testing.T) {
 	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
 	require.True(t, raced)
 	require.True(t, db.Migrator().HasTable(&types.Agent24CredentialRevocation{}))
+	requireAgent24RevocationIndexes(t, db)
 }
 
 func TestEnsureAgent24CredentialRevocationTableCreateFails(t *testing.T) {
@@ -82,11 +100,70 @@ func TestEnsureAgent24CredentialRevocationTableCreateFails(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
-	agent24RevocationCreateHook(t, db, func(tx *gorm.DB) { _ = tx.AddError(errors.New("create refused")) })
+	agent24RevocationStatementHook(t, db, "CREATE TABLE", func(tx *gorm.DB) {
+		_ = tx.AddError(errors.New("create refused"))
+	})
 
 	err = EnsureAgent24CredentialRevocationTable(db)
 	require.ErrorContains(t, err, "create refused")
 	require.False(t, db.Migrator().HasTable(&types.Agent24CredentialRevocation{}))
+}
+
+func TestEnsureAgent24CredentialRevocationTableAddsMissingIndexes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	agent24RevocationBareTable(t, db)
+
+	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
+	requireAgent24RevocationIndexes(t, db)
+	store := NewAgent24CredentialRevocationStore(db)
+	expires := time.Now().Add(time.Hour)
+	require.NoError(t, store.Revoke(context.Background(), 7, "jti-1", expires))
+	require.NoError(t, store.Revoke(context.Background(), 7, "jti-1", expires))
+}
+
+func TestEnsureAgent24CredentialRevocationTableIndexFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	agent24RevocationBareTable(t, db)
+	agent24RevocationStatementHook(t, db, "CREATE UNIQUE INDEX", func(tx *gorm.DB) {
+		_ = tx.AddError(errors.New("index refused"))
+	})
+
+	err = EnsureAgent24CredentialRevocationTable(db)
+	require.ErrorContains(t, err, "index refused")
+}
+
+func TestEnsureAgent24CredentialRevocationTableIndexLostRace(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	agent24RevocationBareTable(t, db)
+	raced := false
+	agent24RevocationStatementHook(t, db, "CREATE UNIQUE INDEX", func(tx *gorm.DB) {
+		if raced {
+			return
+		}
+		raced = true
+		_, err := tx.Statement.ConnPool.ExecContext(tx.Statement.Context, tx.Statement.SQL.String(),
+			tx.Statement.Vars...)
+		require.NoError(t, err)
+	})
+
+	require.NoError(t, EnsureAgent24CredentialRevocationTable(db))
+	require.True(t, raced)
+	requireAgent24RevocationIndexes(t, db)
 }
 
 func TestAgent24CredentialRevocationRevokeAndIsRevoked(t *testing.T) {

@@ -82,19 +82,35 @@ func (s *agent24CredentialRevocationStore) PurgeExpired(ctx context.Context, bef
 	return res.RowsAffected, res.Error
 }
 
-// EnsureAgent24CredentialRevocationTable creates agent24_credential_revocations when it is missing.
-// AutoMigrate is not used: it would alter columns that already exist. CreateTable has no IF NOT EXISTS,
+// agent24CredentialRevocationIndexes are the indexes the table relies on: ON CONFLICT (tenant_id, jti) needs
+// the unique one, and the purge reads by expires_at.
+var agent24CredentialRevocationIndexes = []string{
+	"idx_agent24_cred_rev_tenant_jti",
+	"idx_agent24_cred_rev_expires_at",
+}
+
+// EnsureAgent24CredentialRevocationTable creates agent24_credential_revocations and its indexes when they are
+// missing. AutoMigrate is not used: it would alter columns that already exist. CreateTable has no IF NOT EXISTS,
 // so a concurrent cold start can lose the race to another replica that created the table first; a second
-// HasTable treats that as success. If the table is still absent, the CreateTable error is returned.
+// HasTable treats that as success. CreateTable also creates the indexes in separate statements after the table,
+// so a table can exist without them (an index statement failed, or the process stopped in between); every
+// start therefore checks each index and creates the missing ones, with the same re-check after a failure.
 func EnsureAgent24CredentialRevocationTable(db *gorm.DB) error {
-	if db.Migrator().HasTable(&types.Agent24CredentialRevocation{}) {
-		return nil
-	}
-	if err := db.Migrator().CreateTable(&types.Agent24CredentialRevocation{}); err != nil {
-		if db.Migrator().HasTable(&types.Agent24CredentialRevocation{}) {
-			return nil
+	m := db.Migrator()
+	if !m.HasTable(&types.Agent24CredentialRevocation{}) {
+		if err := m.CreateTable(&types.Agent24CredentialRevocation{}); err != nil &&
+			!m.HasTable(&types.Agent24CredentialRevocation{}) {
+			return err
 		}
-		return err
+	}
+	for _, name := range agent24CredentialRevocationIndexes {
+		if m.HasIndex(&types.Agent24CredentialRevocation{}, name) {
+			continue
+		}
+		if err := m.CreateIndex(&types.Agent24CredentialRevocation{}, name); err != nil &&
+			!m.HasIndex(&types.Agent24CredentialRevocation{}, name) {
+			return err
+		}
 	}
 	return nil
 }
