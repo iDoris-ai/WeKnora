@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -26,7 +25,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		len(state.RoundSteps), totalToolCalls)
 	common.PipelineInfo(ctx, "Agent", "final_answer_start", map[string]interface{}{
 		"session_id":   sessionID,
-		"query_len":    len(query),
+		"query":        query,
 		"steps":        len(state.RoundSteps),
 		"tool_results": totalToolCalls,
 	})
@@ -82,9 +81,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		},
 	)
 	if err != nil {
-		logger.Errorf(ctx,
-			"[Agent][FinalAnswer] Final answer generation failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
 			"session_id": sessionID,
 			"error":      err.Error(),
@@ -134,8 +131,7 @@ func (e *AgentEngine) handleMaxIterations(
 
 	// Stream final answer generation through EventBus
 	if err := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, messages); err != nil {
-		logger.Errorf(ctx, "Failed to synthesize final answer: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to synthesize final answer: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 			"error": err.Error(),
 		})

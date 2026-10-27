@@ -1,18 +1,14 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/config"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -165,140 +161,6 @@ func TestSearchKnowledgeRejectsOutOfScopeKnowledgeBase(t *testing.T) {
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"x","knowledge_base_ids":["kb-9"]}`))
 	if err == nil || res.Success {
 		t.Fatalf("out-of-scope KB must be rejected: res=%+v err=%v", res, err)
-	}
-}
-
-// loadFailKnowledgeBaseService fails the knowledge-base lookup. Keyword search
-// still runs: an empty list means "use the requested mode".
-type loadFailKnowledgeBaseService struct {
-	stubKnowledgeBaseService
-}
-
-func (s *loadFailKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(
-	context.Context, []string,
-) ([]*types.KnowledgeBase, error) {
-	return nil, errors.New("load knowledge bases S3NT1NEL")
-}
-
-func TestSearchKnowledgeLoadFailureLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	tool := NewSearchKnowledgeTool(&loadFailKnowledgeBaseService{}, nil, nil, types.SearchTargets{{
-		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1,
-	}}, nil, nil)
-	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"widgets","mode":"keyword"}`))
-	if err != nil || res == nil || !res.Success {
-		t.Fatalf("keyword search after a failed load: res=%+v err=%v", res, err)
-	}
-	logs := buf.String()
-	if strings.Contains(logs, sentinel) {
-		t.Fatalf("load log leaked error text: %s", logs)
-	}
-	const prefix = "Failed to load knowledge bases [kb-1]: error_len="
-	if !strings.Contains(logs, prefix) || !strings.Contains(logs, "error_type=") {
-		t.Fatalf("log = %s, want %s and error_type=", logs, prefix)
-	}
-}
-
-// searchLogKnowledgeBaseService returns one FAQ hit whose metadata and image
-// info are not JSON. Both parse errors are logged while the hit is rendered.
-type searchLogKnowledgeBaseService struct {
-	stubKnowledgeBaseService
-}
-
-func (s *searchLogKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(
-	context.Context, []string,
-) ([]*types.KnowledgeBase, error) {
-	return []*types.KnowledgeBase{kbWithIndexes("kb-1", true, true, types.KnowledgeBaseTypeFAQ)}, nil
-}
-
-func (s *searchLogKnowledgeBaseService) HybridSearch(
-	context.Context, string, types.SearchParams,
-) ([]*types.SearchResult, error) {
-	return []*types.SearchResult{{
-		ID:              "chunk-1",
-		KnowledgeBaseID: "kb-1",
-		Content:         "hello",
-		ChunkMetadata:   []byte("S3NT1NEL"),
-		ImageInfo:       "S3NT1NEL",
-	}}, nil
-}
-
-func TestSearchKnowledgeParseFailureLogsOmitErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var faqMeta types.FAQChunkMetadata
-	faqErr := json.Unmarshal([]byte(sentinel), &faqMeta)
-	if faqErr == nil || faqErr.Error() == "" {
-		t.Fatal("FAQ metadata unmarshal returned no error text")
-	}
-	var imageInfos []types.ImageInfo
-	imageErr := json.Unmarshal([]byte(sentinel), &imageInfos)
-	if imageErr == nil || imageErr.Error() == "" {
-		t.Fatal("image info unmarshal returned no error text")
-	}
-
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	tool := NewSearchKnowledgeTool(&searchLogKnowledgeBaseService{}, nil, nil, types.SearchTargets{{
-		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1,
-	}}, nil, nil).WithPatternFilter(regexp.MustCompile("hello"))
-	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"hello","mode":"keyword"}`))
-	if err != nil || res == nil || !res.Success {
-		t.Fatalf("search with unparsable FAQ metadata: res=%+v err=%v", res, err)
-	}
-	logs := buf.String()
-	if strings.Contains(logs, sentinel) {
-		t.Fatalf("parse logs leaked error text: %s", logs)
-	}
-	if strings.Contains(logs, faqErr.Error()) || strings.Contains(logs, imageErr.Error()) {
-		t.Fatalf("parse logs contain the unmarshal error text: %s", logs)
-	}
-	if !strings.Contains(logs, "Failed to load FAQ metadata for chunk chunk-1: error_len=") ||
-		!strings.Contains(logs, "Failed to parse image info: error_len=") {
-		t.Fatalf("log = %s, want both parse warnings with error_len=", logs)
-	}
-}
-
-// embedFailKnowledgeBaseService resolves kb-1 to a model key made of a
-// tenant-chosen model name and base URL, then fails the query embedding.
-type embedFailKnowledgeBaseService struct {
-	searchLogKnowledgeBaseService
-}
-
-func (s *embedFailKnowledgeBaseService) ResolveEmbeddingModelKeys(
-	context.Context, []*types.KnowledgeBase,
-) map[string]string {
-	return map[string]string{"kb-1": "model-S3NT1NEL|https://embed.example/S3NT1NEL"}
-}
-
-func (s *embedFailKnowledgeBaseService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
-	return nil, errors.New("embedding failed")
-}
-
-func TestSearchKnowledgeEmbeddingFailureLogOmitsModelKey(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	tool := NewSearchKnowledgeTool(&embedFailKnowledgeBaseService{}, nil, nil, types.SearchTargets{{
-		Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1,
-	}}, nil, nil)
-	_, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"hello","mode":"semantic"}`))
-	logs := buf.String()
-	if strings.Contains(logs, sentinel) {
-		t.Fatalf("embedding log leaked the model key: %s", logs)
-	}
-	if !strings.Contains(logs, "Failed to pre-compute embedding: model_key_len=") {
-		t.Fatalf("log = %s, want the pre-compute embedding warning with model_key_len=", logs)
 	}
 }
 

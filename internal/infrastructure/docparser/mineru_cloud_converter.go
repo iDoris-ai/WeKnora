@@ -235,8 +235,7 @@ func (c *MinerUCloudReader) pollBatchResult(
 
 		items, err := c.fetchBatchStatus(ctx, batchID, headers)
 		if err != nil {
-			logger.Errorf(context.Background(), "[MinerUCloud] poll #%d failed: error_len=%d error_type=%T",
-				pollCount, len(err.Error()), err)
+			logger.Errorf(context.Background(), "[MinerUCloud] poll #%d failed: %v", pollCount, err)
 			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
@@ -305,8 +304,13 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 		return nil, nil
 	}
 
-	logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result raw_bytes=%d",
-		len(pollResp.Data.ExtractResult))
+	// Dump the raw extract_result JSON for debugging
+	rawExtract := string(pollResp.Data.ExtractResult)
+	if len(rawExtract) > 4000 {
+		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...", rawExtract[:4000])
+	} else {
+		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result: %s", rawExtract)
+	}
 
 	// Pretty-print the structure to reveal all available fields
 	var rawObj interface{}

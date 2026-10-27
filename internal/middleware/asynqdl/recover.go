@@ -28,7 +28,7 @@ func CallRecovered(
 ) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf(ctx, "task %s panicked: %s\n%s", t.Type(), logger.PanicValue(r), debug.Stack())
+			logger.Errorf(ctx, "task %s panicked: %v\n%s", t.Type(), r, debug.Stack())
 			err = fmt.Errorf("task %s panicked: %v", t.Type(), r)
 		}
 	}()

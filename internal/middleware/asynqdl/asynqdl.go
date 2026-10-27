@@ -82,9 +82,8 @@ func MiddlewareWithCallback(repo interfaces.TaskDeadLetterRepository, cb OnDeadL
 				if dl != nil {
 					if insertErr := repo.Insert(context.Background(), dl); insertErr != nil {
 						logger.Warnf(ctx,
-							"asynq dead-letter: failed to record %s task: %v "+
-								"(original task error_len=%d error_type=%T)",
-							t.Type(), insertErr, len(err.Error()), err,
+							"asynq dead-letter: failed to record %s task: %v (original task error: %v)",
+							t.Type(), insertErr, err,
 						)
 					}
 				}
@@ -102,7 +101,7 @@ func MiddlewareWithCallback(repo interfaces.TaskDeadLetterRepository, cb OnDeadL
 func safeInvokeCallback(ctx context.Context, t *asynq.Task, taskErr error, cb OnDeadLetter) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Warnf(ctx, "asynq dead-letter callback panicked for %s: %s", t.Type(), logger.PanicValue(r))
+			logger.Warnf(ctx, "asynq dead-letter callback panicked for %s: %v", t.Type(), r)
 		}
 	}()
 	cb(context.Background(), t, taskErr)

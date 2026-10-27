@@ -417,7 +417,7 @@ func (c *Connector) item(ctx context.Context, p *project, ref, file string) (typ
 	// on TrimSpace: a blob that holds only whitespace still carries content the
 	// repository has, and only a zero-byte blob has none.
 	if len(body) == 0 {
-		logger.Infof(ctx, "[GitLab] empty file path_len=%d, syncing its path only", len(title))
+		logger.Infof(ctx, "[GitLab] %s is empty, syncing its path only", title)
 		body = []byte("# " + title + "\n")
 	}
 	// UpdatedAt is intentionally left unset: the file's last commit time is not

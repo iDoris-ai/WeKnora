@@ -1,13 +1,11 @@
 package chatpipeline
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -357,42 +355,5 @@ func TestExtractor_Extract_TruncatedProseIsNotDeclined(t *testing.T) {
 				t.Fatalf("errors.Is(err, ErrModelDeclined) = %v, want %v (err=%v)", got, tc.wantDeclined, err)
 			}
 		})
-	}
-}
-
-// failingChat fails every Chat call with err.
-type failingChat struct{ err error }
-
-func (c failingChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
-	return nil, c.err
-}
-
-func (c failingChat) ChatStream(
-	context.Context, []chat.Message, *chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	return nil, c.err
-}
-func (c failingChat) GetModelName() string { return "failing" }
-func (c failingChat) GetModelID() string   { return "failing" }
-
-// A vendor's error reply can echo the chunk being extracted; the log keeps its length and type only.
-func TestExtractor_Extract_ChatFailureLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	cause := errors.New("vendor echoed " + sentinel)
-	e := NewExtractor(failingChat{err: cause}, &types.PromptTemplateStructured{Description: "extract"})
-	if _, err := e.Extract(context.Background(), "chunk text"); !errors.Is(err, cause) {
-		t.Fatalf("Extract error = %v, want the chat error", err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, "failed to chat: error_len=") {
-		t.Fatalf("expected the chat failure line with error_len, got: %s", out)
-	}
-	if strings.Contains(out, sentinel) {
-		t.Fatalf("log carries the vendor error text: %s", out)
 	}
 }

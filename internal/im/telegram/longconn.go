@@ -52,8 +52,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			logger.Errorf(ctx, "[Telegram] getUpdates error: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Errorf(ctx, "[Telegram] getUpdates error: %v", err)
 			// Back off on error
 			select {
 			case <-ctx.Done():
@@ -74,7 +73,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 			}
 
 			if err := c.handler(ctx, msg); err != nil {
-				logger.Errorf(ctx, "[Telegram] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
+				logger.Errorf(ctx, "[Telegram] Handle message error: %v", err)
 			}
 		}
 	}
@@ -95,14 +94,13 @@ func (c *LongConnClient) getUpdates(ctx context.Context) ([]telegramUpdate, erro
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, im.RedactRequestError(err)
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes the bot token in the path.
-		return nil, im.RedactRequestError(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 

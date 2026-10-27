@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // DuckDuckGoProvider implements web search using DuckDuckGo (HTML first, API fallback)
@@ -83,7 +84,11 @@ func (p *DuckDuckGoProvider) searchHTML(
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 	)
 
-	logger.Infof(ctx, "DuckDuckGo HTML request: GET %s query_len=%d", baseURL, len(query))
+	curlCommand := fmt.Sprintf(
+		"curl -X GET '%s' -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'",
+		req.URL.String(),
+	)
+	logger.Infof(ctx, "Curl of request: %s", secutils.SanitizeForLog(curlCommand))
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -122,7 +127,7 @@ func (p *DuckDuckGoProvider) searchHTML(
 		}
 	})
 
-	logger.Infof(ctx, "DuckDuckGo HTML search returned %d results query_len=%d", len(results), len(query))
+	logger.Infof(ctx, "DuckDuckGo HTML search returned %d results for query: %s", len(results), query)
 	return results, nil
 }
 
@@ -209,7 +214,7 @@ func (p *DuckDuckGoProvider) searchAPI(
 		}
 	}
 
-	logger.Infof(ctx, "DuckDuckGo API search returned %d results query_len=%d", len(results), len(query))
+	logger.Infof(ctx, "DuckDuckGo API search returned %d results for query: %s", len(results), query)
 	return results, nil
 }
 

@@ -2,7 +2,6 @@ package chatpipeline
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -78,9 +77,7 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 					Knowledge:     knowledgeID,
 				}, entity)
 				if err != nil {
-					logger.Errorf(ctx,
-						"Failed to search entity in Knowledge %s: error_len=%d error_type=%T",
-						knowledgeID, len(fmt.Sprint(err)), err)
+					logger.Errorf(ctx, "Failed to search entity in Knowledge %s: %v", knowledgeID, err)
 					return
 				}
 
@@ -108,9 +105,7 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 
 				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: knowledgeBaseID}, entity)
 				if err != nil {
-					logger.Errorf(ctx,
-						"Failed to search entity in KB %s: error_len=%d error_type=%T",
-						knowledgeBaseID, len(fmt.Sprint(err)), err)
+					logger.Errorf(ctx, "Failed to search entity in KB %s: %v", knowledgeBaseID, err)
 					return
 				}
 
@@ -157,8 +152,7 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	}
 	listed, err := p.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to list chunks, session_id: %s, error_len=%d error_type=%T",
-			chatManage.SessionID, len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to list chunks, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
 	}
 	chunks := make([]*types.Chunk, 0, len(listed))
@@ -172,8 +166,7 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	}
 	knowledges, err := p.knowledgeRepo.GetKnowledgeBatchByIDOnly(ctx, knowledgeIDs)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to list knowledge, session_id: %s, error_len=%d error_type=%T",
-			chatManage.SessionID, len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to list knowledge, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
 	}
 

@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	stderrors "errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -107,8 +106,7 @@ func (h *Handler) ForkSession(c *gin.Context) {
 			_ = c.Error(errors.NewBadRequestError("fork point must be a user or assistant message"))
 			return
 		}
-		logger.Errorf(ctx, "fork session %s failed: error_len=%d error_type=%T",
-			sessionID, len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "fork session %s failed: %v", sessionID, err)
 		_ = c.Error(errors.NewInternalServerError("fork session failed"))
 		return
 	}

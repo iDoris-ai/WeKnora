@@ -482,18 +482,31 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// 打印每个Chunk的详细信息
 	for idx, chunkData := range chunks {
+		contentPreview := chunkData.Content
+		if len(contentPreview) > 200 {
+			contentPreview = contentPreview[:200] + "..."
+		}
 		logger.Infof(ctx, "[DocReader] Chunk #%d (seq=%d): 内容长度=%d, 图片数=%d, 范围=[%d-%d]",
 			idx, chunkData.Seq, len(chunkData.Content), len(chunkData.Images), chunkData.Start, chunkData.End)
+		logger.Debugf(ctx, "[DocReader] Chunk #%d 内容预览: %s", idx, contentPreview)
 
 		// 打印图片详细信息
 		for imgIdx, img := range chunkData.Images {
 			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.URL)
 			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalURL)
 			if img.Caption != "" {
-				logger.Infof(ctx, "[DocReader]   图片 #%d: caption_len=%d", imgIdx, len(img.Caption))
+				captionPreview := img.Caption
+				if len(captionPreview) > 100 {
+					captionPreview = captionPreview[:100] + "..."
+				}
+				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, captionPreview)
 			}
 			if img.OCRText != "" {
-				logger.Infof(ctx, "[DocReader]   图片 #%d: ocr_len=%d", imgIdx, len(img.OCRText))
+				ocrPreview := img.OCRText
+				if len(ocrPreview) > 100 {
+					ocrPreview = ocrPreview[:100] + "..."
+				}
+				logger.Infof(ctx, "[DocReader]   图片 #%d: OCRText=%s", imgIdx, ocrPreview)
 			}
 			logger.Infof(ctx, "[DocReader]   图片 #%d: 位置=[%d-%d]", imgIdx, img.Start, img.End)
 		}
@@ -1299,7 +1312,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned unusable content")
 		return nil, err
 	}
-	logger.GetLogger(ctx).WithField("summary_len", len(result.Summary)).
+	logger.GetLogger(ctx).WithField("summary", result.Summary).
 		WithField("has_profile", result.Profile != nil).Infof("GetSummary success")
 	return result, nil
 }
@@ -3821,9 +3834,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.FileURL != "" {
 		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
 		if err := secutils.ValidateURLForSSRF(payload.FileURL); err != nil {
-			logger.Errorf(ctx,
-				"File URL rejected for SSRF protection in ProcessDocument: %s, error_len=%d error_type=%T",
-				secutils.RedactURL(payload.FileURL), len(err.Error()), err)
+			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, err: %v", payload.FileURL, err)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
@@ -3835,9 +3846,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		resolvedFileType := payload.FileType
 		contentBytes, err := downloadFileFromURL(ctx, payload.FileURL, &resolvedFileName, &resolvedFileType)
 		if err != nil {
-			// *url.Error quotes the full URL, so the error is logged by length only.
-			logger.Errorf(ctx, "Failed to download file from URL: %s, error_len=%d error_type=%T",
-				secutils.RedactURL(payload.FileURL), len(err.Error()), err)
+			logger.Errorf(ctx, "Failed to download file from URL: %s, error: %v", payload.FileURL, err)
 			if isLastRetry {
 				knowledge.ParseStatus = "failed"
 				knowledge.ErrorMessage = err.Error()
@@ -3903,8 +3912,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 					logger.Warnf(ctx, "Failed to update knowledge title from extracted page title: %v", err)
 				} else {
-					logger.Infof(ctx, "Updated knowledge title to extracted page title (title_len=%d)",
-						len(extractedTitle))
+					logger.Infof(ctx, "Updated knowledge title to extracted page title: %s", extractedTitle)
 				}
 			}
 		}
@@ -4190,8 +4198,7 @@ func (s *knowledgeService) convert(
 
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
-			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, error_len=%d error_type=%T",
-				secutils.RedactURL(payload.URL), len(err.Error()), err)
+			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", payload.URL, err)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
@@ -4253,17 +4260,15 @@ func (s *knowledgeService) convert(
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	if err != nil {
 		code, message := docReaderFailure(err)
-		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: error_len=%d error_type=%T",
-			knowledge.ID, code, len(err.Error()), err)
+		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			code, message, err)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 	}
 	sanitizeReadResult(result)
 	if result.Error != "" {
-		logger.Errorf(ctx,
-			"[convert] parser returned error kb=%s knowledge=%s file_name_len=%d type=%s engine=%q error_len=%d",
-			kb.ID, knowledge.ID, len(req.FileName), fileType, parserEngine, len(result.Error))
+		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
+			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
@@ -4315,13 +4320,13 @@ func (s *knowledgeService) callDocReaderWithTimeout(
 		// error via %w so errors.Is(callCtx.Err(), context.DeadlineExceeded)
 		// still works for upstream classification.
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			logger.Errorf(ctx, "[convert] docreader call timed out after %s (limit %s) file_name_len=%d",
-				elapsed, timeout, len(req.FileName))
+			logger.Errorf(ctx, "[convert] docreader call timed out after %s (limit %s) for %q",
+				elapsed, timeout, req.FileName)
 			return nil, fmt.Errorf("docreader call timeout after %s: %w", timeout, err)
 		}
 		return nil, err
 	}
-	logger.Infof(ctx, "[convert] docreader call ok in %s file_name_len=%d", elapsed, len(req.FileName))
+	logger.Infof(ctx, "[convert] docreader call ok in %s for %q", elapsed, req.FileName)
 	return result, nil
 }
 

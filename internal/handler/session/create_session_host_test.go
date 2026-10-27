@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -106,21 +105,4 @@ func TestCreateSessionWithoutProjectDirLeavesItEmpty(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 	require.NotNil(t, h.created)
 	require.Empty(t, h.created.HostWorkspaceDir)
-}
-
-func TestCreateSessionBindErrorLogOmitsBody(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	h := handlerWithApprovedDirs()
-	w := postSession(t, h, `{"title":"`+sentinel)
-
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "Failed to validate session creation parameters")
-	require.Contains(t, out, "error_len=")
 }

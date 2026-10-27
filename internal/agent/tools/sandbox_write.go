@@ -319,16 +319,16 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	}
 
 	if err := t.sink.WriteSessionWorkspaceFile(ctx, sessionID, clean, content); err != nil {
-		logger.Warnf(ctx, "[Tool][WriteSandboxFile] write failed: session=%s path_len=%d error_len=%d error_type=%T",
-			sessionID, len(clean), len(err.Error()), err)
+		logger.Warnf(ctx, "[Tool][WriteSandboxFile] write failed: session=%s path=%s err=%v",
+			sessionID, clean, err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("failed to write %s: %v", clean, err),
 		}, nil
 	}
 
-	logger.Infof(ctx, "[Tool][WriteSandboxFile] session=%s path_len=%d mode=%s chunk_bytes=%d total_bytes=%d",
-		sessionID, len(clean), mode, len(chunk), len(content))
+	logger.Infof(ctx, "[Tool][WriteSandboxFile] session=%s path=%s mode=%s chunk_bytes=%d total_bytes=%d",
+		sessionID, clean, mode, len(chunk), len(content))
 
 	// Check the whole file, not just this chunk: a chunk boundary lands in the
 	// middle of the source, so only the assembled result can be judged.

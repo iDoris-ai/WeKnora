@@ -69,7 +69,7 @@ func validateEndpointURL(endpoint, defaultEndpoint, requiredScheme string) error
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return fmt.Errorf("invalid endpoint URL: %w", im.RedactRequestError(err))
+		return fmt.Errorf("invalid endpoint URL: %w", err)
 	}
 	if u.Scheme != requiredScheme {
 		return fmt.Errorf("endpoint must use %s:// scheme, got %s://", requiredScheme, u.Scheme)
@@ -193,8 +193,7 @@ func (a *WebhookAdapter) HandleURLVerification(c *gin.Context) bool {
 	// Decrypt the echostr and return it
 	decrypted, err := a.decrypt(echoStr)
 	if err != nil {
-		logger.Errorf(c.Request.Context(), "[WeCom] Failed to decrypt echostr: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(c.Request.Context(), "[WeCom] Failed to decrypt echostr: %v", err)
 		c.String(http.StatusBadRequest, "decrypt failed")
 		return true
 	}
@@ -221,16 +220,16 @@ func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, err
 		return nil, fmt.Errorf("decrypt message: %w", err)
 	}
 
-	logger.Debugf(c.Request.Context(), "[WeCom] Raw decrypted callback body_bytes=%d", len(decrypted))
+	// Log raw decrypted message for debugging
+	logger.Debugf(c.Request.Context(), "[WeCom] Raw decrypted callback: %s", string(decrypted))
 
 	var msg wecomMessage
 	if err := xml.Unmarshal(decrypted, &msg); err != nil {
 		return nil, fmt.Errorf("unmarshal decrypted message: %w", err)
 	}
 
-	logger.Debugf(c.Request.Context(),
-		"[WeCom] Parsed webhook message: msgid=%s msgtype=%s from=%s content_len=%d picurl_len=%d mediaid_len=%d",
-		msg.MsgID, msg.MsgType, msg.FromUserName, len(msg.Content), len(msg.PicUrl), len(msg.MediaId))
+	logger.Debugf(c.Request.Context(), "[WeCom] Parsed webhook message: msgid=%s msgtype=%s from=%s content=%q picurl=%q mediaid=%q",
+		msg.MsgID, msg.MsgType, msg.FromUserName, msg.Content, msg.PicUrl, msg.MediaId)
 
 	// Determine chat type
 	chatType := im.ChatTypeDirect
@@ -299,13 +298,10 @@ func (a *WebhookAdapter) SendReply(ctx context.Context, incoming *im.IncomingMes
 	// For group chats, try sending to the group via appchat API first.
 	// This works for groups created via /cgi-bin/appchat/create.
 	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
-		appErr := a.sendToAppChat(ctx, accessToken, incoming.ChatID, reply)
-		if appErr == nil {
+		if err := a.sendToAppChat(ctx, accessToken, incoming.ChatID, reply); err == nil {
 			return nil
 		}
-		logger.Debugf(ctx,
-			"[WeCom] appchat/send failed for chat=%s, falling back to touser: error_len=%d error_type=%T",
-			incoming.ChatID, len(fmt.Sprint(appErr)), appErr)
+		logger.Debugf(ctx, "[WeCom] appchat/send failed for chat=%s, falling back to touser: %v", incoming.ChatID, err)
 	}
 
 	// Fallback (or direct message): send to the user directly.
@@ -331,14 +327,13 @@ func (a *WebhookAdapter) sendToAppChat(ctx context.Context, accessToken, chatID 
 	sendURL := fmt.Sprintf("%s/cgi-bin/appchat/send?access_token=%s", a.apiBaseURL, accessToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
+		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes access_token in the query.
-		return fmt.Errorf("send appchat message: %w", im.RedactRequestError(err))
+		return fmt.Errorf("send appchat message: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -376,14 +371,13 @@ func (a *WebhookAdapter) sendToUser(ctx context.Context, accessToken, userID str
 	sendURL := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", a.apiBaseURL, accessToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
+		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes access_token in the query.
-		return fmt.Errorf("send message: %w", im.RedactRequestError(err))
+		return fmt.Errorf("send message: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -416,13 +410,12 @@ func (a *WebhookAdapter) getAccessToken(ctx context.Context) (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", im.RedactRequestError(err))
+		return "", fmt.Errorf("create request: %w", err)
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes corpsecret in the query.
-		return "", fmt.Errorf("request access token: %w", im.RedactRequestError(err))
+		return "", fmt.Errorf("request access token: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -588,23 +581,18 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 	// SSRF protection: reject internal/private URLs unless on the WeCom API allowlist.
 	if !isAllowedIMAPIHost(rawURL, extraAllowedHost) {
 		if err := secutils.ValidateURLForSSRF(rawURL); err != nil {
-			// Most parse failures are rejected here, before NewRequest, and the parse
-			// error quotes rawURL with its access_token: keep only the scheme and host.
-			// A host that starts with a digit, has a port, and has no scheme can pass
-			// this SSRF check and only fails when NewRequest runs.
-			return nil, "", fmt.Errorf("URL rejected for security reasons: %v", im.RedactURLErrorInChain(err))
+			return nil, "", fmt.Errorf("URL rejected for security reasons: %v", err)
 		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create request: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes the URL (access_token in the query).
-		return nil, "", fmt.Errorf("download: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("download: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -612,9 +600,8 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string, extraAllowedH
 		return nil, "", fmt.Errorf("download failed: status=%d", resp.StatusCode)
 	}
 
-	// Content-Disposition carries the file name; log only its length.
-	logger.Debugf(ctx, "[WeCom] Download response: status=%d content-type=%s content_disposition_len=%d",
-		resp.StatusCode, resp.Header.Get("Content-Type"), len(resp.Header.Get("Content-Disposition")))
+	logger.Debugf(ctx, "[WeCom] Download response: status=%d content-type=%s content-disposition=%s",
+		resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"))
 
 	// Try to extract filename from Content-Disposition header.
 	// Supports both standard filename and RFC 5987 filename* parameters.

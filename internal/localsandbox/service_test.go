@@ -3,7 +3,6 @@ package localsandbox
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +21,6 @@ type fakeBackend struct {
 	stdout      string
 	stderr      string
 	exit        ExitStatus
-	prepareErr  error
 	spawnErr    error
 	available   error
 	ensureReady error
@@ -59,11 +56,7 @@ func (f *fakeBackend) Prepare(_ context.Context, p Policy) (Prepared, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, "prepare")
 	f.prepared = append(f.prepared, p.Fingerprint())
-	err := f.prepareErr
 	f.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
 	return fakePrepared{fp: p.Fingerprint()}, nil
 }
 
@@ -434,71 +427,13 @@ func envMapToSlice(env map[string]string) []string {
 	return out
 }
 
-func TestServiceRunLogOmitsCommandText(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	backend := &fakeBackend{stdout: "ok\n", exit: ExitStatus{Code: 0}}
-	svc := serviceFixture(t, backend, ModeAuto)
-
-	_, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo " + sentinel})
-	require.NoError(t, err)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "command_len=")
-}
-
-// The denied path is read out of the command's output, so it is as much the
-// command's text as the command itself.
-func TestServiceRunDeniedLogOmitsPath(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	backend := &fakeBackend{stderr: "touch: /" + sentinel + ": Operation not permitted\n", exit: ExitStatus{Code: 1}}
-	svc := serviceFixture(t, backend, ModeAuto)
-
-	res, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "touch /x"})
-	require.NoError(t, err)
-	require.True(t, res.Denial.IsDenied())
-	require.Equal(t, "/"+sentinel, res.Denial.Path)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "path_len=")
-}
-
-// work_dir is a tool argument (A24-OBS-09): neither a refused work_dir nor the cwd resolved from an accepted
-// one reaches the log, only their lengths.
-func TestServiceRunWorkDirLogsOmitPath(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	project, err := filepath.EvalSymlinks(t.TempDir())
-	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join(project, sentinel), 0o755))
-	svc := serviceFixtureWithProjects(t, &fakeBackend{exit: ExitStatus{Code: 0}}, ModeAuto, fixedProject(project))
-
-	_, err = svc.Run(context.Background(), RunRequest{
-		SessionID: "s1", Command: "pwd", WorkDir: "/" + sentinel + "-outside",
-	})
-	require.Error(t, err)
-	_, err = svc.Run(context.Background(), RunRequest{
-		SessionID: "s1", Command: "pwd", WorkDir: filepath.Join(project, sentinel),
-	})
-	require.NoError(t, err)
-
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "work_dir_len=")
-	require.Contains(t, logs, "cwd_len=")
+func TestPreviewCommandMasksInlineAssignments(t *testing.T) {
+	got := previewCommand(`export TOKEN="sk-secret"; FOO=bare ./run --model cogview-4`)
+	require.NotContains(t, got, "sk-secret")
+	require.NotContains(t, got, "bare")
+	require.Contains(t, got, "TOKEN=***")
+	require.Contains(t, got, "FOO=***")
+	require.Contains(t, got, "--model cogview-4")
 }
 
 // Two sessions on the same project share one directory. Overlapping Run
@@ -618,86 +553,4 @@ func TestServiceRunWithPolicyRejectsInvalidPolicy(t *testing.T) {
 	_, err := svc.RunWithPolicy(context.Background(), Policy{Cwd: "relative"}, RunRequest{Command: "ls"})
 	require.Error(t, err)
 	require.Empty(t, backend.prepared)
-}
-
-// The project directory is the host directory the user chose: neither the resolve error that quotes it nor the
-// resolved root reaches the log through the Service entry points, only their lengths.
-func TestGuardForSessionLogsOmitProjectDir(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	project := filepath.Join(t.TempDir(), sentinel, "sub")
-	require.NoError(t, os.MkdirAll(project, 0o755))
-	svc := serviceFixtureWithProjects(t, &fakeBackend{exit: ExitStatus{Code: 0}}, ModeAuto, fixedProject(project))
-	_, ws, err := svc.GuardForSession(context.Background(), "s1")
-	require.NoError(t, err)
-	require.Contains(t, ws.Root, sentinel)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Equal(t, 3, strings.Count(logs, "root_len=")) // Resolve, workspaceFor, GuardForSession
-
-	buf.Reset()
-	missing := filepath.Join(t.TempDir(), sentinel)
-	svc = serviceFixtureWithProjects(t, &fakeBackend{exit: ExitStatus{Code: 0}}, ModeAuto, fixedProject(missing))
-	_, _, err = svc.GuardForSession(context.Background(), "s1")
-	require.Error(t, err)
-	logs = buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "resolve workspace session=s1: error_len=")
-}
-
-func TestServiceRunPrepareLogOmitsErrorText(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	backend := &fakeBackend{prepareErr: errors.New("prepare " + sentinel)}
-	svc := serviceFixture(t, backend, ModeAuto)
-	_, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo hi"})
-	require.Error(t, err)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "prepare session=s1: error_len=")
-}
-
-// A project under home/Library is too broad to sandbox. The refusal quotes that directory.
-// home is EvalSymlinks'd first: macOS t.TempDir is /var/folders, which resolves to /private/var,
-// and a mismatched prefix makes rejectBroadWorkspace miss the Library check.
-func TestBuildPolicyLogOmitsLibraryPath(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	base, err := filepath.EvalSymlinks(t.TempDir())
-	require.NoError(t, err)
-	home := filepath.Join(base, "home")
-	project := filepath.Join(home, "Library", sentinel)
-	require.NoError(t, os.MkdirAll(project, 0o755))
-	appData := filepath.Join(home, "App Support", "WeKnora Lite")
-	resolver := NewWorkspaceResolver(DirLayout{
-		SessionRoot: filepath.Join(home, "Documents", "WeKnora"),
-	}, fixedProject(project))
-	svc := NewService(&fakeBackend{}, resolver, NewPolicyBuilder(home, appData), fixedMode(ModeAuto))
-
-	_, _, err = svc.GuardForSession(context.Background(), "s1")
-	require.Error(t, err)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	var policyLine string
-	for _, line := range strings.Split(logs, "\n") {
-		if strings.Contains(line, "build policy session=s1") {
-			policyLine = line
-			break
-		}
-	}
-	require.NotEmpty(t, policyLine)
-	require.Contains(t, policyLine, "root_len=")
-	require.Contains(t, policyLine, "error_len=")
 }

@@ -71,14 +71,14 @@ func (p *OllamaProvider) Search(
 		maxResults = maxOllamaResults
 	}
 
-	logger.Infof(ctx, "[WebSearch][Ollama] query_len=%d maxResults=%d url=%s", len(query), maxResults, p.baseURL)
+	logger.Infof(ctx, "[WebSearch][Ollama] query=%q maxResults=%d url=%s", query, maxResults, p.baseURL)
 	req, err := p.buildRequest(ctx, query, maxResults)
 	if err != nil {
 		return nil, err
 	}
 	results, err := p.doSearch(ctx, req)
 	if err != nil {
-		logger.Warnf(ctx, "[WebSearch][Ollama] failed: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Warnf(ctx, "[WebSearch][Ollama] failed: %v", err)
 		return nil, err
 	}
 	logger.Infof(ctx, "[WebSearch][Ollama] returned %d results", len(results))
@@ -121,7 +121,7 @@ func (p *OllamaProvider) doSearch(ctx context.Context, req *http.Request) ([]*ty
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Warnf(ctx, "[WebSearch][Ollama] API returned status %d body_bytes=%d", resp.StatusCode, len(body))
+		logger.Warnf(ctx, "[WebSearch][Ollama] API returned status %d: %s", resp.StatusCode, string(body))
 		return nil, fmt.Errorf("ollama API returned status %d: %s", resp.StatusCode, string(body))
 	}
 

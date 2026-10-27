@@ -59,7 +59,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	tenantID uint64,
 	asrModelID string, // optional; enables audio transcription when set
 ) (*types.MessageAttachment, error) {
-	logger.Infof(ctx, "processing attachment: file_name_len=%d, fileSize=%d", len(fileName), fileSize)
+	logger.Infof(ctx, "processing attachment: fileName=%s, fileSize=%d", secutils.SanitizeForLog(fileName), fileSize)
 
 	// Validate filename (injection / path-traversal checks)
 	safeFileName, isValid := secutils.ValidateInput(fileName)
@@ -98,34 +98,30 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	// Extract text content based on file type; errors are non-fatal.
 	if p.isTextFile(ext) {
 		if err := p.processTextFile(ctx, data, attachment); err != nil {
-			logger.Warnf(ctx, "text file processing failed: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "text file processing failed: %v", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to process text file</message><details>%v</details></error>", err)
 		}
 	} else if docparser.IsAudioFormat(ext) {
 		if err := p.processAudioFile(ctx, data, baseName, attachment, asrModelID); err != nil {
-			logger.Warnf(ctx, "audio transcription failed: error_len=%d error_type=%T, keeping placeholder",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "audio transcription failed: %v, keeping placeholder", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to transcribe audio file</message><details>%v</details></error>", err)
 		}
 	} else if docparser.IsSimpleFormat(ext) {
 		if err := p.processWithDocParser(ctx, data, baseName, ext, attachment, tenantID); err != nil {
-			logger.Warnf(ctx, "SimpleFormatReader failed: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "SimpleFormatReader failed: %v", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to parse document</message><details>%v</details></error>", err)
 		}
 	} else {
 		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID); err != nil {
-			logger.Warnf(ctx, "DocumentReader failed: error_len=%d error_type=%T, keeping metadata only",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "DocumentReader failed: %v, keeping metadata only", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to read document</message><details>%v</details></error>", err)
 		}
 	}
 
 	attachment.Content = common.CleanInvalidUTF8(attachment.Content)
 
-	logger.Infof(ctx, "attachment processed: file_name_len=%d, truncated=%v, contentLen=%d",
-		len(baseName), attachment.IsTruncated, len(attachment.Content))
+	logger.Infof(ctx, "attachment processed: fileName=%s, truncated=%v, contentLen=%d",
+		secutils.SanitizeForLog(baseName), attachment.IsTruncated, len(attachment.Content))
 
 	return attachment, nil
 }
@@ -186,8 +182,7 @@ func (p *AttachmentProcessor) processWithDocParser(
 	if len(result.ImageRefs) > 0 && p.imageResolver != nil {
 		updatedMarkdown, _, err := p.imageResolver.ResolveAndStore(ctx, result, p.fileService, tenantID)
 		if err != nil {
-			logger.Warnf(ctx, "image resolution failed: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "image resolution failed: %v", err)
 		} else {
 			result.MarkdownContent = updatedMarkdown
 		}
@@ -216,7 +211,7 @@ func (p *AttachmentProcessor) processAudioFile(
 		return fmt.Errorf("failed to get ASR model: %w", err)
 	}
 
-	logger.Infof(ctx, "starting audio transcription: file_name_len=%d, size=%d", len(fileName), len(data))
+	logger.Infof(ctx, "starting audio transcription: fileName=%s, size=%d", fileName, len(data))
 	res, err := asrInstance.Transcribe(ctx, data, fileName)
 	if err != nil {
 		return fmt.Errorf("audio transcription failed: %w", err)
@@ -261,9 +256,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 		Remote:    p.documentReader,
 	})
 	if err != nil {
-		logger.Warnf(ctx,
-			"parser engine (name_len=%d) unusable for this attachment, using docreader: error_len=%d error_type=%T",
-			len(parserEngine), len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "parser engine %q unusable for this attachment, using docreader: %v", parserEngine, err)
 		reader = p.documentReader
 	}
 
@@ -282,8 +275,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	if len(result.ImageRefs) > 0 && p.imageResolver != nil {
 		updatedMarkdown, _, err := p.imageResolver.ResolveAndStore(ctx, result, p.fileService, tenantID)
 		if err != nil {
-			logger.Warnf(ctx, "image resolution failed: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "image resolution failed: %v", err)
 		} else {
 			result.MarkdownContent = updatedMarkdown
 		}

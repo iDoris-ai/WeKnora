@@ -1,16 +1,13 @@
 package session
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -78,40 +75,4 @@ func TestAgentStreamHandlerInternalErrorKeepsErrorType(t *testing.T) {
 	evt := streams.events[0]
 	require.Equal(t, types.ResponseTypeError, evt.Type)
 	require.True(t, evt.Done)
-}
-
-// failingStreamManager fails every append with an error that quotes the sentinel.
-type failingStreamManager struct {
-	interfaces.StreamManager
-}
-
-func (failingStreamManager) AppendEvent(context.Context, string, string, interfaces.StreamEvent) error {
-	return errors.New("redis write S3NT1NEL")
-}
-
-// A failed append is logged with the error's length and type only. The handler
-// logger is taken from the handler context, so the buffer is installed first.
-func TestAgentStreamHandlerAppendFailureLogsOmitErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	h := NewAgentStreamHandler(
-		context.Background(), "sess-1", "msg-1", "req-1", 1, time.Now(),
-		&types.Message{}, failingStreamManager{}, nil, nil, nil, nil,
-	)
-	require.NoError(t, h.handleThought(context.Background(), event.Event{
-		ID: "evt-1", Type: event.EventAgentThought, Data: event.AgentThoughtData{Content: "thinking"},
-	}))
-	require.NoError(t, h.handleError(context.Background(), event.Event{
-		ID: "evt-err", Type: event.EventError,
-		Data: event.ErrorData{Stage: "think", Error: "llm unavailable"},
-	}))
-
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "Append thought event to stream failed: error_len=")
-	require.Contains(t, logs, "Append error event to stream failed: error_len=")
 }

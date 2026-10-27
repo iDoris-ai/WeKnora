@@ -189,8 +189,8 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 
 	entries, err := t.source.ListSessionFiles(ctx, sessionID, targetDir)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][ListSandboxFiles] list failed: session=%s dir_len=%d error_len=%d error_type=%T",
-			sessionID, len(targetDir), len(err.Error()), err)
+		logger.Warnf(ctx, "[Tool][ListSandboxFiles] list failed: session=%s dir=%s err=%v",
+			sessionID, targetDir, err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("failed to list %s: %v", targetDir, err),
@@ -239,8 +239,8 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 		})
 	}
 
-	logger.Infof(ctx, "[Tool][ListSandboxFiles] session=%s dir_len=%d count=%d truncated=%v",
-		sessionID, len(targetDir), len(items), truncated)
+	logger.Infof(ctx, "[Tool][ListSandboxFiles] session=%s dir=%s count=%d truncated=%v",
+		sessionID, targetDir, len(items), truncated)
 
 	return &types.ToolResult{
 		Success: true,

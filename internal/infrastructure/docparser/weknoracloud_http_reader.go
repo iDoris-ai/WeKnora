@@ -107,9 +107,7 @@ func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		logger.Errorf(context.Background(),
-			"[WeKnoraCloud] http read unexpected status %d body_bytes=%d",
-			resp.StatusCode, len(bodyBytes))
+		logger.Errorf(context.Background(), "[WeKnoraCloud] http read unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
 		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 	var submit weKnoraCloudAsyncSubmitResponse
@@ -118,9 +116,7 @@ func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.
 		return nil, fmt.Errorf("http decode read submit response: %w", err)
 	}
 	if strings.TrimSpace(submit.TaskID) == "" {
-		logger.Errorf(context.Background(),
-			"[WeKnoraCloud] submit response missing task_id (status=%q message_len=%d)",
-			submit.Status, len(submit.Message))
+		logger.Errorf(context.Background(), "[WeKnoraCloud] submit response missing task_id (status=%q message=%q)", submit.Status, submit.Message)
 		return nil, fmt.Errorf("weknoracloud docreader submit response missing task_id")
 	}
 	logger.Infof(ctx, "[WeKnoraCloud] task submitted task_id=%s file=%q type=%q", submit.TaskID, req.FileName, req.FileType)
@@ -171,9 +167,7 @@ func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, t
 			if resp.StatusCode != http.StatusOK {
 				bodyBytes, _ := io.ReadAll(resp.Body)
 				err = fmt.Errorf("http poll task status %d: %s", resp.StatusCode, string(bodyBytes))
-				logger.Errorf(context.Background(),
-					"[WeKnoraCloud] poll task_id=%s status %d body_bytes=%d",
-					taskID, resp.StatusCode, len(bodyBytes))
+				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s status %d: %s", taskID, resp.StatusCode, string(bodyBytes))
 				return
 			}
 			if decodeErr := json.NewDecoder(resp.Body).Decode(&taskResp); decodeErr != nil {
@@ -192,25 +186,21 @@ func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, t
 			}
 			res := fromHTTPReadResponse(taskResp.Result)
 			if res.Error != "" {
-				logger.Errorf(ctx,
-					"[WeKnoraCloud] task_id=%s completed with result.error error_len=%d", taskID, len(res.Error))
+				logger.Errorf(ctx, "[WeKnoraCloud] task_id=%s completed with result.error: %s", taskID, res.Error)
 			} else {
 				logger.Debugf(ctx, "[WeKnoraCloud] task_id=%s completed ok markdownLen=%d", taskID, len(res.MarkdownContent))
 			}
 			return res, nil
 		case "failed":
 			if taskResp.Error != "" {
-				logger.Errorf(context.Background(),
-					"[WeKnoraCloud] task_id=%s failed: error_len=%d", taskID, len(taskResp.Error))
+				logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s failed: %s", taskID, taskResp.Error)
 				return nil, fmt.Errorf("weknoracloud docreader task failed: %s", taskResp.Error)
 			}
-			logger.Errorf(context.Background(),
-				"[WeKnoraCloud] task_id=%s failed: message_len=%d", taskID, len(taskResp.Message))
+			logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s failed: %s", taskID, taskResp.Message)
 			return nil, fmt.Errorf("weknoracloud docreader task failed: %s", taskResp.Message)
 		case "cancelled":
 			if taskResp.Error != "" {
-				logger.Errorf(context.Background(),
-					"[WeKnoraCloud] task_id=%s cancelled: error_len=%d", taskID, len(taskResp.Error))
+				logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s cancelled: %s", taskID, taskResp.Error)
 				return nil, fmt.Errorf("weknoracloud docreader task cancelled: %s", taskResp.Error)
 			}
 			logger.Errorf(context.Background(), "[WeKnoraCloud] task_id=%s cancelled", taskID)

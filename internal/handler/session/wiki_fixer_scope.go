@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -53,8 +52,7 @@ func resolveBuiltinWikiFixerTenantScope(
 	kbID := kbIDs[0]
 	kb, err := kbLookup.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
-		logger.Warnf(ctx, "wiki fixer: failed to resolve KB %s for shared scope: error_len=%d error_type=%T",
-			secutils.SanitizeForLog(kbID), len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "wiki fixer: failed to resolve KB %s for shared scope: %v", secutils.SanitizeForLog(kbID), err)
 		return agent, 0
 	}
 	if kb == nil {
@@ -68,8 +66,7 @@ func resolveBuiltinWikiFixerTenantScope(
 	permissions := access.NewKBSharePermissions(ctx, kbShare, currentTenantID, callerTenantRole)
 	allowed, err := permissions.Check(kb.ID, types.OrgRoleEditor)
 	if err != nil {
-		logger.Warnf(ctx, "wiki fixer: failed to check shared KB %s permission: error_len=%d error_type=%T",
-			secutils.SanitizeForLog(kb.ID), len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "wiki fixer: failed to check shared KB %s permission: %v", secutils.SanitizeForLog(kb.ID), err)
 		return agent, 0
 	}
 	if !allowed {

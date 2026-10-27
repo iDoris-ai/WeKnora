@@ -93,10 +93,6 @@ type settingSpec struct {
 	// (e.g. asynq worker pool size). The UI shows a restart badge; the
 	// service persists the flag on first write.
 	RequiresRestart bool
-	// IsSecret keeps the value out of the audit log (old and new are both
-	// written as "***"). The registry is the authority; the row's is_secret
-	// column is only a supplement.
-	IsSecret bool
 }
 
 // registry pins the set of legal keys. Expanding it is a deliberate,
@@ -988,19 +984,15 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 	// Capture pre-image for the audit log — pulled fresh, not from
 	// any cache, so concurrent admin edits race-fairly (last writer
 	// wins, audit reflects what was actually replaced).
-	prev, err := s.repo.Get(ctx, key)
-	if err != nil {
-		return nil, fmt.Errorf("read system setting %q: %w", key, err)
-	}
+	prev, _ := s.repo.Get(ctx, key)
 	var oldValue types.JSON
 	var category, description string
-	isSecret := spec.IsSecret
-	var requiresRestart bool
+	var isSecret, requiresRestart bool
 	if prev != nil {
 		oldValue = prev.Value
 		category = prev.Category
 		description = prev.Description
-		isSecret = spec.IsSecret || prev.IsSecret
+		isSecret = prev.IsSecret
 		requiresRestart = prev.RequiresRestart
 	} else {
 		// First-write path: derive category/description from registry
@@ -1056,7 +1048,7 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 	s.dispatchSideEffects(ctx, key)
 
 	s.publishChange(ctx, key)
-	s.emitChangeAudit(ctx, key, spec.Type, oldValue, encoded, isSecret)
+	s.emitChangeAudit(ctx, key, spec.Type, oldValue, encoded)
 	return persisted, nil
 }
 
@@ -1076,10 +1068,7 @@ func (s *systemSettingService) Reset(ctx context.Context, key string) error {
 	}
 
 	// Capture pre-image for the audit log before the row vanishes.
-	prev, err := s.repo.Get(ctx, key)
-	if err != nil {
-		return fmt.Errorf("read system setting %q: %w", key, err)
-	}
+	prev, _ := s.repo.Get(ctx, key)
 
 	deleted, err := s.repo.Delete(ctx, key)
 	if err != nil {
@@ -1104,7 +1093,7 @@ func (s *systemSettingService) Reset(ctx context.Context, key string) error {
 	// is intentionally null to flag this as a reset (vs an Update
 	// which always writes a concrete new_value).
 	if deleted && prev != nil {
-		s.emitChangeAudit(ctx, key, spec.Type, prev.Value, nil, spec.IsSecret || prev.IsSecret)
+		s.emitChangeAudit(ctx, key, spec.Type, prev.Value, nil)
 	}
 	return nil
 }
@@ -1205,28 +1194,17 @@ func (s *systemSettingService) consumeMessages(ctx context.Context, ch <-chan *r
 // This mirrors tenantMemberService.emitAudit's failure semantics: the
 // business op (config update) succeeds even if audit is broken.
 func (s *systemSettingService) emitChangeAudit(
-	ctx context.Context, key, valueType string, oldValue, newValue types.JSON, secret bool,
+	ctx context.Context, key, valueType string, oldValue, newValue types.JSON,
 ) {
 	if s.audit == nil {
 		return
 	}
-	detailsMap := map[string]any{
+	details, _ := json.Marshal(map[string]any{
 		"key":        key,
 		"value_type": valueType,
 		"old_value":  json.RawMessage(oldValue),
 		"new_value":  json.RawMessage(newValue),
-	}
-	if secret {
-		// nil stays JSON null; any stored value becomes the JSON string "***".
-		if oldValue != nil {
-			detailsMap["old_value"] = "***"
-		}
-		if newValue != nil {
-			detailsMap["new_value"] = "***"
-		}
-		detailsMap["redacted"] = true
-	}
-	details, _ := json.Marshal(detailsMap)
+	})
 	_ = s.audit.Log(ctx, &types.AuditLog{
 		// tenant_id=0 marks the row as system-scope (the audit_logs
 		// table itself is tenant-scoped; 0 is the convention for

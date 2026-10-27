@@ -164,32 +164,22 @@ func (r *ToolRegistry) ExecuteTool(
 	if err := ctx.Err(); err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
-	tool, err := r.GetTool(name)
-	retiredMsg := ""
-	if err != nil {
-		retiredMsg = RetiredToolReplacement(name)
-	}
-	// An unregistered name is whatever the model emitted, so it is logged by length only (A24-OBS-10).
-	loggedName := name
-	if err != nil && retiredMsg == "" {
-		loggedName = "unknown"
-	}
 	common.PipelineInfo(ctx, "AgentTool", "execute_start", map[string]interface{}{
-		"tool":     loggedName,
-		"args_len": len(args),
+		"tool": name,
+		"args": args,
 	})
+	tool, err := r.GetTool(name)
 	if err != nil {
-		if retiredMsg != "" {
+		if msg := RetiredToolReplacement(name); msg != "" {
 			common.PipelineWarn(ctx, "AgentTool", "retired_tool", map[string]interface{}{
-				"tool":   name,
-				"reason": retiredMsg,
+				"tool":  name,
+				"error": msg,
 			})
-			return &types.ToolResult{Success: false, Error: retiredMsg}, nil
+			return &types.ToolResult{Success: false, Error: msg}, nil
 		}
 		common.PipelineError(ctx, "AgentTool", "execute_failed", map[string]interface{}{
-			"tool":            loggedName,
-			"tool_name_bytes": len(name),
-			"error_len":       len(err.Error()),
+			"tool":  name,
+			"error": err.Error(),
 		})
 		return &types.ToolResult{
 			Success: false,
@@ -241,8 +231,8 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 			errMsg += editSandboxMissingFieldHint
 		}
 		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
-			"tool":       name,
-			"errors_len": len(errMsg),
+			"tool":   name,
+			"errors": errMsg,
 		})
 		return &types.ToolResult{
 			Success: false,
@@ -280,19 +270,17 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	}
 
 	fields := map[string]interface{}{
-		"tool":     name,
-		"args_len": len(args),
+		"tool": name,
+		"args": args,
 	}
 	if result != nil {
 		fields["success"] = result.Success
 		if result.Error != "" {
-			// Tool errors can quote the call's input; see runToolCall.
-			fields["error_len"] = len(result.Error)
+			fields["error"] = result.Error
 		}
 	}
 	if execErr != nil {
-		fields["error_type"] = fmt.Sprintf("%T", execErr)
-		fields["error_len"] = len(execErr.Error())
+		fields["error"] = execErr.Error()
 		common.PipelineError(ctx, "AgentTool", "execute_done", fields)
 	} else if result != nil && !result.Success {
 		common.PipelineWarn(ctx, "AgentTool", "execute_done", fields)
@@ -316,8 +304,7 @@ func executeRecovered(
 ) (result *types.ToolResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf(ctx, "[ToolRegistry] Tool %s panicked: %s\n%s",
-				tool.Name(), logger.PanicValue(r), debug.Stack())
+			logger.Errorf(ctx, "[ToolRegistry] Tool %s panicked: %v\n%s", tool.Name(), r, debug.Stack())
 			// The panic value can carry internals (paths, addresses); the
 			// model and the user only need to know the call did not complete.
 			err = fmt.Errorf("tool %s failed with an internal error", tool.Name())

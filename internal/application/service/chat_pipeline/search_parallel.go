@@ -2,7 +2,6 @@ package chatpipeline
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -101,9 +100,9 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	}
 
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
-		"session_id":        chatManage.SessionID,
-		"has_entities":      len(chatManage.Entity) > 0,
-		"rewrite_query_len": len(chatManage.RewriteQuery),
+		"session_id":    chatManage.SessionID,
+		"has_entities":  len(chatManage.Entity) > 0,
+		"rewrite_query": chatManage.RewriteQuery,
 	})
 
 	// Deep-copy to avoid concurrent read/write on shared slice fields
@@ -158,8 +157,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 
 	for name, err := range errs {
-		logger.Warnf(ctx, "[SearchParallel] %s error: error_len=%d error_type=%T",
-			name, len(fmt.Sprint(err.Err)), err.Err)
+		logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)
 	}
 
 	pipelineInfo(ctx, "SearchParallel", "complete", map[string]interface{}{

@@ -89,8 +89,7 @@ func (e *AgentEngine) runCompaction(
 			logger.Infof(ctx, "[Agent][Round-%d] Nothing outside the keep-recent budget; "+
 				"skipping compaction", round)
 		} else {
-			logger.Warnf(ctx, "[Agent][Round-%d] Compaction failed: error_len=%d error_type=%T",
-				round, len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[Agent][Round-%d] Compaction failed: %v", round, err)
 		}
 		e.compactionExhaustedAt = len(messages)
 		return messages, false

@@ -106,8 +106,7 @@ func (c *LongConnClient) handleEvent(ctx context.Context, eventsAPIEvent slackev
 		logger.Infof(ctx, "[Slack] Received inner event type: %s", innerEvent.Type)
 		switch ev := innerEvent.Data.(type) {
 		case *slackevents.AppMentionEvent:
-			logger.Infof(ctx, "[Slack] AppMentionEvent: user=%s channel=%s text_len=%d",
-				ev.User, ev.Channel, len(ev.Text))
+			logger.Infof(ctx, "[Slack] AppMentionEvent: user=%s channel=%s text=%s", ev.User, ev.Channel, ev.Text)
 			// Handle @bot mention in a channel
 			threadTs := ev.ThreadTimeStamp
 			if threadTs == "" {
@@ -115,8 +114,7 @@ func (c *LongConnClient) handleEvent(ctx context.Context, eventsAPIEvent slackev
 			}
 			c.processMessage(ctx, ev.User, ev.Channel, ev.Text, threadTs, im.ChatTypeGroup, files)
 		case *slackevents.MessageEvent:
-			logger.Infof(ctx, "[Slack] MessageEvent: user=%s channel=%s text_len=%d subtype=%s bot_id=%s",
-				ev.User, ev.Channel, len(ev.Text), ev.SubType, ev.BotID)
+			logger.Infof(ctx, "[Slack] MessageEvent: user=%s channel=%s text=%s subtype=%s bot_id=%s", ev.User, ev.Channel, ev.Text, ev.SubType, ev.BotID)
 			if ev.BotID != "" {
 				return
 			}
@@ -147,6 +145,6 @@ func (c *LongConnClient) processMessage(ctx context.Context, user, channel, text
 	incoming := parseIncomingMessage(user, channel, text, ts, chatType, files)
 
 	if err := c.handler(ctx, incoming); err != nil {
-		logger.Errorf(ctx, "[Slack] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "[Slack] Handle message error: %v", err)
 	}
 }

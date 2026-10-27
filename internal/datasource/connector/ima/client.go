@@ -110,9 +110,8 @@ func (c *client) callAPIAt(
 	backoff := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
 	c.logCredentialOnce.Do(func() {
-		// A24-OBS-01: no part of the api_key reaches the log, only whether one is set.
-		logger.Infof(ctx, "[IMA] client configured client_id=%s api_key_set=%t base=%s",
-			redact(c.clientID), c.apiKey != "", datasource.ConnectorBaseURLForLog(c.baseURL))
+		logger.Infof(ctx, "[IMA] client configured client_id=%s api_key=%s base=%s",
+			redact(c.clientID), redact(c.apiKey), c.baseURL)
 	})
 
 	var body []byte

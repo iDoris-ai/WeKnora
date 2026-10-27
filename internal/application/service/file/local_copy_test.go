@@ -1,7 +1,6 @@
 package file
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,93 +87,4 @@ func TestLocalCopyFile_TraversalRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, ErrCrossBackendCopy),
 		"traversal should be a path error, not cross-backend")
-}
-
-func captureFileServiceLog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-	return &buf
-}
-
-// TestLocalGetFile_LogOmitsMissingFileName reads a missing file whose name
-// carries the sentinel. The open failure log must still be emitted, without
-// the name, the resolved path, or the *os.PathError text.
-func TestLocalGetFile_LogOmitsMissingFileName(t *testing.T) {
-	base := t.TempDir()
-	svc := NewLocalFileService(base, "")
-	buf := captureFileServiceLog(t)
-
-	_, err := svc.GetFile(context.Background(), "S3NT1NEL.txt")
-	require.Error(t, err)
-
-	logs := buf.String()
-	require.NotContains(t, logs, "S3NT1NEL")
-	require.Contains(t, logs, "Getting file: path_len=")
-	require.Contains(t, logs, "Failed to open file:")
-}
-
-// TestLocalSaveBytes_LogOmitsFileName saves bytes under a sentinel file name.
-// Both the request log and the success log must appear without that name.
-func TestLocalSaveBytes_LogOmitsFileName(t *testing.T) {
-	base := t.TempDir()
-	svc := NewLocalFileService(base, "")
-	buf := captureFileServiceLog(t)
-
-	_, err := svc.SaveBytes(context.Background(), []byte("hi"), 7, "S3NT1NEL.txt", false)
-	require.NoError(t, err)
-
-	logs := buf.String()
-	require.NotContains(t, logs, "S3NT1NEL")
-	require.Contains(t, logs, "Saving bytes data:")
-	require.Contains(t, logs, "Bytes data saved successfully:")
-}
-
-// TestLocalCopyFile_LogOmitsPaths copies a local object whose source path
-// carries the sentinel. The copy log must name neither source nor destination.
-func TestLocalCopyFile_LogOmitsPaths(t *testing.T) {
-	base := t.TempDir()
-	svc := NewLocalFileService(base, "")
-	srcPath := seedLocalObject(t, base, 0, "S3NT1NEL.txt", []byte("x"))
-	buf := captureFileServiceLog(t)
-
-	got, err := svc.CopyFile(context.Background(), srcPath, 42, "dst-knowledge")
-	require.NoError(t, err)
-
-	logs := buf.String()
-	require.NotContains(t, logs, "S3NT1NEL")
-	// The destination name is regenerated from a timestamp, so the sentinel
-	// cannot catch it; check the returned file name directly.
-	require.NotContains(t, logs, filepath.Base(got))
-	require.Contains(t, logs, "Copied local file")
-}
-
-// TestLocalGetFile_PathTraversalLogOmitsSentinel rejects a path SafePathUnderBase
-// refuses. The denial log must appear, and the sentinel in the caller path must not.
-func TestLocalGetFile_PathTraversalLogOmitsSentinel(t *testing.T) {
-	base := t.TempDir()
-	svc := NewLocalFileService(base, "")
-	buf := captureFileServiceLog(t)
-
-	_, err := svc.GetFile(context.Background(), "../S3NT1NEL")
-	require.Error(t, err)
-
-	logs := buf.String()
-	require.NotContains(t, logs, "S3NT1NEL")
-	require.Contains(t, logs, "Path traversal denied for GetFile:")
-}
-
-// The dummy service's no-op copy warning keeps the source path's length only.
-func TestDummyCopyFile_LogOmitsSourcePath(t *testing.T) {
-	buf := captureFileServiceLog(t)
-
-	got, err := NewDummyFileService().CopyFile(context.Background(), "dummy://1/S3NT1NEL.txt", 1, "k")
-	require.NoError(t, err)
-	require.Equal(t, "dummy://1/S3NT1NEL.txt", got)
-
-	logs := buf.String()
-	require.NotContains(t, logs, "S3NT1NEL")
-	require.Contains(t, logs, "[dummy] CopyFile no-op: returning source path src_len=")
 }

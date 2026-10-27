@@ -501,8 +501,7 @@ func (s *Service) buildIMMCPAuthNotice(ctx context.Context, services []imMCPAuth
 				ctx, tenantID, principal, svc.ID, redirectURI, frontendRedirect,
 			)
 			if err != nil {
-				logger.Warnf(ctx, "[IM] Failed to build MCP OAuth URL for service %s: error_len=%d error_type=%T",
-					svc.ID, len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[IM] Failed to build MCP OAuth URL for service %s: %v", svc.ID, err)
 			} else {
 				authURL = url
 			}
@@ -649,9 +648,7 @@ func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage
 	if isImage && s.documentReader != nil {
 		result, err = s.documentReader.Read(attachmentCtx, request)
 		if err != nil {
-			logger.Warnf(ctx,
-				"[IM] image OCR/document parsing failed, continuing with vision input: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[IM] image OCR/document parsing failed, continuing with vision input: %v", err)
 			result, err = nil, nil
 		}
 	}
@@ -661,9 +658,7 @@ func (s *Service) prepareIMAttachments(ctx context.Context, msg *IncomingMessage
 		result, err = s.documentReader.Read(attachmentCtx, request)
 	}
 	if err != nil {
-		logger.Warnf(ctx,
-			"[IM] attachment parsing failed, continuing with attachment metadata: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Warnf(ctx, "[IM] attachment parsing failed, continuing with attachment metadata: %v", err)
 	}
 	if result != nil {
 		applyIMAttachmentTruncation(result.MarkdownContent, &attachment)
@@ -1007,8 +1002,7 @@ func (s *Service) LoadAndStartChannels() error {
 	for i := range channels {
 		ch := channels[i]
 		if err := s.StartChannel(&ch); err != nil {
-			logger.Warnf(ctx, "[IM] Failed to start channel %s (%s/%s): error_len=%d error_type=%T",
-				ch.ID, ch.Platform, ch.Name, len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[IM] Failed to start channel %s (%s/%s): %v", ch.ID, ch.Platform, ch.Name, err)
 		} else if _, _, active := s.GetChannelAdapter(ch.ID); active {
 			// Adapter initialization can launch an asynchronous connection attempt.
 			// Do not claim network readiness here; platform connection logs report it.
@@ -1052,9 +1046,7 @@ func (s *Service) channelConfigSubscriberLoop() {
 			}
 			var event channelConfigEvent
 			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-				logger.Warnf(context.Background(),
-					"[IM] Ignore invalid channel config event: error_len=%d error_type=%T",
-					len(fmt.Sprint(err)), err)
+				logger.Warnf(context.Background(), "[IM] Ignore invalid channel config event: %v", err)
 				continue
 			}
 			if event.ChannelID == "" || event.SourceInstance == s.instanceID {
@@ -1079,9 +1071,7 @@ func (s *Service) publishChannelConfigChange(channelID string) {
 	if err := s.redis.Publish(context.Background(), RedisChannelConfig, payload).Err(); err != nil {
 		// The database is the source of truth. Subscribers also verify freshness
 		// on webhook callbacks / leader renewal, so publication is best-effort.
-		logger.Warnf(context.Background(),
-			"[IM] Publish channel config event failed for %s: error_len=%d error_type=%T",
-			channelID, len(fmt.Sprint(err)), err)
+		logger.Warnf(context.Background(), "[IM] Publish channel config event failed for %s: %v", channelID, err)
 	}
 }
 
@@ -1092,9 +1082,7 @@ func (s *Service) reloadChannelFromDB(channelID, reason string) {
 		return
 	}
 	if err != nil {
-		logger.Warnf(context.Background(),
-			"[IM] Reload channel %s after %s failed: error_len=%d error_type=%T",
-			channelID, reason, len(fmt.Sprint(err)), err)
+		logger.Warnf(context.Background(), "[IM] Reload channel %s after %s failed: %v", channelID, reason, err)
 		return
 	}
 	if !fresh.Enabled {
@@ -1107,9 +1095,7 @@ func (s *Service) reloadChannelFromDB(channelID, reason string) {
 
 	logger.Infof(context.Background(), "[IM] Reloading channel %s after %s", channelID, reason)
 	if err := s.StartChannel(fresh); err != nil && !s.stopped.Load() {
-		logger.Warnf(context.Background(),
-			"[IM] Reload channel %s after %s failed: error_len=%d error_type=%T",
-			channelID, reason, len(fmt.Sprint(err)), err)
+		logger.Warnf(context.Background(), "[IM] Reload channel %s after %s failed: %v", channelID, reason, err)
 	}
 }
 
@@ -1260,10 +1246,7 @@ func (s *Service) tryAcquireWSLeader(channelID string) bool {
 	key := RedisKeyLeader + channelID
 	ok, err := s.redis.SetNX(context.Background(), key, s.instanceID, wsLeaderTTL).Result()
 	if err != nil {
-		logger.Warnf(context.Background(),
-			"[IM] Redis leader election failed for %s: error_len=%d error_type=%T; "+
-				"connection will retry without taking leadership",
-			channelID, len(fmt.Sprint(err)), err)
+		logger.Warnf(context.Background(), "[IM] Redis leader election failed for %s: %v; connection will retry without taking leadership", channelID, err)
 		return false
 	}
 	return ok
@@ -1327,9 +1310,7 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				// Transient DB error — don't stop a possibly-healthy channel
 				// on a DB hiccup. Skip this round; the next renewal re-checks.
 				logger.Warnf(context.Background(),
-					"[IM] DB check failed for channel %s during leader renewal: "+
-						"error_len=%d error_type=%T (skipping this round)",
-					channelID, len(fmt.Sprint(err)), err)
+					"[IM] DB check failed for channel %s during leader renewal: %v (skipping this round)", channelID, err)
 				continue
 			}
 			if !ch.Enabled {
@@ -1350,8 +1331,7 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				// because the old renewal context has been cancelled.
 				if err := s.StartChannel(ch); err != nil && !s.stopped.Load() {
 					logger.Warnf(context.Background(),
-						"[IM] Rebuild changed channel %s failed: error_len=%d error_type=%T",
-						channelID, len(fmt.Sprint(err)), err)
+						"[IM] Rebuild changed channel %s failed: %v", channelID, err)
 				}
 				return
 			}
@@ -1435,9 +1415,7 @@ func (s *Service) wsLeaderRetryLoop(ctx context.Context, channel *IMChannel, sta
 					// Release the lock for this round and retry on the next tick.
 					s.releaseWSLeader(channel.ID)
 					logger.Warnf(context.Background(),
-						"[IM] DB check failed for channel %s during leader takeover: "+
-							"error_len=%d error_type=%T (will retry)",
-						channel.ID, len(fmt.Sprint(err)), err)
+						"[IM] DB check failed for channel %s during leader takeover: %v (will retry)", channel.ID, err)
 					continue
 				}
 				if !fresh.Enabled {
@@ -1457,8 +1435,7 @@ func (s *Service) wsLeaderRetryLoop(ctx context.Context, channel *IMChannel, sta
 				}
 				if err := s.startChannelInternal(channel, factory); err != nil {
 					logger.Warnf(context.Background(),
-						"[IM] Failed to start channel %s after acquiring leadership: error_len=%d error_type=%T",
-						channel.ID, len(fmt.Sprint(err)), err)
+						"[IM] Failed to start channel %s after acquiring leadership: %v", channel.ID, err)
 				}
 				return
 			}
@@ -1501,8 +1478,7 @@ func (s *Service) storeInflightMapping(ctx context.Context, userKey, sessionID, 
 	}
 	val := sessionID + ":" + messageID
 	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, 10*time.Minute).Err(); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to store inflight mapping: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[IM] Failed to store inflight mapping: %v", err)
 	}
 }
 
@@ -1547,8 +1523,7 @@ func (s *Service) writeStopEvent(ctx context.Context, sessionID, messageID strin
 		},
 	}
 	if err := s.streamManager.AppendEvent(ctx, sessionID, messageID, stopEvt); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to write stop event to StreamManager: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[IM] Failed to write stop event to StreamManager: %v", err)
 	}
 }
 
@@ -1692,8 +1667,7 @@ func (s *Service) isDuplicate(ctx context.Context, messageID string) bool {
 		}
 		// Redis is configured but failed — fail-closed to avoid cross-instance
 		// duplicate processing. The user can simply resend the message.
-		logger.Errorf(ctx, "[IM] Redis dedup failed (fail-closed, message dropped): error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "[IM] Redis dedup failed (fail-closed, message dropped): %v", err)
 		return true
 	}
 	// Single-instance mode: local dedup is sufficient.
@@ -1764,9 +1738,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 
 	logger.Infof(ctx, "[IM] HandleMessage: channel=%s platform=%s user=%s chat=%s msgtype=%s content_len=%d",
 		channelID, msg.Platform, msg.UserID, msg.ChatID, msg.MessageType, len(msg.Content))
-	// Some adapters put a download URL (WeChat, WeCom) or the data itself (Yunzhijia) in FileKey.
-	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey_len=%d filename_len=%d",
-		msg.MessageID, msg.Extra["raw_msgtype"], len(msg.FileKey), len(msg.FileName))
+	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s raw_msgtype=%s filekey=%s filename=%s",
+		msg.MessageID, msg.Extra["raw_msgtype"], msg.FileKey, msg.FileName)
 
 	// ── File/Image message handling ──
 	// File messages use the normal QA path as well.  A configured knowledge base
@@ -1788,8 +1761,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			Content: hint,
 			IsFinal: true,
 		}); err != nil {
-			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: %v", err)
 		}
 		return nil
 	}
@@ -1813,8 +1785,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	if agentID != "" {
 		agent, err := s.agentService.GetAgentByID(sessionCtx, agentID)
 		if err != nil {
-			logger.Warnf(ctx, "[IM] Failed to get agent %s: error_len=%d error_type=%T, using default",
-				agentID, len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[IM] Failed to get agent %s: %v, using default", agentID, err)
 		} else {
 			customAgent = agent
 		}
@@ -1846,8 +1817,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			logger.Warnf(ctx, "[IM] Session %s not found (deleted?), recycling stale channel session %s",
 				channelSession.SessionID, channelSession.ID)
 			if delErr := s.db.Delete(&ChannelSession{}, "id = ?", channelSession.ID).Error; delErr != nil {
-				logger.Warnf(ctx, "[IM] Failed to delete stale channel session %s: error_len=%d error_type=%T",
-					channelSession.ID, len(fmt.Sprint(delErr)), delErr)
+				logger.Warnf(ctx, "[IM] Failed to delete stale channel session %s: %v", channelSession.ID, delErr)
 			}
 			channelSession, err = s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)
 			if err != nil {
@@ -1899,8 +1869,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	pos, enqueueErr := s.qaQueue.Enqueue(req)
 	if enqueueErr != nil {
 		qaCancel()
-		logger.Warnf(ctx, "[IM] Queue rejected: user=%s error_len=%d error_type=%T",
-			msg.UserID, len(fmt.Sprint(enqueueErr)), enqueueErr)
+		logger.Warnf(ctx, "[IM] Queue rejected: user=%s reason=%v", msg.UserID, enqueueErr)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 			Content: "当前排队人数较多，请稍后再试。",
 			IsFinal: true,
@@ -1957,8 +1926,7 @@ func emptyIncomingMessageReply(msg *IncomingMessage) (string, bool) {
 func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agentID string, customAgent *types.CustomAgent, kbIDs []string) {
 	state := buildIMLastRequestState(agentID, customAgent, kbIDs)
 	if err := s.sessionService.UpdateSessionLastRequestState(logger.CloneContext(context.WithoutCancel(ctx)), sessionID, state); err != nil {
-		logger.Warnf(ctx, "[IM] persist last_request_state failed for session %s: error_len=%d error_type=%T",
-			sessionID, len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[IM] persist last_request_state failed for session %s: %v", sessionID, err)
 	}
 }
 
@@ -1987,11 +1955,9 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	var kbIDs []string
 	attachments, imageURLs, downloaded, err := s.prepareIMAttachments(ctx, req.msg, req.adapter)
 	if err != nil {
-		// A download error quotes the file URL (*url.Error).
-		logger.Warnf(ctx, "[IM] attachment preparation failed: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
 		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: error_len=%d error_type=%T",
-				len(sendErr.Error()), sendErr)
+			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: %v", sendErr)
 		}
 		return
 	}
@@ -2014,7 +1980,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 				ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
 				progressSender, req.adapter, req.userKey, req.tenant,
 			); err != nil {
-				logger.Errorf(ctx, "[IM] Full-output QA failed: error_len=%d error_type=%T", len(err.Error()), err)
+				logger.Errorf(ctx, "[IM] Full-output QA failed: %v", err)
 			}
 			return
 		}
@@ -2024,7 +1990,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 			ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
 			streamer, req.adapter, req.userKey, req.tenant,
 		); err != nil {
-			logger.Errorf(ctx, "[IM] Stream QA failed: error_len=%d error_type=%T", len(err.Error()), err)
+			logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
 		}
 		return
 	}
@@ -2032,8 +1998,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// Non-streaming fallback: collect full answer then send.
 	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] QA failed: error_len=%d error_type=%T, sending fallback reply",
-			len(err.Error()), err)
+		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = imQAFailureReply(err)
 	}
 
@@ -2043,7 +2008,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
-		logger.Errorf(ctx, "[IM] Send reply failed: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
 		return
 	}
 
@@ -2070,9 +2035,7 @@ func (s *Service) handleMessageFullOutput(
 ) error {
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
-		logger.Warnf(ctx,
-			"[IM] StartStream failed for full output, falling back to plain reply: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Warnf(ctx, "[IM] StartStream failed for full output, falling back to plain reply: %v", err)
 		return s.fallbackNonStream(
 			ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant,
 		)
@@ -2082,8 +2045,7 @@ func (s *Service) handleMessageFullOutput(
 		ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote,
 	)
 	if qaErr != nil {
-		logger.Errorf(ctx, "[IM] Full-output QA failed: error_len=%d error_type=%T, sending fallback reply",
-			len(qaErr.Error()), qaErr)
+		logger.Errorf(ctx, "[IM] Full-output QA failed: %v, sending fallback reply", qaErr)
 		answer = imQAFailureReply(qaErr)
 	}
 
@@ -2094,13 +2056,11 @@ func (s *Service) handleMessageFullOutput(
 
 	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalContent)
 	if finalizeErr != nil {
-		logger.Warnf(ctx, "[IM] FinalizeStream failed for full output: error_len=%d error_type=%T",
-			len(finalizeErr.Error()), finalizeErr)
+		logger.Warnf(ctx, "[IM] FinalizeStream failed for full output: %v", finalizeErr)
 	}
 	endErr := streamer.EndStream(outCtx, msg, streamID)
 	if endErr != nil {
-		logger.Warnf(ctx, "[IM] EndStream failed for full output: error_len=%d error_type=%T",
-			len(endErr.Error()), endErr)
+		logger.Warnf(ctx, "[IM] EndStream failed for full output: %v", endErr)
 	}
 
 	// If the placeholder could not be replaced, send a plain final reply so the
@@ -2109,9 +2069,7 @@ func (s *Service) handleMessageFullOutput(
 	if finalizeErr != nil {
 		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
 		if fallbackErr != nil {
-			logger.Errorf(ctx,
-				"[IM] Plain reply fallback after full-output finalize failure failed: error_len=%d error_type=%T",
-				len(fallbackErr.Error()), fallbackErr)
+			logger.Errorf(ctx, "[IM] Plain reply fallback after full-output finalize failure failed: %v", fallbackErr)
 		}
 	}
 
@@ -2153,7 +2111,7 @@ func (s *Service) handleCommand(
 
 	result, err := cmd.Execute(ctx, cmdCtx, args)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] Command /%s error: error_len=%d error_type=%T", cmd.Name(), len(err.Error()), err)
+		logger.Errorf(ctx, "[IM] Command /%s error: %v", cmd.Name(), err)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 			Content: "抱歉，执行指令时出现了异常，请稍后再试。",
 			IsFinal: true,
@@ -2171,8 +2129,7 @@ func (s *Service) handleCommand(
 		if err := s.db.Model(&ChannelSession{}).
 			Where("id = ?", channelSession.ID).
 			Update("deleted_at", time.Now()).Error; err != nil {
-			logger.Warnf(ctx, "[IM] Failed to soft-delete channel session: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[IM] Failed to soft-delete channel session: %v", err)
 		}
 	case ActionStop:
 		stopThreadID := ""
@@ -2224,9 +2181,7 @@ func (s *Service) handleCommand(
 	if channel.OutputMode != "full" {
 		if streamer, ok := adapter.(StreamSender); ok {
 			if err := s.sendStreamReply(ctx, msg, streamer, result.Content); err != nil {
-				logger.Warnf(ctx,
-					"[IM] Stream reply for command /%s failed, falling back: error_len=%d error_type=%T",
-					cmd.Name(), len(err.Error()), err)
+				logger.Warnf(ctx, "[IM] Stream reply for command /%s failed, falling back: %v", cmd.Name(), err)
 			} else {
 				sent = true
 			}
@@ -2388,8 +2343,7 @@ func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, 
 	}
 	if err := s.db.Create(&cs).Error; err != nil {
 		if delErr := s.db.Where("id = ?", createdSession.ID).Delete(createdSession).Error; delErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: error_len=%d error_type=%T",
-				createdSession.ID, len(fmt.Sprint(delErr)), delErr)
+			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: %v", createdSession.ID, delErr)
 		}
 		var existing ChannelSession
 		if findErr := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
@@ -2463,8 +2417,7 @@ func (s *Service) resolveThreadSession(ctx context.Context, msg *IncomingMessage
 	if err := s.db.Create(&cs).Error; err != nil {
 		// Unique constraint fallback for concurrent creation.
 		if delErr := s.db.Where("id = ?", createdSession.ID).Delete(createdSession).Error; delErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: error_len=%d error_type=%T",
-				createdSession.ID, len(fmt.Sprint(delErr)), delErr)
+			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: %v", createdSession.ID, delErr)
 		}
 		var existing ChannelSession
 		if findErr := s.db.Where(
@@ -2538,8 +2491,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// Start the stream on the IM platform (e.g., create Feishu streaming card)
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
-		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: %v", err)
 		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant)
 	}
 
@@ -2659,8 +2611,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		if !ok {
 			return nil
 		}
-		logger.Errorf(ctx, "[IM] QA stream error: error_len=%d stage=%s error_code=%s",
-			len(data.Error), data.Stage, data.ErrorCode)
+		logger.Errorf(ctx, "[IM] QA stream error: %s", data.Error)
 		bufMu.Lock()
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		bufMu.Unlock()
@@ -2757,8 +2708,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			streamedAny = true
 		}
 		bufMu.Unlock()
-		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool_len=%d id=%s",
-			len(data.ToolName), data.ToolCallID)
+		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool=%s id=%s", data.ToolName, data.ToolCallID)
 		return nil
 	})
 
@@ -2792,8 +2742,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			streamedAny = true
 		}
 		bufMu.Unlock()
-		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool_len=%d success=%v duration=%dms",
-			len(data.ToolName), data.Success, data.Duration)
+		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool=%s success=%v duration=%dms",
+			data.ToolName, data.Success, data.Duration)
 		return nil
 	})
 
@@ -2864,8 +2814,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			err = s.sessionService.KnowledgeQA(qaCtx, req, eventBus)
 		}
 		if err != nil {
-			logger.Errorf(ctx, "[IM] QA stream execution error: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Errorf(ctx, "[IM] QA stream execution error: %v", err)
 			bufMu.Lock()
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			bufMu.Unlock()
@@ -2897,7 +2846,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc, s.storageResolver)
 		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
-			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: error_len=%d error_type=%T", len(err.Error()), err)
+			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: %v", err)
 		}
 	}
 
@@ -2953,15 +2902,13 @@ loop:
 
 	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalDisplay)
 	if finalizeErr != nil {
-		logger.Warnf(ctx, "[IM] FinalizeStream failed: error_len=%d error_type=%T",
-			len(finalizeErr.Error()), finalizeErr)
+		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", finalizeErr)
 	}
 
 	// End the stream
 	endErr := streamer.EndStream(outCtx, msg, streamID)
 	if endErr != nil {
-		logger.Warnf(ctx, "[IM] EndStream failed: error_len=%d error_type=%T",
-			len(endErr.Error()), endErr)
+		logger.Warnf(ctx, "[IM] EndStream failed: %v", endErr)
 	}
 
 	// Match full-output delivery: a failed card replacement must not strand the
@@ -2970,9 +2917,7 @@ loop:
 	if finalizeErr != nil {
 		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalDisplay, IsFinal: true})
 		if fallbackErr != nil {
-			logger.Errorf(ctx,
-				"[IM] Plain reply fallback after stream finalize failure failed: error_len=%d error_type=%T",
-				len(fallbackErr.Error()), fallbackErr)
+			logger.Errorf(ctx, "[IM] Plain reply fallback after stream finalize failure failed: %v", fallbackErr)
 		}
 	}
 
@@ -2983,8 +2928,7 @@ loop:
 	assistantMsg.Content = answer
 	assistantMsg.IsCompleted = true
 	if err := s.messageService.UpdateMessage(outCtx, assistantMsg); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to update assistant message: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
 	}
 
 	if finalizeErr != nil && fallbackErr != nil {
@@ -2998,7 +2942,7 @@ loop:
 func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
 	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] QA fallback failed: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
 		answer = imQAFailureReply(err)
 	}
 
@@ -3050,8 +2994,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		if !ok {
 			return nil
 		}
-		logger.Errorf(ctx, "[IM] QA error: error_len=%d stage=%s error_code=%s",
-			len(data.Error), data.Stage, data.ErrorCode)
+		logger.Errorf(ctx, "[IM] QA error: %s", data.Error)
 		answerMu.Lock()
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		answerMu.Unlock()
@@ -3154,7 +3097,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 			err = s.sessionService.KnowledgeQA(ctx, req, eventBus)
 		}
 		if err != nil {
-			logger.Errorf(ctx, "[IM] QA execution error: error_len=%d error_type=%T", len(err.Error()), err)
+			logger.Errorf(ctx, "[IM] QA execution error: %v", err)
 			answerMu.Lock()
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			answerMu.Unlock()
@@ -3175,8 +3118,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		assistantMsg.IsCompleted = true
 		// Use a fresh context since the original is cancelled
 		if updateErr := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); updateErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to update cancelled assistant message: error_len=%d error_type=%T",
-				len(fmt.Sprint(updateErr)), updateErr)
+			logger.Warnf(ctx, "[IM] Failed to update cancelled assistant message: %v", updateErr)
 		}
 		return "", fmt.Errorf("QA cancelled: %w", ctx.Err())
 	}
@@ -3201,8 +3143,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	assistantMsg.Content = answer
 	assistantMsg.IsCompleted = true
 	if err := s.messageService.UpdateMessage(ctx, assistantMsg); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to update assistant message: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
 	}
 
 	// Return raw answer — callers apply cleanIMContent with the appropriate FileService.
@@ -3295,9 +3236,7 @@ func (s *Service) CreateChannel(channel *IMChannel) error {
 	}
 	if channel.Enabled {
 		if err := s.StartChannel(channel); err != nil {
-			logger.Warnf(context.Background(),
-				"[IM] Created channel %s but failed to start: error_len=%d error_type=%T",
-				channel.ID, len(fmt.Sprint(err)), err)
+			logger.Warnf(context.Background(), "[IM] Created channel %s but failed to start: %v", channel.ID, err)
 		}
 	}
 	s.publishChannelConfigChange(channel.ID)
@@ -3361,9 +3300,7 @@ func (s *Service) UpdateChannel(channel *IMChannel) error {
 	s.StopChannel(channel.ID)
 	if channel.Enabled {
 		if err := s.StartChannel(channel); err != nil {
-			logger.Warnf(context.Background(),
-				"[IM] Updated channel %s but failed to restart: error_len=%d error_type=%T",
-				channel.ID, len(fmt.Sprint(err)), err)
+			logger.Warnf(context.Background(), "[IM] Updated channel %s but failed to restart: %v", channel.ID, err)
 		}
 	}
 	s.publishChannelConfigChange(channel.ID)
@@ -3419,9 +3356,7 @@ func (s *Service) ToggleChannel(channelID string, tenantID uint64) (*IMChannel, 
 	}
 	if ch.Enabled {
 		if err := s.StartChannel(&ch); err != nil {
-			logger.Warnf(context.Background(),
-				"[IM] Failed to start channel %s after enable: error_len=%d error_type=%T",
-				ch.ID, len(fmt.Sprint(err)), err)
+			logger.Warnf(context.Background(), "[IM] Failed to start channel %s after enable: %v", ch.ID, err)
 		}
 	} else {
 		s.StopChannel(channelID)
@@ -3497,8 +3432,7 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 	// Build context with tenant info for the knowledge service
 	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
 	if err != nil {
-		logger.Errorf(ctx, "[IM] Failed to get tenant %d for file processing: error_len=%d error_type=%T",
-			tenantID, len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "[IM] Failed to get tenant %d for file processing: %v", tenantID, err)
 		return
 	}
 	kbCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
@@ -3507,8 +3441,7 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 	fileName := file.fileName
 	ext := fileExtension(fileName)
 	if !supportedKBFileExts[ext] {
-		// ext is whatever follows the last dot of the user's file name; only unsupported ones reach here.
-		logger.Infof(ctx, "[IM] Unsupported file type after download: ext_len=%d file_len=%d", len(ext), len(fileName))
+		logger.Infof(ctx, "[IM] Unsupported file type after download: %s (file=%s)", ext, fileName)
 		return
 	}
 
@@ -3521,16 +3454,14 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 		errMsg := err.Error()
 		// Check for duplicate file
 		if strings.Contains(errMsg, "duplicate") || strings.Contains(errMsg, "already exists") {
-			logger.Infof(ctx, "[IM] File already exists in knowledge base: file_len=%d", len(fileName))
+			logger.Infof(ctx, "[IM] File already exists in knowledge base: %s", fileName)
 			return
 		}
-		logger.Errorf(ctx, "[IM] Failed to create knowledge from file: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Errorf(ctx, "[IM] Failed to create knowledge from file: %v", err)
 		return
 	}
 
-	logger.Infof(ctx, "[IM] File saved to knowledge base: kb=%s knowledge=%s file_len=%d",
-		kbID, knowledge.ID, len(fileName))
+	logger.Infof(ctx, "[IM] File saved to knowledge base: kb=%s knowledge=%s file=%s", kbID, knowledge.ID, fileName)
 }
 
 // fileExtension extracts the lowercase file extension from a filename.

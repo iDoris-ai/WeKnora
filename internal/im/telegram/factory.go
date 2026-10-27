@@ -33,9 +33,7 @@ func NewFactory() im.AdapterFactory {
 			wsCtx, wsCancel := context.WithCancel(context.Background())
 			go func() {
 				if err := client.Start(wsCtx); err != nil && wsCtx.Err() == nil {
-					logger.Errorf(context.Background(),
-						"[IM] Telegram long polling stopped for channel %s: error_len=%d error_type=%T",
-						channel.ID, len(err.Error()), err)
+					logger.Errorf(context.Background(), "[IM] Telegram long polling stopped for channel %s: %v", channel.ID, err)
 				}
 			}()
 

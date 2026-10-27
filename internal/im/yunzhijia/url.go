@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/ipclass"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -37,8 +36,7 @@ func deriveWebSocketURL(sendMsgURL, allowedHostSuffix string) (string, error) {
 func validateEndpointURL(rawURL, requiredScheme, allowedHostSuffix string) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
-		// Agent24 KB-OBS-01: the parse error quotes send_msg_url, yzjtoken included.
-		return nil, im.RedactRequestError(err)
+		return nil, err
 	}
 	if !strings.EqualFold(u.Scheme, requiredScheme) {
 		return nil, fmt.Errorf("URL must use %s", requiredScheme)

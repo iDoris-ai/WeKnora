@@ -1094,8 +1094,8 @@ func (h *WikiPageHandler) SearchPagesAcross(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Wiki search request, knowledge base IDs: %v, query_len=%d",
-		secutils.SanitizeForLogArray(kbIDs), len(request.Query))
+	logger.Infof(ctx, "Wiki search request, knowledge base IDs: %v, query: %s",
+		secutils.SanitizeForLogArray(kbIDs), secutils.SanitizeForLog(request.Query))
 
 	pages, err := h.wikiService.SearchPagesAcross(ctx, kbIDs, request.Query, request.Limit)
 	if err != nil {

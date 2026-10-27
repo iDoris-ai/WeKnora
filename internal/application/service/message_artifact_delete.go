@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -82,8 +81,8 @@ func (s *messageService) DeleteSessionArtifact(
 		return nil, ErrArtifactNotFound
 	}
 
-	logger.Infof(ctx, "Deleted artifact name_len=%d from session %s: %d row(s)",
-		len(target.FileName), req.SessionID, len(marked))
+	logger.Infof(ctx, "Deleted artifact %s from session %s: %d row(s)",
+		target.FileName, req.SessionID, len(marked))
 	return &types.ArtifactDeleteResult{
 		FileName: target.FileName,
 		Deleted:  len(marked),
@@ -111,12 +110,11 @@ func (s *messageService) reclaimableBlobs(
 	for _, ref := range candidates {
 		live, err := s.messageRepo.CountLiveArtifactsByURL(ctx, ref.URL)
 		if err != nil {
-			logger.Warnf(ctx, "Artifact reclaim check failed, keeping the blob: url_len=%d error_len=%d error_type=%T",
-				len(ref.URL), len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "Artifact reclaim check failed for %s, keeping the blob: %v", ref.URL, err)
 			continue
 		}
 		if live > 0 {
-			logger.Infof(ctx, "Keeping artifact blob url_len=%d: %d live row(s) still point at it", len(ref.URL), live)
+			logger.Infof(ctx, "Keeping artifact blob %s: %d live row(s) still point at it", ref.URL, live)
 			continue
 		}
 		out = append(out, ref)
@@ -137,8 +135,8 @@ func (s *messageService) artifactDeleteSet(
 	versions, err := s.messageRepo.FindSessionArtifactVersions(ctx, req.SessionID, target.SourcePath)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"session_id":      req.SessionID,
-			"source_path_len": len(target.SourcePath),
+			"session_id":  req.SessionID,
+			"source_path": target.SourcePath,
 		})
 		return nil, err
 	}

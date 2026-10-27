@@ -38,8 +38,7 @@ func (r knowledgeImageReader) fileService(
 ) interfaces.FileService {
 	tenant, err := r.tenantRepo.GetTenantByID(ctx, tenantID)
 	if err != nil || tenant == nil {
-		logger.Warnf(ctx, "[ImageReader] GetTenantByID failed: tenant=%d error_len=%d error_type=%T",
-			tenantID, len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[ImageReader] GetTenantByID failed: tenant=%d err=%v", tenantID, err)
 		return r.fileSvc
 	}
 
@@ -51,9 +50,7 @@ func (r knowledgeImageReader) fileService(
 	// stored on a different backend (multi-backend / post-migration).
 	if _, isResourceRef := types.ParseResourcePath(imageURL); isResourceRef && r.resourceCatalog != nil {
 		if resource, resErr := r.resourceCatalog.Resolve(ctx, imageURL); resErr != nil {
-			logger.Warnf(ctx,
-				"[ImageReader] resolve resource reference failed: url_len=%d error_len=%d error_type=%T",
-				len(imageURL), len(fmt.Sprint(resErr)), resErr)
+			logger.Warnf(ctx, "[ImageReader] resolve resource reference failed: url=%s err=%v", imageURL, resErr)
 		} else if resource != nil {
 			backendID = resource.StorageBackendID
 			provider = strings.ToLower(strings.TrimSpace(resource.Provider))
@@ -73,14 +70,13 @@ func (r knowledgeImageReader) fileService(
 	}
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	logger.Infof(ctx,
-		"[ImageReader] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q url_len=%d",
-		tenantID, provider, baseDir, len(imageURL))
+		"[ImageReader] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
+		tenantID, provider, baseDir, imageURL)
 	fileSvc, _, svcErr := r.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
 	if svcErr != nil {
 		logger.Warnf(ctx,
-			"[ImageReader] resolve file service failed (falling back to default): "+
-				"tenant=%d provider=%s error_len=%d error_type=%T",
-			tenantID, provider, len(fmt.Sprint(svcErr)), svcErr)
+			"[ImageReader] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
+			tenantID, provider, svcErr)
 		return r.fileSvc
 	}
 	return fileSvc

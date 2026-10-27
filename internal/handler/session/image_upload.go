@@ -8,7 +8,6 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -69,8 +68,7 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 
 	vlmModel, err := h.modelService.GetVLMModel(ctx, vlmModelID)
 	if err != nil {
-		logger.Warnf(ctx, "No VLM model available for image analysis, skipping: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "No VLM model available for image analysis, skipping: %v", err)
 		return
 	}
 
@@ -81,16 +79,13 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 		}
 		imgBytes, _, decErr := decodeDataURI(img.Data)
 		if decErr != nil {
-			logger.Warnf(ctx, "Failed to decode image %d for VLM analysis: error_len=%d error_type=%T",
-				i, len(fmt.Sprint(decErr)), decErr)
+			logger.Warnf(ctx, "Failed to decode image %d for VLM analysis: %v", i, decErr)
 			continue
 		}
 		prompt := buildImageAnalysisPrompt(userQuery)
 		analysis, analysisErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if analysisErr != nil {
-			logger.Warnf(ctx,
-				"VLM analysis failed for image %d: error_len=%d error_type=%T",
-				i, len(fmt.Sprint(analysisErr)), analysisErr)
+			logger.Warnf(ctx, "VLM analysis failed for image %d: %v", i, analysisErr)
 		} else {
 			img.Caption = analysis
 		}
@@ -145,18 +140,6 @@ func mimeToExt(mime string) string {
 	}
 }
 
-// storageProviderForLog returns an allowlisted provider name. Agent config is
-// not validated, so a URL or other free-form value is logged as a length only.
-func storageProviderForLog(p string) string {
-	name := strings.ToLower(strings.TrimSpace(p))
-	for _, supported := range storageallowlist.Supported() {
-		if name == supported {
-			return name
-		}
-	}
-	return fmt.Sprintf("(unsupported len=%d)", len(p))
-}
-
 func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider string) interfaces.FileService {
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant == nil {
@@ -169,9 +152,7 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 			return svc
 		}
 		if err != nil {
-			logger.Warnf(ctx,
-				"[image-storage] failed to resolve storage instance for provider=%s: error_len=%d error_type=%T",
-				storageProviderForLog(storageProvider), len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[image-storage] failed to resolve storage instance for provider=%s: %v", storageProvider, err)
 		}
 	}
 	if strings.TrimSpace(storageProvider) == "" || tenant.StorageEngineConfig == nil {
@@ -180,9 +161,7 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 
 	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, tenant.StorageEngineConfig, "")
 	if err != nil {
-		logger.Warnf(ctx,
-			"[image-storage] failed to create %s file service: error_len=%d error_type=%T, fallback to default",
-			storageProviderForLog(storageProvider), len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[image-storage] failed to create %s file service: %v, fallback to default", storageProvider, err)
 		return h.fileService
 	}
 	logger.Infof(ctx, "[image-storage] using provider=%s for image uploads", resolvedProvider)

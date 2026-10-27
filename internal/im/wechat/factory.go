@@ -30,9 +30,7 @@ func NewFactory() im.AdapterFactory {
 		pollCtx, pollCancel := context.WithCancel(context.Background())
 		go func() {
 			if err := client.Start(pollCtx); err != nil && pollCtx.Err() == nil {
-				logger.Errorf(context.Background(),
-					"[IM] WeChat long-poll stopped for channel %s: error_len=%d error_type=%T",
-					channel.ID, len(fmt.Sprint(err)), err)
+				logger.Errorf(context.Background(), "[IM] WeChat long-poll stopped for channel %s: %v", channel.ID, err)
 			}
 		}()
 

@@ -30,7 +30,7 @@ func (s *sessionService) AgentQA(
 	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
 	// bind script execution to a per-session MicroVM instance.
 	ctx = types.WithSessionID(ctx, sessionID)
-	_, err := json.Marshal(req.Session)
+	sessionJSON, err := json.Marshal(req.Session)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
 		return fmt.Errorf("failed to marshal session: %w", err)
@@ -44,8 +44,8 @@ func (s *sessionService) AgentQA(
 
 	// Resolve retrieval tenant using shared helper
 	agentTenantID := s.resolveRetrievalTenantID(ctx, req)
-	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query_len=%d",
-		sessionID, agentTenantID, len(req.Query))
+	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
+		sessionID, agentTenantID, req.Query, string(sessionJSON))
 
 	var tenantInfo *types.Tenant
 	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
@@ -306,7 +306,7 @@ func (s *sessionService) AgentQA(
 	// Events will be emitted to EventBus and handled by the Handler layer
 	logger.Info(ctx, "Executing agent with streaming")
 	if _, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs); err != nil {
-		logger.Errorf(ctx, "Agent execution failed: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Agent execution failed: %v", err)
 		// Emit error event to the EventBus used by this agent
 		eventBus.Emit(ctx, event.Event{
 			Type:      event.EventError,

@@ -1,7 +1,6 @@
 package asynqdl
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +9,6 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
 )
@@ -199,51 +197,6 @@ func TestMiddleware_RepoFailure_DoesNotMaskTaskError(t *testing.T) {
 	gotErr := runMiddleware(repo, "any", []byte(`{"tenant_id":1}`), wantErr)
 	if !errors.Is(gotErr, wantErr) {
 		t.Fatalf("repo failure must not mask task error; got %v", gotErr)
-	}
-}
-
-func TestDeadLetterRecordFailureOmitsTaskError(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	repo := &fakeRepo{fail: errors.New("db down")}
-	wantErr := errors.New("S3NT1NEL")
-	gotErr := runMiddleware(repo, "any", []byte(`{"tenant_id":1}`), wantErr)
-	if !errors.Is(gotErr, wantErr) {
-		t.Fatalf("repo failure must not mask task error; got %v", gotErr)
-	}
-	if strings.Contains(buf.String(), "S3NT1NEL") {
-		t.Fatalf("log contains the task error:\n%s", buf.String())
-	}
-	if !strings.Contains(buf.String(), "original task error_len=8") {
-		t.Fatalf("log missing the record-failure warning:\n%s", buf.String())
-	}
-}
-
-func TestDeadLetterCallbackPanicOmitsSentinel(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	repo := &fakeRepo{}
-	cb := func(context.Context, *asynq.Task, error) { panic("S3NT1NEL") }
-	mw := MiddlewareWithCallback(repo, cb)
-	wrapped := mw(asynq.HandlerFunc(func(context.Context, *asynq.Task) error {
-		return errors.New("task failed")
-	}))
-	err := wrapped.ProcessTask(context.Background(), asynq.NewTask("any", []byte(`{}`)))
-	if err == nil {
-		t.Fatal("expected the original task error")
-	}
-	logText := buf.String()
-	if strings.Contains(logText, "S3NT1NEL") {
-		t.Fatalf("log contains the panic value:\n%s", logText)
-	}
-	if !strings.Contains(logText, "string (len=8)") {
-		t.Fatalf("log missing redacted panic value:\n%s", logText)
 	}
 }
 

@@ -277,16 +277,16 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	if err := t.editor.WriteSessionWorkspaceFile(ctx, sessionID, clean, content); err != nil {
-		logger.Warnf(ctx, "[Tool][EditSandboxFile] write failed: session=%s path_len=%d error_len=%d error_type=%T",
-			sessionID, len(clean), len(err.Error()), err)
+		logger.Warnf(ctx, "[Tool][EditSandboxFile] write failed: session=%s path=%s err=%v",
+			sessionID, clean, err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("failed to write %s: %v", clean, err),
 		}, nil
 	}
 
-	logger.Infof(ctx, "[Tool][EditSandboxFile] session=%s path_len=%d replacements=%d bytes=%d",
-		sessionID, len(clean), replacements, len(content))
+	logger.Infof(ctx, "[Tool][EditSandboxFile] session=%s path=%s replacements=%d bytes=%d",
+		sessionID, clean, replacements, len(content))
 
 	added, removed := sandboxEditDiffStats(string(raw), input.Edits)
 

@@ -245,11 +245,10 @@ func (r *assetResolver) classify(src string) (imgAction, string) {
 	return imgDownload, abs
 }
 
-// logImageFailure records a redacted warning: host and path length only, never the
+// logImageFailure records a redacted warning: host and path only, never the
 // query (which may carry signed tokens), the Authorization header, or the body.
 func logImageFailure(ctx context.Context, abs string, err error) {
-	// An unparsable abs counts as path only, so the raw string never reaches the log.
-	host, path := "", abs
+	host, path := abs, ""
 	if u, perr := url.Parse(abs); perr == nil {
 		host, path = u.Host, u.Path
 	}
@@ -268,7 +267,7 @@ func logImageFailure(ctx context.Context, abs string, err error) {
 	if errors.As(err, &api) {
 		reason = "status_" + strconv.Itoa(api.status)
 	}
-	logger.Warnf(ctx, "[Confluence] failed to resolve image host=%s path_len=%d reason=%s", host, len(path), reason)
+	logger.Warnf(ctx, "[Confluence] failed to resolve image host=%s path=%s reason=%s", host, path, reason)
 }
 
 // extractImageSrc returns the HTML-unescaped src value of an <img> tag.

@@ -237,17 +237,16 @@ func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenan
 	tenants, total, err := s.repo.SearchTenants(ctx, keyword, tenantID, page, pageSize)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"keyword_len": len(keyword),
-			"tenantID":    tenantID,
-			"page":        page,
-			"pageSize":    pageSize,
+			"keyword":  keyword,
+			"tenantID": tenantID,
+			"page":     page,
+			"pageSize": pageSize,
 		})
 		return nil, 0, err
 	}
 
-	logger.Infof(ctx,
-		"Tenants search completed, keyword_len=%d, tenantID: %d, page: %d, pageSize: %d, total: %d, found: %d",
-		len(keyword), tenantID, page, pageSize, total, len(tenants))
+	logger.Infof(ctx, "Tenants search completed, keyword: %s, tenantID: %d, page: %d, pageSize: %d, total: %d, found: %d",
+		keyword, tenantID, page, pageSize, total, len(tenants))
 	return tenants, total, nil
 }
 

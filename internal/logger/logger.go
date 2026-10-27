@@ -146,7 +146,7 @@ type lineSafeWriter struct {
 }
 
 // LineSafeWriter 返回按行转义的 io.Writer，供 container 等包套住自建的标准库 log。
-// 标准库 log、默认 slog 与 gorm logger 不经过 CustomFormatter（fork patch A24-OBS-11）。
+// 标准库 log、默认 slog 与 gorm logger 不经过 CustomFormatter（fork patch A24-OBS-07）。
 func LineSafeWriter(w io.Writer) io.Writer {
 	return lineSafeWriter{w: w}
 }

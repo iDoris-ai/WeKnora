@@ -383,8 +383,7 @@ func (c *minerUV1Client) waitJob(ctx context.Context, jobID string) (*minerUV1Jo
 				// Job state lives in process memory; a restarted server forgets it.
 				return nil, fmt.Errorf("parse job %s no longer exists (MinerU restarted?): %w", jobID, err)
 			}
-			logger.Warnf(ctx, "[%s] poll #%d for job %s failed: error_len=%d error_type=%T",
-				c.logLabel, poll, jobID, len(err.Error()), err)
+			logger.Warnf(ctx, "[%s] poll #%d for job %s failed: %v", c.logLabel, poll, jobID, err)
 		} else {
 			if poll == 1 || poll%10 == 0 || minerUV1JobTerminal(job.Status) {
 				logger.Infof(ctx, "[%s] poll #%d: job=%s status=%s", c.logLabel, poll, jobID, job.Status)
@@ -412,7 +411,7 @@ func (c *minerUV1Client) cancelJob(jobID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cancelBudget)
 	defer cancel()
 	if err := c.doJSON(ctx, http.MethodDelete, "/v1/parse/jobs/"+url.PathEscape(jobID), nil, nil); err != nil {
-		logger.Warnf(ctx, "[%s] cancel job %s: error_len=%d error_type=%T", c.logLabel, jobID, len(err.Error()), err)
+		logger.Warnf(ctx, "[%s] cancel job %s: %v", c.logLabel, jobID, err)
 	}
 }
 

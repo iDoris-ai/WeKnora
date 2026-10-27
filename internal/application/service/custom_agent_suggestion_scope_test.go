@@ -1,13 +1,11 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -101,37 +99,6 @@ func TestSharedSuggestionKnowledgeBases_OnlyForCallerOwnedAgents(t *testing.T) {
 
 	borrowed := svc.sharedSuggestionKnowledgeBases(ctx, 1, &types.CustomAgent{ID: "agent", TenantID: 2})
 	assert.Empty(t, borrowed, "a shared agent keeps its owner's scope")
-}
-
-type suggestionKBShareErrorService struct {
-	interfaces.KBShareService
-	err error
-}
-
-func (s *suggestionKBShareErrorService) ListSharedKnowledgeBases(
-	context.Context, uint64, types.TenantRole,
-) ([]*types.SharedKnowledgeBaseInfo, error) {
-	return nil, s.err
-}
-
-func TestSharedSuggestionKnowledgeBases_LogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	svc := &customAgentService{kbShareService: &suggestionKBShareErrorService{
-		err: errors.New("list failed " + sentinel),
-	}}
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
-	got := svc.sharedSuggestionKnowledgeBases(ctx, 1, &types.CustomAgent{ID: "agent", TenantID: 1})
-
-	require.Nil(t, got)
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "Failed to list shared knowledge bases for suggestions")
-	require.Contains(t, out, "error_len=")
 }
 
 func TestResolveSuggestionTagScopes_UsesSourceTenantForSharedKB(t *testing.T) {

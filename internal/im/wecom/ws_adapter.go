@@ -111,9 +111,8 @@ func (a *WSAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (
 		return nil, "", fmt.Errorf("read encrypted file: %w", err)
 	}
 
-	// fileName falls back to FileKey, the encrypted download URL, when the message has no name.
-	logger.Debugf(ctx, "[WeCom] Decrypting file: name_len=%d encrypted_size=%d aes_key_len=%d",
-		len(fileName), len(encryptedData), len(aesKeyB64))
+	logger.Debugf(ctx, "[WeCom] Decrypting file: name=%s encrypted_size=%d aes_key_len=%d",
+		fileName, len(encryptedData), len(aesKeyB64))
 
 	// Decrypt
 	decrypted, err := decryptAESCBC(encryptedData, aesKeyB64)
@@ -121,7 +120,7 @@ func (a *WSAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (
 		return nil, "", fmt.Errorf("decrypt file: %w", err)
 	}
 
-	logger.Debugf(ctx, "[WeCom] File decrypted: name_len=%d decrypted_size=%d", len(fileName), len(decrypted))
+	logger.Debugf(ctx, "[WeCom] File decrypted: name=%s decrypted_size=%d", fileName, len(decrypted))
 
 	return io.NopCloser(bytes.NewReader(decrypted)), fileName, nil
 }

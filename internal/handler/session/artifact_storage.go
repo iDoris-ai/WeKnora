@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"fmt"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -82,14 +81,13 @@ func (h *Handler) reclaimArtifactBlobs(ctx context.Context, tenantID uint64, ref
 			ctx, ownerTenantID, path, backendID, "artifact delete",
 		)
 		if !ok {
-			logger.Warnf(ctx, "artifact delete: storage unavailable for url_len=%d, blob kept", len(ref.URL))
+			logger.Warnf(ctx, "artifact delete: storage unavailable for %s, blob kept", ref.URL)
 			continue
 		}
 		// DeleteFile takes the stored reference: the catalog-backed service
 		// resolves it and marks the resource deleted once the bytes are gone.
 		if err := fileService.DeleteFile(blobCtx, ref.URL); err != nil {
-			logger.Warnf(ctx, "artifact delete: failed to remove blob url_len=%d: error_len=%d error_type=%T",
-				len(ref.URL), len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "artifact delete: failed to remove blob %s: %v", ref.URL, err)
 		}
 	}
 }
@@ -116,8 +114,7 @@ func (h *Handler) locateArtifactBlob(
 	for _, messageID := range ref.MessageIDs {
 		count, err := h.resourceCatalog.Release(ctx, ref.URL, types.ResourceOwnerMessage, messageID)
 		if err != nil {
-			logger.Warnf(ctx, "artifact delete: failed to release url_len=%d, blob kept: error_len=%d error_type=%T",
-				len(ref.URL), len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "artifact delete: failed to release %s, blob kept: %v", ref.URL, err)
 			return "", 0, "", false
 		}
 		if count >= 0 {
@@ -125,14 +122,12 @@ func (h *Handler) locateArtifactBlob(
 		}
 	}
 	if remaining > 0 {
-		logger.Infof(ctx, "artifact delete: keeping url_len=%d, %d owner(s) still reference it",
-			len(ref.URL), remaining)
+		logger.Infof(ctx, "artifact delete: keeping %s, %d owner(s) still reference it", ref.URL, remaining)
 		return "", 0, "", false
 	}
 	resolved, resource, err := h.resourceCatalog.ResolvePath(ctx, ref.URL)
 	if err != nil {
-		logger.Warnf(ctx, "artifact delete: failed to resolve url_len=%d, blob kept: error_len=%d error_type=%T",
-			len(ref.URL), len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "artifact delete: failed to resolve %s, blob kept: %v", ref.URL, err)
 		return "", 0, "", false
 	}
 	if resource == nil {
@@ -141,8 +136,8 @@ func (h *Handler) locateArtifactBlob(
 	if resource.TenantID != tenantID {
 		// The session is the caller's, so its artifacts should be too. A
 		// mismatch means the url points somewhere unexpected; leave it alone.
-		logger.Warnf(ctx, "artifact delete: url_len=%d belongs to tenant %d, not %d; blob kept",
-			len(ref.URL), resource.TenantID, tenantID)
+		logger.Warnf(ctx, "artifact delete: %s belongs to tenant %d, not %d; blob kept",
+			ref.URL, resource.TenantID, tenantID)
 		return "", 0, "", false
 	}
 	return resolved, resource.TenantID, resource.StorageBackendID, true

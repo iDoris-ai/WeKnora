@@ -1,14 +1,12 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	stderrors "errors"
 	"testing"
 	"time"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -31,13 +29,12 @@ func (r *deleteSessionRepo) Get(_ context.Context, tenantID uint64, userID, id s
 
 type deleteMessageRepo struct {
 	interfaces.MessageRepository
-	target      *types.MessageArtifactRecord
-	versions    []types.MessageArtifactRecord
-	versionsErr error
-	marked      []types.ArtifactRef
-	liveByte    map[string]int64
-	liveErr     error
-	askedURL    []string
+	target   *types.MessageArtifactRecord
+	versions []types.MessageArtifactRecord
+	marked   []types.ArtifactRef
+	liveByte map[string]int64
+	liveErr  error
+	askedURL []string
 }
 
 func (r *deleteMessageRepo) FindSessionArtifact(
@@ -49,9 +46,6 @@ func (r *deleteMessageRepo) FindSessionArtifact(
 func (r *deleteMessageRepo) FindSessionArtifactVersions(
 	_ context.Context, _, _ string,
 ) ([]types.MessageArtifactRecord, error) {
-	if r.versionsErr != nil {
-		return nil, r.versionsErr
-	}
 	return r.versions, nil
 }
 
@@ -202,60 +196,6 @@ func TestDeleteSessionArtifactAllVersionsWithoutASourcePath(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Deleted)
-}
-
-// All-versions looks the path up. The log keeps its length; the path and the
-// lookup error both carry the sentinel.
-func TestDeleteSessionArtifactVersionLookupLogOmitsSourcePath(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	path := "/w/" + sentinel + "/report.pptx"
-	repo := &deleteMessageRepo{
-		target:      ptr(artifactRow("msg-1", 0, "resource://v1", path)),
-		versionsErr: stderrors.New("version lookup " + sentinel),
-	}
-	s := &messageService{sessionRepo: &deleteSessionRepo{}, messageRepo: repo}
-	_, err := s.DeleteSessionArtifact(deleteCallerCtx(), &types.ArtifactDeleteRequest{
-		SessionID: "sess-1", MessageID: "msg-1", Index: 0, AllVersions: true,
-	})
-	require.Error(t, err)
-	require.ErrorContains(t, err, sentinel)
-
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "发生错误")
-	require.Contains(t, logs, "source_path_len=")
-	require.Contains(t, logs, "error_len=")
-}
-
-// A successful delete logs the file name and the kept blob's URL only by length.
-func TestDeleteSessionArtifactSuccessLogsOmitFileNameAndURL(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	url := "resource://" + sentinel
-	row := artifactRow("msg-1", 0, url, "/w/a.pptx")
-	row.FileName = sentinel + ".pptx"
-	repo := &deleteMessageRepo{target: ptr(row), liveByte: map[string]int64{url: 1}}
-	s := &messageService{sessionRepo: &deleteSessionRepo{}, messageRepo: repo}
-
-	result, err := s.DeleteSessionArtifact(deleteCallerCtx(), &types.ArtifactDeleteRequest{
-		SessionID: "sess-1", MessageID: "msg-1", Index: 0,
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, result.Deleted)
-
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "Keeping artifact blob url_len=")
-	require.Contains(t, logs, "Deleted artifact name_len=")
 }
 
 func ptr[T any](v T) *T { return &v }

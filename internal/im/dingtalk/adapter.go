@@ -302,18 +302,16 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", err
 	}
 	if err := validateFileDownloadURL(downloadURL); err != nil {
-		// Agent24 KB-OBS-01: a parse failure quotes the signed temporary download URL.
-		return nil, "", fmt.Errorf("download url rejected: %w", im.RedactURLErrorInChain(err))
+		return nil, "", fmt.Errorf("download url rejected: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create download request: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("create download request: %w", err)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes the signed temporary download URL.
-		return nil, "", fmt.Errorf("download file: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("download file: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -546,14 +544,13 @@ func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, conten
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(jsonBody))
 	if err != nil {
-		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
+		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes the session credential in the query.
-		return fmt.Errorf("send reply: %w", im.RedactRequestError(err))
+		return fmt.Errorf("send reply: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -835,9 +832,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	if a.cardTemplateID != "" {
 		outTrackID, err := a.createAndDeliverCard(ctx, incoming)
 		if err != nil {
-			logger.Warnf(ctx,
-				"[DingTalk] Failed to create AI card, falling back to sessionWebhook: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[DingTalk] Failed to create AI card, falling back to sessionWebhook: %v", err)
 		} else {
 			state.outTrackID = outTrackID
 		}
@@ -882,8 +877,7 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	state.mu.Unlock()
 
 	if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, false); err != nil {
-		logger.Warnf(ctx, "[DingTalk] Failed to update card stream: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Warnf(ctx, "[DingTalk] Failed to update card stream: %v", err)
 	}
 	return nil
 }
@@ -904,8 +898,7 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 
 	if outTrackID != "" {
 		if err := a.streamingUpdateCard(ctx, outTrackID, finalContent, false); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
 		}
 	}
 	return nil
@@ -933,18 +926,15 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 
 	if outTrackID != "" {
 		if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, true); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
 		}
 	} else if sessionWebhook != "" {
 		if err := a.replyViaSessionWebhook(ctx, sessionWebhook, fullContent); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to end stream: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[DingTalk] Failed to end stream: %v", err)
 		}
 	} else {
 		if err := a.replyViaOpenAPI(ctx, incoming, fullContent); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to end stream via OpenAPI: error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[DingTalk] Failed to end stream via OpenAPI: %v", err)
 		}
 	}
 

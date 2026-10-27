@@ -198,7 +198,7 @@ func (s *minioFileService) CopyFile(ctx context.Context,
 	}
 
 	newPath := fmt.Sprintf("minio://%s/%s", s.bucketName, destKey)
-	logger.Infof(ctx, "Copied MinIO object src_len=%d dst_len=%d", len(srcPath), len(newPath))
+	logger.Infof(ctx, "Copied MinIO object %s to %s", srcPath, newPath)
 	return newPath, nil
 }
 

@@ -100,9 +100,7 @@ func (c *DriveConnector) ListResources(
 		// folder_token so the picker still renders something usable.
 		folderName := rootFolderToken
 		if meta, mErr := client.GetDriveFolderMeta(ctx, rootFolderToken); mErr != nil {
-			logger.Warnf(ctx, "[FeishuDrive] resolve root folder name failed: error_len=%d error_type=%T "+
-				"(falling back to token)",
-				len(fmt.Sprint(mErr)), mErr)
+			logger.Warnf(ctx, "[FeishuDrive] resolve root folder name failed: %v (falling back to token)", mErr)
 		} else if meta.Data.Name != "" {
 			folderName = meta.Data.Name
 		}
@@ -187,8 +185,7 @@ func (c *DriveConnector) ResolveResourceAncestors(
 
 			files, err := client.ListDriveFilesAllPages(ctx, cur)
 			if err != nil {
-				logger.Warnf(ctx, "[FeishuDrive] resolve ancestors: list %s: error_len=%d error_type=%T",
-					cur, len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[FeishuDrive] resolve ancestors: list %s: %v", cur, err)
 				break // best-effort: stop this root's traversal
 			}
 			for _, f := range files {

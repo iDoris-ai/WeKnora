@@ -199,9 +199,7 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 		Timestamp: time.Now(),
 		Data:      metadata,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append thought event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append thought event to stream failed", "error", err)
 	}
 
 	return nil
@@ -250,9 +248,7 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 		Timestamp: time.Now(),
 		Data:      metadata,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append tool call event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append tool call event to stream failed", "error", err)
 	}
 
 	return nil
@@ -315,9 +311,7 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 		Timestamp: time.Now(),
 		Data:      metadata,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append tool result event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append tool result event to stream failed", "error", err)
 	}
 
 	return nil
@@ -351,9 +345,7 @@ func (h *AgentStreamHandler) handleToolApprovalRequired(ctx context.Context, evt
 		Timestamp: time.Now(),
 		Data:      meta,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append tool approval required event failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append tool approval required event failed", "error", err)
 	}
 	return nil
 }
@@ -374,9 +366,7 @@ func (h *AgentStreamHandler) handleToolApprovalResolved(ctx context.Context, evt
 		Timestamp: time.Now(),
 		Data:      meta,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append tool approval resolved event failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append tool approval resolved event failed", "error", err)
 	}
 	return nil
 }
@@ -398,9 +388,7 @@ func (h *AgentStreamHandler) handleMCPOAuthRequired(ctx context.Context, evt eve
 		Timestamp: time.Now(),
 		Data:      meta,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append mcp oauth required event failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append mcp oauth required event failed", "error", err)
 	}
 	return nil
 }
@@ -421,9 +409,7 @@ func (h *AgentStreamHandler) handleMCPOAuthResolved(ctx context.Context, evt eve
 		Timestamp: time.Now(),
 		Data:      meta,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append mcp oauth resolved event failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append mcp oauth resolved event failed", "error", err)
 	}
 	return nil
 }
@@ -468,9 +454,7 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 			"references": types.References(h.knowledgeRefs),
 		},
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append references event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append references event to stream failed", "error", err)
 	}
 
 	return nil
@@ -500,9 +484,7 @@ func (h *AgentStreamHandler) handleMemoryRecalled(ctx context.Context, evt event
 		Timestamp: time.Now(),
 		Data:      map[string]interface{}{"memories": used},
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append memory recalled event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append memory recalled event to stream failed", "error", err)
 	}
 	return nil
 }
@@ -535,9 +517,7 @@ func (h *AgentStreamHandler) handleContextCompacted(_ context.Context, evt event
 			"split_turn":      data.SplitTurn,
 		},
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append context compacted event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append context compacted event to stream failed", "error", err)
 	}
 	return nil
 }
@@ -619,9 +599,7 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 		Timestamp: time.Now(),
 		Data:      metadata,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append answer event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append answer event to stream failed", "error", err)
 	}
 
 	return nil
@@ -642,9 +620,7 @@ func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Eve
 		Done:      data.Done,
 		Timestamp: time.Now(),
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append reflection event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append reflection event to stream failed", "error", err)
 	}
 
 	return nil
@@ -672,9 +648,7 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 		Timestamp: time.Now(),
 		Data:      metadata,
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append error event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append error event to stream failed", "error", err)
 	}
 
 	return nil
@@ -702,9 +676,7 @@ func (h *AgentStreamHandler) handleSessionTitle(ctx context.Context, evt event.E
 			"title":      data.Title,
 		},
 	}); err != nil {
-		logger.GetLogger(h.ctx).Warnf(
-			"Append session title event to stream failed (stream may have ended): error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Warn("Append session title event to stream failed (stream may have ended)", "error", err)
 	}
 
 	return nil
@@ -732,9 +704,7 @@ func (h *AgentStreamHandler) handleUserMessageInjected(_ context.Context, evt ev
 			"user_message_id": data.UserMessageID,
 		},
 	}); err != nil {
-		logger.GetLogger(h.ctx).Errorf(
-			"Append user message injected event to stream failed: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.GetLogger(h.ctx).Error("Append user message injected event to stream failed", "error", err)
 	}
 	return nil
 }
@@ -829,8 +799,8 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 				)
 				if err != nil {
 					logger.GetLogger(h.ctx).Warnf(
-						"artifact collect failed session=%s message=%s: error_len=%d error_type=%T",
-						h.sessionID, h.assistantMessageID, len(fmt.Sprint(err)), err,
+						"artifact collect failed session=%s message=%s: %v",
+						h.sessionID, h.assistantMessageID, err,
 					)
 				}
 			}
@@ -901,9 +871,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 				"is_fallback": true,
 			},
 		}); err != nil {
-			logger.GetLogger(h.ctx).Errorf(
-				"Append fallback answer event failed: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.GetLogger(h.ctx).Errorf("Append fallback answer event failed: %v", err)
 		}
 		if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 			ID:        fallbackID,
@@ -916,9 +884,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 				"is_fallback": true,
 			},
 		}); err != nil {
-			logger.GetLogger(h.ctx).Errorf(
-				"Append fallback answer done event failed: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.GetLogger(h.ctx).Errorf("Append fallback answer done event failed: %v", err)
 		}
 	}
 
@@ -994,8 +960,8 @@ func (h *AgentStreamHandler) emitArtifactsPending(count int) {
 		},
 	}); err != nil {
 		logger.GetLogger(h.ctx).Warnf(
-			"append artifacts_pending failed session=%s message=%s: error_len=%d error_type=%T",
-			h.sessionID, h.assistantMessageID, len(fmt.Sprint(err)), err,
+			"append artifacts_pending failed session=%s message=%s: %v",
+			h.sessionID, h.assistantMessageID, err,
 		)
 	}
 }

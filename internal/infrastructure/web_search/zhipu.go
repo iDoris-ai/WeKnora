@@ -139,8 +139,7 @@ func (p *ZhipuProvider) Search(
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	logger.Infof(ctx, "[WebSearch][Zhipu] query_len=%d maxResults=%d engine=%s",
-		len(preparedQuery), maxResults, p.searchEngine)
+	logger.Infof(ctx, "[WebSearch][Zhipu] query=%q maxResults=%d engine=%s", preparedQuery, maxResults, p.searchEngine)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute Zhipu request: %w", err)
