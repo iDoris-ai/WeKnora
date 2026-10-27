@@ -390,46 +390,50 @@ func TestAgent24NarrowSearch(t *testing.T) {
 		{Rank: 4, KnowledgeBaseID: "b", ChunkID: "c2"},
 		{Rank: 7, KnowledgeBaseID: "c", ChunkID: "c3"},
 	}
+	plan := agent24SearchPlan{
+		Scope: []string{"a", "b", "c", "e", "f"}, ScoreSpace: "s",
+		Searchable: []string{"a", "b", "c"}, Empty: []string{"e"},
+		Failures: []agent24SearchFailure{{KnowledgeBaseID: "f", Reason: "index_building"}},
+	}
 
 	t.Run("filter and renumber", func(t *testing.T) {
-		comp, got, failures := agent24NarrowSearch([]string{"c", "a"}, "partial", hits, nil)
-		require.Equal(t, "partial", comp)
-		require.Nil(t, failures)
+		got, gotHits := agent24NarrowSearch([]string{"a", "c"}, plan, hits)
+		require.Equal(t, agent24SearchPlan{
+			Scope: []string{"a", "c"}, ScoreSpace: "s", Searchable: []string{"a", "c"},
+		}, got)
 		require.Equal(t, []agent24SearchHit{
 			{Rank: 1, KnowledgeBaseID: "a", ChunkID: "c1"},
 			{Rank: 2, KnowledgeBaseID: "c", ChunkID: "c3"},
+		}, gotHits)
+	})
+	t.Run("empty and failed KBs kept in scope", func(t *testing.T) {
+		got, _ := agent24NarrowSearch([]string{"e", "f"}, plan, hits)
+		require.Equal(t, agent24SearchPlan{
+			Scope: []string{"e", "f"}, ScoreSpace: "s", Empty: []string{"e"},
+			Failures: []agent24SearchFailure{{KnowledgeBaseID: "f", Reason: "index_building"}},
 		}, got)
 	})
-	t.Run("failures become empty", func(t *testing.T) {
-		comp, _, failures := agent24NarrowSearch([]string{"a"}, "partial", hits, []agent24SearchFailure{
-			{KnowledgeBaseID: "z", Reason: "drop"}, {KnowledgeBaseID: "y", Reason: "drop"},
-		})
-		require.Equal(t, "complete", comp)
-		require.Nil(t, failures)
-	})
-	t.Run("failures remain", func(t *testing.T) {
-		comp, _, failures := agent24NarrowSearch([]string{"a", "b"}, "partial", hits, []agent24SearchFailure{
-			{KnowledgeBaseID: "z", Reason: "drop"},
-			{KnowledgeBaseID: "a", Reason: "keep-a"},
-			{KnowledgeBaseID: "b", Reason: "keep-b"},
-		})
-		require.Equal(t, "partial", comp)
-		require.Equal(t, []agent24SearchFailure{
-			{KnowledgeBaseID: "a", Reason: "keep-a"},
-			{KnowledgeBaseID: "b", Reason: "keep-b"},
-		}, failures)
-	})
-	t.Run("no failures", func(t *testing.T) {
-		comp, _, failures := agent24NarrowSearch([]string{"a"}, "partial", hits, nil)
-		require.Equal(t, "partial", comp)
-		require.Nil(t, failures)
-		comp, _, failures = agent24NarrowSearch([]string{"a"}, "complete", hits, []agent24SearchFailure{})
-		require.Equal(t, "complete", comp)
-		require.Nil(t, failures)
-	})
 	t.Run("hits all dropped", func(t *testing.T) {
-		_, got, _ := agent24NarrowSearch([]string{"z"}, "complete", hits, nil)
+		_, got := agent24NarrowSearch([]string{"e"}, plan, hits)
 		require.NotNil(t, got)
 		require.Empty(t, got)
 	})
+	t.Run("outcome over the narrowed plan", func(t *testing.T) {
+		comp, failures, kerr := agent24SearchOutcome(must2(agent24NarrowSearch([]string{"a"}, plan, hits)), nil)
+		require.Nil(t, kerr)
+		require.Equal(t, "complete", comp)
+		require.Nil(t, failures)
+
+		comp, failures, kerr = agent24SearchOutcome(must2(agent24NarrowSearch([]string{"a", "f"}, plan, hits)), nil)
+		require.Nil(t, kerr)
+		require.Equal(t, "partial", comp)
+		require.Equal(t, plan.Failures, failures)
+
+		_, _, kerr = agent24SearchOutcome(must2(agent24NarrowSearch([]string{"f"}, plan, hits)), nil)
+		require.NotNil(t, kerr)
+		require.Equal(t, agent24CodeUnavailable, kerr.Code)
+		require.Equal(t, "index_building", kerr.Reason)
+	})
 }
+
+func must2(p agent24SearchPlan, _ []agent24SearchHit) agent24SearchPlan { return p }

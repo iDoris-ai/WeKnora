@@ -679,6 +679,26 @@ func TestAgent24KnowledgeSearchRecheck(t *testing.T) {
 		assert.NotContains(t, w.Body.String(), `"knowledge_base_id":"z"`)
 		assert.NotContains(t, w.Body.String(), `"chunk_id":"c2"`)
 	})
+	t.Run("failure outside the new scope", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
+		w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a","d"`, agent24Budget))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var got agent24SearchResp
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		assert.Equal(t, "complete", got.Completeness)
+		assert.NotContains(t, w.Body.String(), "partial_failures")
+	})
+	t.Run("only failed KBs left", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "d"}}}
+		w := e.run(agent24TenantCtx(), t, agent24SearchBody(`"a","d"`, agent24Budget))
+		require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "unavailable", "index_building")
+		assert.Contains(t, w.Body.String(), `"knowledge_base_id":"d"`)
+		assert.NotContains(t, w.Body.String(), `"knowledge_base_id":"a"`)
+		assert.NotContains(t, w.Body.String(), `"chunk_id":"c1"`)
+	})
 	t.Run("scope empty", func(t *testing.T) {
 		e := newAgent24SearchEnv()
 		wrap := &agent24ScopeThen{inner: e.scope}

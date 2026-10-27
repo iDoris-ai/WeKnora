@@ -104,12 +104,8 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 		}
 		return
 	}
-	page, kerr := agent24JudgeRead(h.key, req, snap)
-	if kerr != nil {
-		agent24NoteScope(c, scope)
-		writeAgent24KnowledgeError(c, kerr, echo)
-		return
-	}
+	// The recheck comes before the judgement: a stale answer carries the current revisions (R4.5), which a
+	// credential that no longer stands, or a document whose KB left E, must not see (R7.6).
 	newScope, kerr, gone := agent24RecheckScope(ctx, h.recheck, h.scope, c.Request.Header, req.KBIDs, scope)
 	if gone {
 		agent24NoteCancelled(c, echo, scope)
@@ -125,6 +121,12 @@ func (h *Agent24KnowledgeReadHandler) Read(c *gin.Context) {
 	if !slices.Contains(newScope, snap.KnowledgeBaseID) {
 		agent24NoteScope(c, newScope)
 		writeAgent24KnowledgeError(c, agent24NotFound(), echo)
+		return
+	}
+	page, kerr := agent24JudgeRead(h.key, req, snap)
+	if kerr != nil {
+		agent24NoteScope(c, newScope)
+		writeAgent24KnowledgeError(c, kerr, echo)
 		return
 	}
 	resource, revision := agent24ReadAuditResource(req.KnowledgeID, page.Revision, page.Segments)

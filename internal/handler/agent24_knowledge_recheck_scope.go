@@ -58,35 +58,45 @@ func agent24RecheckScope(
 	return narrowed, nil, false
 }
 
-// agent24NarrowSearch filters a search result down to scope (R7.6): hits outside it are dropped with no
-// refill and the rest renumbered from 1 (R3.6); partial_failures keep only KBs in scope, and when filtering
-// leaves none of a non-empty list completeness becomes complete. hits stays non-nil.
+// agent24NarrowSearch narrows a search to scope, the E the recheck left (R7.6). The plan keeps only KBs in
+// scope, so agent24SearchOutcome then judges completeness and partial_failures over the narrowed E: a
+// failure outside it is dropped, none left makes the result complete, and only failed KBs left is the
+// top-level error a search over that E would give. hits outside scope are dropped with no refill and the
+// rest renumbered from 1 (R3.6); hits stays non-nil.
 func agent24NarrowSearch(
-	scope []string, completeness string, hits []agent24SearchHit, failures []agent24SearchFailure,
-) (string, []agent24SearchHit, []agent24SearchFailure) {
+	scope []string, plan agent24SearchPlan, hits []agent24SearchHit,
+) (agent24SearchPlan, []agent24SearchHit) {
 	allowed := make(map[string]struct{}, len(scope))
 	for _, id := range scope {
 		allowed[id] = struct{}{}
 	}
+	in := func(id string) bool {
+		_, ok := allowed[id]
+		return ok
+	}
+	narrowed := agent24SearchPlan{Scope: append([]string(nil), scope...), ScoreSpace: plan.ScoreSpace}
+	for _, id := range plan.Searchable {
+		if in(id) {
+			narrowed.Searchable = append(narrowed.Searchable, id)
+		}
+	}
+	for _, id := range plan.Empty {
+		if in(id) {
+			narrowed.Empty = append(narrowed.Empty, id)
+		}
+	}
+	for _, f := range plan.Failures {
+		if in(f.KnowledgeBaseID) {
+			narrowed.Failures = append(narrowed.Failures, f)
+		}
+	}
 	outHits := make([]agent24SearchHit, 0, len(hits))
 	for _, hit := range hits {
-		if _, ok := allowed[hit.KnowledgeBaseID]; !ok {
+		if !in(hit.KnowledgeBaseID) {
 			continue
 		}
 		hit.Rank = len(outHits) + 1
 		outHits = append(outHits, hit)
 	}
-	if len(failures) == 0 {
-		return completeness, outHits, nil
-	}
-	var outFailures []agent24SearchFailure
-	for _, failure := range failures {
-		if _, ok := allowed[failure.KnowledgeBaseID]; ok {
-			outFailures = append(outFailures, failure)
-		}
-	}
-	if len(outFailures) == 0 {
-		return "complete", outHits, nil
-	}
-	return completeness, outHits, outFailures
+	return narrowed, outHits
 }

@@ -352,6 +352,31 @@ func TestAgent24KnowledgeReadRecheck(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 		agent24RequireErrorCode(t, w.Body.Bytes(), "forbidden", "empty_scope")
 	})
+	stale := agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`, `"knowledge_id":"doc-1"`,
+		`"chunk_id":"c1"`, `"expected_revision":{"content_tag":"old"}`)
+	t.Run("stale after the credential stopped", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.recheck = agent24FixedRecheck{reason: "credential_revoked"}
+		w := e.run(agent24TenantCtx(), t, stale)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "unauthorized", "credential_revoked")
+		assert.NotContains(t, w.Body.String(), "current_content_tag")
+	})
+	t.Run("stale for a document outside the new scope", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "b"}}}
+		w := e.run(agent24TenantCtx(), t, stale)
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "not_found", "")
+		assert.NotContains(t, w.Body.String(), "current_content_tag")
+	})
+	t.Run("stale inside the new scope", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
+		w := e.run(agent24TenantCtx(), t, stale)
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "current_content_tag")
+	})
 	t.Run("credential expired", func(t *testing.T) {
 		e := newAgent24ReadEnv()
 		e.h.recheck = agent24FixedRecheck{reason: "credential_expired"}

@@ -158,8 +158,7 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 		agent24NoteCancelled(c, echo, plan.Scope)
 		return
 	}
-	completeness, failures, kerr := agent24SearchOutcome(plan, searchErr)
-	if kerr != nil {
+	if _, _, kerr := agent24SearchOutcome(plan, searchErr); kerr != nil {
 		agent24NoteScope(c, plan.Scope)
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
@@ -176,7 +175,15 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
 	}
-	completeness, hits, failures = agent24NarrowSearch(scope, completeness, hits, failures)
+	// The outcome is judged again over the narrowed E (R7.6): failures outside it are dropped, and when only
+	// failed KBs are left the answer is the top-level error a search over that E would give.
+	plan, hits = agent24NarrowSearch(scope, plan, hits)
+	completeness, failures, kerr := agent24SearchOutcome(plan, searchErr)
+	if kerr != nil {
+		agent24NoteScope(c, plan.Scope)
+		writeAgent24KnowledgeError(c, kerr, echo)
+		return
+	}
 	outcome := completeness
 	if completeness == "complete" {
 		outcome = agent24AuditOK
