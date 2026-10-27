@@ -370,6 +370,16 @@ func TestAgent24KnowledgeReadRecheck(t *testing.T) {
 		agent24RequireErrorCode(t, w.Body.Bytes(), "not_found", "")
 		assert.NotContains(t, w.Body.String(), "current_content_tag")
 	})
+	t.Run("deadline passed while a stale read was rechecked", func(t *testing.T) {
+		e := newAgent24ReadEnv()
+		e.h.scope = &agent24ResolveWaitSecond{inner: e.scope}
+		w := e.run(agent24TenantCtx(), t, agent24ReadBodyOf(`"scope":{"knowledge_base_ids":["a","b"]}`,
+			`"knowledge_id":"doc-1"`, `"chunk_id":"c1"`, `"expected_revision":{"content_tag":"old"}`,
+			`"deadline_ms":30`))
+		require.Equal(t, http.StatusGatewayTimeout, w.Code, w.Body.String())
+		agent24RequireErrorCode(t, w.Body.Bytes(), "timeout", "")
+		assert.NotContains(t, w.Body.String(), "current_content_tag")
+	})
 	t.Run("stale inside the new scope", func(t *testing.T) {
 		e := newAgent24ReadEnv()
 		e.h.scope = &agent24ScopeThen{inner: e.scope, then: []*types.KnowledgeBase{{ID: "a"}}}
@@ -384,4 +394,19 @@ func TestAgent24KnowledgeReadRecheck(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		agent24RequireErrorCode(t, w.Body.Bytes(), "unauthorized", "credential_expired")
 	})
+}
+
+// agent24ResolveWaitSecond resolves through inner, and on the second call (the recheck) waits for the
+// request's deadline first: the recheck is the last step before a read answers.
+type agent24ResolveWaitSecond struct {
+	inner agent24ScopeResolver
+	calls int
+}
+
+func (s *agent24ResolveWaitSecond) Resolve(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+	s.calls++
+	if s.calls == 2 {
+		<-ctx.Done()
+	}
+	return s.inner.Resolve(ctx, ids)
 }
