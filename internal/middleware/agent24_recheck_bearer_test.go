@@ -219,7 +219,7 @@ func TestAgent24RecheckBearer(t *testing.T) {
 		},
 		{
 			name: "header tenant inactive member fail open", tenantHeader: "9", entry: &entry9, rbac: &rbacOff,
-			members: map[uint64]*types.TenantMember{9: &types.TenantMember{
+			members: map[uint64]*types.TenantMember{9: {
 				UserID: "u1", TenantID: 9, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusSuspended,
 			}},
 			present: []uint64{9}, wantReason: invalid,
@@ -250,14 +250,14 @@ func TestAgent24RecheckBearer(t *testing.T) {
 
 		{
 			name: "inactive member enforced",
-			members: map[uint64]*types.TenantMember{7: &types.TenantMember{
+			members: map[uint64]*types.TenantMember{7: {
 				UserID: "u1", TenantID: 7, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusSuspended,
 			}},
 			wantReason: invalid,
 		},
 		{
 			name: "inactive member fail open", rbac: &rbacOff,
-			members: map[uint64]*types.TenantMember{7: &types.TenantMember{
+			members: map[uint64]*types.TenantMember{7: {
 				UserID: "u1", TenantID: 7, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusSuspended,
 			}},
 		},
@@ -269,20 +269,20 @@ func TestAgent24RecheckBearer(t *testing.T) {
 
 		{
 			name: "ghost role enforced",
-			members: map[uint64]*types.TenantMember{7: &types.TenantMember{
+			members: map[uint64]*types.TenantMember{7: {
 				UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
 			}},
 			wantReason: invalid,
 		},
 		{
 			name: "ghost role fail open", rbac: &rbacOff,
-			members: map[uint64]*types.TenantMember{7: &types.TenantMember{
+			members: map[uint64]*types.TenantMember{7: {
 				UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
 			}},
 		},
 		{
 			name: "ghost role cross superuser", user: super, cross: true,
-			members: map[uint64]*types.TenantMember{7: &types.TenantMember{
+			members: map[uint64]*types.TenantMember{7: {
 				UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
 			}},
 		},

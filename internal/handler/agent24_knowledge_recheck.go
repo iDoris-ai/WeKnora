@@ -93,7 +93,9 @@ func (r agent24DefaultRechecker) Recheck(ctx context.Context, header http.Header
 	return types.WithTenantAPIKeyScope(ctx, fresh), "", nil
 }
 
-func (r agent24DefaultRechecker) recheckBearer(ctx context.Context, header http.Header) (context.Context, string, error) {
+func (r agent24DefaultRechecker) recheckBearer(
+	ctx context.Context, header http.Header,
+) (context.Context, string, error) {
 	if r.users == nil || r.members == nil || r.tenants == nil {
 		return ctx, "", errAgent24RecheckUnwired
 	}
