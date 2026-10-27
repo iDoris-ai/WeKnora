@@ -386,3 +386,57 @@ func TestAgent24RecheckBearer(t *testing.T) {
 		})
 	}
 }
+
+// TestAgent24RecheckBearerNilGuards covers what the table above never builds: a nil config, a config
+// without Tenant settings, and no membership service (L3 on #122). Each guard keeps the recheck from
+// panicking and decides as Auth does for the same input.
+func TestAgent24RecheckBearerNilGuards(t *testing.T) {
+	header := http.Header{}
+	header.Set("Authorization", "Bearer tok")
+	entry := Agent24RecheckBearerEntry{UserID: "u1", TenantID: 7}
+	users := agent24BearerUsers{user: &types.User{ID: "u1", TenantID: 7}, jwtTenantID: 7}
+	tenants := agent24BearerTenants{present: []uint64{0, 7, 9}}
+	inactive := agent24BearerMembers{byTenant: map[uint64]*types.TenantMember{7: {
+		UserID: "u1", TenantID: 7, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusSuspended,
+	}}}
+	ghost := agent24BearerMembers{byTenant: map[uint64]*types.TenantMember{7: {
+		UserID: "u1", TenantID: 7, Role: types.TenantRole("ghost"), Status: types.TenantMemberStatusActive,
+	}}}
+
+	run := func(t *testing.T, users agent24BearerUsers, members interfaces.TenantMemberService,
+		cfg *config.Config, header http.Header, entry Agent24RecheckBearerEntry,
+	) string {
+		t.Helper()
+		res, err := Agent24RecheckBearer(context.Background(), users, members, tenants, cfg, header, entry)
+		require.NoError(t, err)
+		return res.Reason
+	}
+
+	t.Run("nil config fails open on the role", func(t *testing.T) {
+		require.Empty(t, run(t, users, inactive, nil, header, entry))
+	})
+	t.Run("nil config fails open on the viewer floor", func(t *testing.T) {
+		require.Empty(t, run(t, users, ghost, nil, header, entry))
+	})
+	t.Run("no tenant settings enforce RBAC", func(t *testing.T) {
+		require.Equal(t, "credential_invalid", run(t, users, ghost, &config.Config{}, header, entry))
+	})
+	t.Run("no tenant settings with a header tenant", func(t *testing.T) {
+		h := header.Clone()
+		h.Set("X-Tenant-ID", "9")
+		members := agent24BearerMembers{byTenant: map[uint64]*types.TenantMember{9: agent24BearerViewer(9)}}
+		require.Empty(t, run(t, users, members, &config.Config{}, h,
+			Agent24RecheckBearerEntry{UserID: "u1", TenantID: 9}))
+	})
+	t.Run("no membership service with a header tenant", func(t *testing.T) {
+		h := header.Clone()
+		h.Set("X-Tenant-ID", "9")
+		require.Equal(t, "credential_invalid",
+			run(t, users, nil, nil, h, Agent24RecheckBearerEntry{UserID: "u1", TenantID: 9}))
+	})
+	t.Run("no membership service without a tenant", func(t *testing.T) {
+		homeless := agent24BearerUsers{user: &types.User{ID: "u1"}}
+		require.Equal(t, "credential_invalid",
+			run(t, homeless, nil, nil, header, Agent24RecheckBearerEntry{UserID: "u1"}))
+	})
+}

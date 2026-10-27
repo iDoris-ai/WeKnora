@@ -66,7 +66,8 @@ func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) error {
 }
 
 // installAgent24IntegrationAuthEnvelope must run right before middleware.Auth (A24-KB-11); the credential gate
-// after Auth releases what it holds.
+// after Auth releases what it holds. An invalid mode never reaches here: installAgent24IntegrationMode, at the
+// top of NewRouter, already stopped startup on it, as ensureAgent24CredentialRevocations does in the container.
 func installAgent24IntegrationAuthEnvelope(r *gin.Engine) {
 	mode, err := handler.Agent24KnowledgeModeFromEnv()
 	if err == nil && mode == handler.Agent24KnowledgeModeIntegration {
@@ -74,7 +75,8 @@ func installAgent24IntegrationAuthEnvelope(r *gin.Engine) {
 	}
 }
 
-// installAgent24IntegrationCredentialGate must run right after middleware.Auth.
+// installAgent24IntegrationCredentialGate must run right after middleware.Auth. As for the auth envelope, an
+// invalid mode already stopped startup in installAgent24IntegrationMode.
 func installAgent24IntegrationCredentialGate(r *gin.Engine, revocations interfaces.Agent24CredentialRevocationStore) {
 	mode, err := handler.Agent24KnowledgeModeFromEnv()
 	if err == nil && mode == handler.Agent24KnowledgeModeIntegration {

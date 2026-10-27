@@ -70,11 +70,15 @@ func Agent24IntegrationCredentialGate(revocations interfaces.Agent24CredentialRe
 }
 
 // agent24RevocationCheckFailed refuses the request when the jti list cannot be read. err is nil when the
-// store itself is nil; the log records that nil and never the jti or the error text.
+// store itself is nil, and the log says so; it never records the jti or the error text.
 func agent24RevocationCheckFailed(c *gin.Context, tenantID uint64, err error) {
-	logger.Warnf(c.Request.Context(),
-		"[agent24] revocation check failed: tenant=%d error_len=%d error_type=%T",
-		tenantID, len(fmt.Sprint(err)), err)
+	if err == nil {
+		logger.Warnf(c.Request.Context(), "[agent24] revocation check failed: tenant=%d store=unwired", tenantID)
+	} else {
+		logger.Warnf(c.Request.Context(),
+			"[agent24] revocation check failed: tenant=%d error_len=%d error_type=%T",
+			tenantID, len(fmt.Sprint(err)), err)
+	}
 	if strings.HasPrefix(c.Request.URL.Path, agent24KnowledgePathPrefix) {
 		writeAgent24KnowledgeError(c, agent24Internal(), agent24KnowledgeEcho{})
 		return
