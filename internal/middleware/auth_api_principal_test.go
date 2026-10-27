@@ -240,6 +240,7 @@ func TestResolveAPIPrincipalSignedTokenJTI(t *testing.T) {
 		{name: "blank", set: func(c jwt.MapClaims) { c["jti"] = "   " }},
 		{name: "trimmed", set: func(c jwt.MapClaims) { c["jti"] = "  kept  " }, want: "kept"},
 		{name: "control", set: func(c jwt.MapClaims) { c["jti"] = "bad\njti" }},
+		{name: "delete", set: func(c jwt.MapClaims) { c["jti"] = "bad\x7fjti" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
