@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -193,46 +192,4 @@ func TestRerankKeepsNoImagesUnlessAsked(t *testing.T) {
 	})
 	assert.Equal(t, "t1", ids(res.Results))
 	assert.Zero(t, res.Diagnostics.ImagesKept)
-}
-
-// The image reader's error quotes the image URL; the log keeps its length and type.
-func TestRerankUnreadableImageLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	model := &visionScorer{textScorer: textScorer{scores: map[string]float64{"a red circle": 0.7}}}
-	Rerank(context.Background(), model, "q", []*types.SearchResult{imageHit("img", "a red circle", 0.2, 0)},
-		Options{Threshold: 0.5, LoadImage: func(context.Context, *types.SearchResult) ([]byte, error) {
-			return nil, errors.New("download https://files.example/" + sentinel + ".png: gone")
-		}})
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "Image of img unreadable, scoring its text: error_len=")
-}
-
-// Prepare rejects bytes that are not an image. The sentinel is those bytes;
-// the error names only the detected type.
-func TestRerankUnpreparedImageLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	model := &visionScorer{textScorer: textScorer{scores: map[string]float64{"a red circle": 0.7}}}
-	_, prepErr := imageprep.Prepare([]byte(sentinel), model.ImageLimits())
-	require.Error(t, prepErr)
-	require.NotEmpty(t, prepErr.Error())
-	res := Rerank(context.Background(), model, "q", []*types.SearchResult{imageHit("img", "a red circle", 0.2, 0)},
-		Options{Threshold: 0.5, LoadImage: func(context.Context, *types.SearchResult) ([]byte, error) {
-			return []byte(sentinel), nil
-		}})
-	assert.Equal(t, "img", ids(res.Results))
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.NotContains(t, logs, prepErr.Error())
-	assert.Contains(t, logs, "Image of img does not fit the model, scoring its text: error_len=")
 }

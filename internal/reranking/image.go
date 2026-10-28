@@ -3,7 +3,6 @@ package reranking
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"sync"
 	"unicode/utf8"
@@ -87,16 +86,12 @@ func imageCandidates(
 		group.Go(func() error {
 			data, err := opts.LoadImage(groupCtx, r)
 			if err != nil {
-				// The reader's error quotes the image URL.
-				logger.Warnf(groupCtx, "[Rerank] Image of %s unreadable, scoring its text: error_len=%d error_type=%T",
-					r.ID, len(fmt.Sprint(err)), err)
+				logger.Warnf(groupCtx, "[Rerank] Image of %s unreadable, scoring its text: %v", r.ID, err)
 				return nil
 			}
 			img, err := imageprep.Prepare(data, limits)
 			if err != nil {
-				logger.Warnf(groupCtx,
-					"[Rerank] Image of %s does not fit the model, scoring its text: error_len=%d error_type=%T",
-					r.ID, len(fmt.Sprint(err)), err)
+				logger.Warnf(groupCtx, "[Rerank] Image of %s does not fit the model, scoring its text: %v", r.ID, err)
 				return nil
 			}
 			mu.Lock()
@@ -128,8 +123,7 @@ func scoreCandidates(
 		imageModel, _ := rerank.AsImageReranker(model)
 		imageScores, imgErr := imageModel.RerankImages(ctx, query, images)
 		if imgErr != nil {
-			logger.Warnf(ctx, "[Rerank] Image scoring failed, scoring those hits as text: error_len=%d error_type=%T",
-				len(fmt.Sprint(imgErr)), imgErr)
+			logger.Warnf(ctx, "[Rerank] Image scoring failed, scoring those hits as text: %v", imgErr)
 		} else {
 			for _, s := range imageScores {
 				if s.Index < 0 || s.Index >= len(imagePositions) {

@@ -3,7 +3,6 @@ package searchutil
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -141,15 +140,12 @@ func ContextImages(
 			source.ImageInfo = string(info)
 			data, err := read(ctx, &source)
 			if err != nil {
-				// The reader's error quotes the image URL.
-				logger.Warnf(ctx, "[ContextImages] Image of %s unreadable: error_len=%d error_type=%T",
-					ref.ChunkID, len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[ContextImages] Image of %s unreadable: %v", ref.ChunkID, err)
 				continue
 			}
 			img, err := imageprep.Prepare(data, VisionImageLimits)
 			if err != nil {
-				logger.Warnf(ctx, "[ContextImages] Image of %s does not fit a vision model: error_len=%d error_type=%T",
-					ref.ChunkID, len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[ContextImages] Image of %s does not fit a vision model: %v", ref.ChunkID, err)
 				continue
 			}
 			images = append(images, img.DataURI())

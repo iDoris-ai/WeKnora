@@ -288,8 +288,7 @@ func resolveImageAssetSourceNames(
 	if err != nil {
 		logger.WarnWithFields(ctx, logger.Fields{
 			"knowledge_ids": ids,
-			"error_len":     len(fmt.Sprint(err)),
-			"error_type":    fmt.Sprintf("%T", err),
+			"error":         err.Error(),
 		}, "failed to resolve image source names")
 		return names
 	}
