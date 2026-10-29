@@ -14,7 +14,6 @@ package session
 import (
 	"context"
 	stderrors "errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -235,9 +234,8 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 			return
 		}
 		_, code := desktopErrorStatus(err)
-		logger.Warnf(ctx,
-			"[sandbox-desktop] open failed session=%s provision=%t code=%s: error_len=%d error_type=%T",
-			sessionID, allowProvision, code, len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[sandbox-desktop] open failed session=%s provision=%t code=%s: %v",
+			sessionID, allowProvision, code, err)
 		browserConn, upErr := desktopUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if upErr != nil {
 			return
@@ -265,8 +263,7 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 	prelude, err := readDesktopServerHandshake(ctx, desktop.Conn)
 	if err != nil {
 		_ = desktop.Conn.Close()
-		logger.Warnf(ctx, "[sandbox-desktop] bad server handshake session=%s: error_len=%d error_type=%T",
-			sessionID, len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[sandbox-desktop] bad server handshake session=%s: %v", sessionID, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": desktopErrUpstream})
 		return
 	}
@@ -307,8 +304,7 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 	// the security-type list, and the pump will never see it again.
 	if len(prelude) > rfbProtocolVersionBytes {
 		if err := relay.serverStream.Observe(prelude[rfbProtocolVersionBytes:]); err != nil {
-			logger.Warnf(ctx, "[sandbox-desktop] session=%s error_len=%d error_type=%T",
-				sessionID, len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[sandbox-desktop] %v session=%s", err, sessionID)
 			relay.closeWith(desktopErrUpstream)
 			return
 		}
@@ -490,8 +486,7 @@ func renewDesktopSlot(
 				if stderrors.Is(rerr, context.Canceled) && ctx.Err() != nil {
 					return
 				}
-				logger.Warnf(ctx, "[sandbox-desktop] slot renew failed key=%s: error_len=%d error_type=%T",
-					key, len(fmt.Sprint(rerr)), rerr)
+				logger.Warnf(ctx, "[sandbox-desktop] slot renew failed key=%s: %v", key, rerr)
 				if time.Since(lastOK) >= lease {
 					cancelHold(rerr)
 					return
@@ -656,8 +651,7 @@ func (r *desktopRelay) pumpSandboxToBrowser() {
 			continue
 		}
 		if err := r.serverStream.Observe(payload); err != nil {
-			logger.Warnf(r.ctx, "[sandbox-desktop] session=%s error_len=%d error_type=%T",
-				r.sessionID, len(fmt.Sprint(err)), err)
+			logger.Warnf(r.ctx, "[sandbox-desktop] %v session=%s", err, r.sessionID)
 			r.closeWith(desktopErrUpstream)
 			return
 		}
@@ -780,8 +774,8 @@ func (r *desktopRelay) watchAuth(done <-chan struct{}) {
 				r.closeWith(desktopErrAuth)
 				return
 			}
-			logger.Warnf(r.ctx, "[sandbox-desktop] auth recheck failed session=%s: error_len=%d error_type=%T",
-				r.sessionID, len(fmt.Sprint(err)), err)
+			logger.Warnf(r.ctx, "[sandbox-desktop] auth recheck failed session=%s: %v",
+				r.sessionID, err)
 		}
 	}
 }
@@ -872,12 +866,10 @@ func (h *Handler) desktopSandboxRebuilt(ctx context.Context, sessionID, sandboxI
 	}
 	prev, err := h.desktopLast.Get(ctx, sessionID)
 	if err != nil {
-		logger.Warnf(ctx, "[sandbox-desktop] last-sandbox get failed session=%s: error_len=%d error_type=%T",
-			sessionID, len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[sandbox-desktop] last-sandbox get failed session=%s: %v", sessionID, err)
 	}
 	if setErr := h.desktopLast.Set(ctx, sessionID, sandboxID); setErr != nil {
-		logger.Warnf(ctx, "[sandbox-desktop] last-sandbox set failed session=%s: error_len=%d error_type=%T",
-			sessionID, len(fmt.Sprint(setErr)), setErr)
+		logger.Warnf(ctx, "[sandbox-desktop] last-sandbox set failed session=%s: %v", sessionID, setErr)
 	}
 	return prev != "" && prev != sandboxID
 }

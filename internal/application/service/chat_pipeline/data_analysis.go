@@ -95,7 +95,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	// Load data into DuckDB
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get data schema: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "Failed to get data schema: %v", err)
 		return next()
 	}
 
@@ -111,8 +111,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		// broken data file) and must not disappear into a debug log.
 		pipelineWarn(ctx, "DataAnalysis", "analysis_failed", map[string]interface{}{
 			"knowledge_id": knowledge.ID,
-			"error_len":    len(err.Error()),
-			"error_type":   fmt.Sprintf("%T", err),
+			"error":        err.Error(),
 		})
 		return next()
 	}
@@ -233,11 +232,8 @@ func runDataAnalysis(
 		default:
 			errText = "tool returned no result"
 		}
-		lastErr = fmt.Errorf("attempt %d: sql_len=%d: %s", attempt, len(plan.SQL), errText)
-		// errText can quote the SQL (validation and engine errors); the repair
-		// prompt below still gets it whole.
-		logger.Warnf(ctx, "[DataAnalysis] attempt %d failed: sql_len=%d error_len=%d",
-			attempt, len(plan.SQL), len(errText))
+		lastErr = fmt.Errorf("attempt %d: sql=%q: %s", attempt, plan.SQL, errText)
+		logger.Warnf(ctx, "[DataAnalysis] %v", lastErr)
 		messages = append(messages,
 			chat.Message{Role: "assistant", Content: response.Content},
 			chat.Message{Role: "user", Content: fmt.Sprintf(

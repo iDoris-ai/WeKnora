@@ -359,9 +359,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		// The model answered in prose (e.g. declined a table-of-contents
 		// chunk). Replaying the same input cannot help, so finish the task
 		// instead of letting asynq retry it (issue #3600).
-		// The error quotes the start of the model's answer.
-		logger.Warnf(ctx, "graph extraction skipped for chunk %s: error_len=%d error_type=%T",
-			p.ChunkID, len(err.Error()), err)
+		logger.Warnf(ctx, "graph extraction skipped for chunk %s: %v", p.ChunkID, err)
 		graphOut["skipped"] = "model_declined"
 		return nil
 	}
@@ -654,7 +652,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 使用knowledge.ID作为表名，根据文件类型自动加载数据
 	tableSchema, err := duckdbTool.LoadFromKnowledge(ctx, resources.knowledge)
 	if err != nil {
-		logger.Errorf(ctx, "failed to load data into DuckDB: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "failed to load data into DuckDB: %v", err)
 		return nil, err
 	}
 
@@ -694,20 +692,18 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
-		logger.Errorf(ctx, "failed to generate table description: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "failed to generate table description: %v", err)
 		return nil, err
 	}
-	logger.Debugf(ctx, "table describe of knowledge %s: table_desc_len=%d",
-		resources.knowledge.ID, len(tableDescription))
+	logger.Debugf(ctx, "table describe of knowledge %s: %s", resources.knowledge.ID, tableDescription)
 
 	columnDescription, err := s.generateColumnDescriptions(ctx, resources.chatModel, tools.DataAnalysisTableName,
 		schemaDesc, sampleDesc, customInstructions)
 	if err != nil {
-		logger.Errorf(ctx, "failed to generate column descriptions: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "failed to generate column descriptions: %v", err)
 		return nil, err
 	}
-	logger.Debugf(ctx, "column describe of knowledge %s: column_desc_len=%d",
-		resources.knowledge.ID, len(columnDescription))
+	logger.Debugf(ctx, "column describe of knowledge %s: %s", resources.knowledge.ID, columnDescription)
 
 	// 构建chunks：一个表格摘要chunk + 多个列描述chunks
 	chunks := s.buildChunks(resources, tableDescription, columnDescription)

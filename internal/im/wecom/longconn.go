@@ -205,9 +205,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 		}
 
 		delay := reconnectDelay(attempts)
-		logger.Warnf(ctx,
-			"[WeCom] Connection lost (error_len=%d error_type=%T), reconnecting in %v (attempt %d)...",
-			len(fmt.Sprint(err)), err, delay, attempts)
+		logger.Warnf(ctx, "[WeCom] Connection lost (%v), reconnecting in %v (attempt %d)...", err, delay, attempts)
 
 		select {
 		case <-time.After(delay):
@@ -420,8 +418,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 
 		var frame wsFrame
 		if err := json.Unmarshal(message, &frame); err != nil {
-			logger.Warnf(ctx, "[WeCom] Failed to unmarshal frame: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[WeCom] Failed to unmarshal frame: %v", err)
 			continue
 		}
 
@@ -494,9 +491,7 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn) {
 				Headers: map[string]string{"req_id": reqID},
 			}
 			if err := c.writeJSON(frame); err != nil {
-				logger.Warnf(ctx,
-					"[WeCom] Heartbeat failed: error_len=%d error_type=%T, closing connection to trigger reconnect",
-					len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[WeCom] Heartbeat failed: %v, closing connection to trigger reconnect", err)
 				c.closeConnIf(conn)
 				return
 			}
@@ -505,19 +500,18 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn) {
 }
 
 func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, frame wsFrame) {
-	logger.Debugf(ctx, "[WeCom] Raw callback body body_bytes=%d", len(frame.Body))
+	// Log raw message body for debugging
+	logger.Debugf(ctx, "[WeCom] Raw callback body: %s", string(frame.Body))
 
 	var msg botMessage
 	if err := json.Unmarshal(frame.Body, &msg); err != nil {
-		logger.Warnf(ctx, "[WeCom] Failed to unmarshal callback body: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[WeCom] Failed to unmarshal callback body: %v", err)
 		return
 	}
 
-	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s "+
-		"text_len=%d image_url_len=%d file_url_len=%d voice_len=%d mixed_items=%d",
+	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s text=%q image_url=%q file_url=%q voice=%q mixed_items=%d",
 		msg.MsgID, msg.MsgType, msg.From.UserID, msg.ChatType,
-		len(msg.Text.Content), len(msg.Image.URL), len(msg.File.URL), len(msg.Voice.Content), len(msg.Mixed.MsgItem))
+		msg.Text.Content, msg.Image.URL, msg.File.URL, msg.Voice.Content, len(msg.Mixed.MsgItem))
 
 	// Handle server-side events (e.g. disconnected_event) before normal messages.
 	if msg.MsgType == "event" {
@@ -647,7 +641,7 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 	}
 
 	if err := c.handler(ctx, incoming); err != nil {
-		logger.Errorf(ctx, "[WeCom] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "[WeCom] Handle message error: %v", err)
 	}
 }
 

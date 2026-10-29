@@ -227,7 +227,7 @@ func (s *cosFileService) CopyFile(ctx context.Context,
 	}
 
 	newPath := fmt.Sprintf("cos://%s/%s/%s", s.bucketName, s.region, destKey)
-	logger.Infof(ctx, "Copied COS object src_len=%d dst_len=%d", len(srcPath), len(newPath))
+	logger.Infof(ctx, "Copied COS object %s to %s", srcPath, newPath)
 	return newPath, nil
 }
 

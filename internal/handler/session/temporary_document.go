@@ -162,8 +162,7 @@ func (h *Handler) PreviewTemporaryDocument(c *gin.Context) {
 	if err := filetransport.Serve(c.Writer, c.Request, file, filetransport.Options{
 		Filename: filename, CacheControl: "private, no-store",
 	}); err != nil {
-		logger.Errorf(ctx, "Failed to stream attachment preview: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to stream attachment preview: %v", err)
 	}
 }
 

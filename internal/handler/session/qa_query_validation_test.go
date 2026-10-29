@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -171,45 +170,4 @@ func TestUploadOnlyQuery(t *testing.T) {
 	assert.Equal(t, "Please answer based on what I uploaded.", uploadOnlyQuery(en, image))
 	assert.Empty(t, uploadOnlyQuery(zh, &CreateKnowledgeQARequest{}))
 	assert.Empty(t, uploadOnlyQuery(zh, &CreateKnowledgeQARequest{Images: []ImageAttachment{{URL: "http://x/a.png"}}}))
-}
-
-// The request log keeps the request shape. The query, a mentioned item name and
-// an attachment file name are user text and carry the sentinel.
-func TestQARequestLogOmitsUserText(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	sessions := &queryValidationSessionStub{}
-	h := &Handler{sessionService: sessions}
-	router := gin.New()
-	router.Use(middleware.ErrorHandler())
-	router.POST("/agent-chat/:session_id", h.AgentQA)
-
-	body, err := json.Marshal(CreateKnowledgeQARequest{
-		Query:             "what is " + sentinel,
-		MentionedItems:    []MentionedItemRequest{{ID: "kb-1", Name: sentinel + " notes", Type: "kb"}},
-		AttachmentUploads: []AttachmentUpload{{Data: "aGk=", FileName: sentinel + ".txt"}},
-	})
-	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "/agent-chat/session-1", bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(httptest.NewRecorder(), request)
-	require.Equal(t, 1, sessions.lookupCalls)
-
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "Request: session_id=session-1, query_len=16, kb_count=0")
-	assert.Contains(t, logs, "mentioned_count=1")
-	assert.Contains(t, logs, "attachment_count=1")
-}
-
-func TestAgentModeForLog(t *testing.T) {
-	assert.Equal(t, types.AgentModeQuickAnswer, agentModeForLog(types.AgentModeQuickAnswer))
-	assert.Equal(t, types.AgentModeSmartReasoning, agentModeForLog(types.AgentModeSmartReasoning))
-	assert.Equal(t, "", agentModeForLog(""))
-	assert.Equal(t, "(unknown len=27)", agentModeForLog("https://S3NT1NEL.example/x/"))
 }

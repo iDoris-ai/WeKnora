@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // defaultRunTimeout matches the shell_exec tool default so behaviour does not
@@ -82,9 +84,7 @@ func (s *Service) workspaceFor(
 ) (Workspace, Policy, error) {
 	ws, err := s.resolver.Resolve(ctx, sessionID)
 	if err != nil {
-		// The resolve error can quote the project directory (an *fs.PathError): length and type only.
-		logger.Warnf(ctx, "[LocalSandbox] resolve workspace session=%s: error_len=%d error_type=%T",
-			sessionID, len(err.Error()), err)
+		logger.Warnf(ctx, "[LocalSandbox] resolve workspace session=%s: %v", sessionID, err)
 		return Workspace{}, Policy{}, err
 	}
 	mode := ModeAuto
@@ -102,13 +102,12 @@ func (s *Service) workspaceFor(
 	}
 	policy, err := s.builder.Build(mode, ws)
 	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] build policy session=%s mode=%s root_len=%d: error_len=%d error_type=%T",
-			sessionID, mode, len(ws.Root), len(err.Error()), err)
+		logger.Warnf(ctx, "[LocalSandbox] build policy session=%s mode=%s root=%s: %v",
+			sessionID, mode, ws.Root, err)
 		return Workspace{}, Policy{}, err
 	}
-	// In project mode Root is the host directory the user chose for the session; it is logged by length only.
-	logger.Debugf(ctx, "[LocalSandbox] workspace session=%s kind=%d root_len=%d mode=%s writable=%d",
-		sessionID, ws.Kind, len(ws.Root), mode, len(policy.WritableRoots))
+	logger.Debugf(ctx, "[LocalSandbox] workspace session=%s kind=%d root=%s mode=%s writable=%d",
+		sessionID, ws.Kind, ws.Root, mode, len(policy.WritableRoots))
 	return ws, policy, nil
 }
 
@@ -122,7 +121,7 @@ func (s *Service) GuardForSession(
 	if err != nil {
 		return nil, Workspace{}, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root_len=%d", sessionID, len(ws.Root))
+	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root=%s", sessionID, ws.Root)
 	return NewPathGuard(policy), ws, nil
 }
 
@@ -173,9 +172,8 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 		// it is checked against the same guard the file tools use.
 		resolved, err := NewPathGuard(policy).CheckDir(req.WorkDir)
 		if err != nil {
-			// The guard error quotes work_dir, a tool argument; only lengths are logged.
-			logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir_len=%d error_len=%d error_type=%T",
-				req.SessionID, len(req.WorkDir), len(err.Error()), err)
+			logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir=%q: %v",
+				req.SessionID, req.WorkDir, err)
 			return nil, err
 		}
 		cwd = resolved
@@ -188,15 +186,14 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 	if timeout > maxRunTimeout {
 		timeout = maxRunTimeout
 	}
-	logger.Infof(ctx, "[LocalSandbox] run session=%s cwd_len=%d timeout=%s command_len=%d",
-		req.SessionID, len(cwd), timeout, len(req.Command))
+	logger.Infof(ctx, "[LocalSandbox] run session=%s cwd=%s timeout=%s command=%q",
+		req.SessionID, cwd, timeout, previewCommand(req.Command))
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	prep, err := s.backend.Prepare(runCtx, policy)
 	if err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] prepare session=%s: error_len=%d error_type=%T",
-			req.SessionID, len(err.Error()), err)
+		logger.Errorf(ctx, "[LocalSandbox] prepare session=%s: %v", req.SessionID, err)
 		return nil, fmt.Errorf("prepare sandbox: %w", err)
 	}
 	defer func() { _ = prep.Close() }()
@@ -212,7 +209,7 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 		Cwd:  cwd,
 	})
 	if err != nil {
-		logger.Errorf(ctx, "[LocalSandbox] spawn session=%s cwd_len=%d: %v", req.SessionID, len(cwd), err)
+		logger.Errorf(ctx, "[LocalSandbox] spawn session=%s cwd=%s: %v", req.SessionID, cwd, err)
 		return nil, fmt.Errorf("spawn sandboxed command: %w", err)
 	}
 
@@ -239,8 +236,8 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 
 	denial := ClassifyRunDenial(policy, status, stdout, stderr)
 	if denial.IsDenied() {
-		logger.Warnf(ctx, "[LocalSandbox] denied session=%s reason=%d path_len=%d exit=%d killed=%t duration=%s",
-			req.SessionID, denial.Reason, len(denial.Path), status.Code, status.Killed, status.Duration)
+		logger.Warnf(ctx, "[LocalSandbox] denied session=%s reason=%d path=%q exit=%d killed=%t duration=%s",
+			req.SessionID, denial.Reason, denial.Path, status.Code, status.Killed, status.Duration)
 	} else {
 		logger.Infof(ctx, "[LocalSandbox] done session=%s exit=%d killed=%t duration=%s stdout=%d stderr=%d",
 			req.SessionID, status.Code, status.Killed, status.Duration, len(stdout), len(stderr))
@@ -266,6 +263,17 @@ func watchKill(ctx context.Context, done <-chan struct{}, proc Process) {
 	default:
 		_ = proc.Kill()
 	}
+}
+
+const commandLogLimit = 240
+
+func previewCommand(command string) string {
+	command = strings.Join(strings.Fields(command), " ")
+	command = utils.MaskCommandAssignments(command)
+	if len(command) <= commandLogLimit {
+		return command
+	}
+	return command[:commandLogLimit] + "…"
 }
 
 func drain(proc Process) (string, string) {

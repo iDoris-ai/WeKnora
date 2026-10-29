@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -135,20 +134,4 @@ func TestRewindSessionMapsResetFailureTo500(t *testing.T) {
 	w := performRewind(t, rewinder, `{"message_id":"u-2"}`)
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
-}
-
-func TestRewindSessionLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	w := performRewind(t, &stubRewinder{err: errors.New("workspace reset " + sentinel)}, `{"message_id":"u-2"}`)
-
-	require.Equal(t, http.StatusInternalServerError, w.Code)
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "rewind session")
-	require.Contains(t, out, "error_len=")
 }

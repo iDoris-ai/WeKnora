@@ -100,7 +100,7 @@ func validateAPIBaseURL(endpoint, defaultEndpoint string) error {
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return fmt.Errorf("invalid api_base_url: %w", im.RedactRequestError(err))
+		return fmt.Errorf("invalid api_base_url: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("api_base_url must use http(s):// scheme, got %s://", u.Scheme)
@@ -252,8 +252,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 	if err := json.Unmarshal(bodyBytes, &encryptedBody); err == nil && encryptedBody.Encrypt != "" {
 		decrypted, err := a.decrypt(encryptedBody.Encrypt)
 		if err != nil {
-			logger.Errorf(c.Request.Context(), "[%s] Failed to decrypt: error_len=%d error_type=%T",
-				a.region.Label, len(fmt.Sprint(err)), err)
+			logger.Errorf(c.Request.Context(), "[%s] Failed to decrypt: %v", a.region.Label, err)
 			return false
 		}
 		if err := json.Unmarshal(decrypted, &body); err != nil {
@@ -635,16 +634,15 @@ func (a *Adapter) sendWithFallback(
 		case err != nil:
 			// Network/transport error — try the fallback since send-message is
 			// a different endpoint that might succeed.
-			logger.Warnf(ctx, "[%s] reply API transport error (will try fallback): error_len=%d error_type=%T",
-				a.region.Label, len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[%s] reply API transport error (will try fallback): %v", a.region.Label, err)
 		case code == 0:
 			return nil
 		case !fallbackEligibleErrorCodes[code]:
 			return fmt.Errorf("%s reply api error: code=%d msg=%s", a.region.Label, code, msg)
 		default:
 			// Fallback-eligible: retry via plain send-message API.
-			logger.Warnf(ctx, "[%s] reply API returned code=%d msg_len=%d, falling back to send-message API",
-				a.region.Label, code, len(msg))
+			logger.Warnf(ctx, "[%s] reply API returned code=%d msg=%s, falling back to send-message API",
+				a.region.Label, code, msg)
 		}
 	} else if incoming.MessageID != "" {
 		// message_id present but contains unsafe characters — refuse rather
@@ -1162,13 +1160,7 @@ func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, conten
 		}
 		imgKey, err := a.imageKeyForURL(ctx, accessToken, rawURL)
 		if err != nil || imgKey == "" {
-			// rawURL comes from the reply text (may be a signed URL); err may be nil when no key came back.
-			errLen := 0
-			if err != nil {
-				errLen = len(err.Error())
-			}
-			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url_len=%d error_len=%d error_type=%T",
-				a.region.Label, len(rawURL), errLen, err)
+			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url=%s err=%v", a.region.Label, rawURL, err)
 			return fallback(alt, rawURL)
 		}
 		return fmt.Sprintf("![%s](%s)", alt, imgKey)
@@ -1213,18 +1205,16 @@ func (a *Adapter) imageKeyForURL(ctx context.Context, accessToken, rawURL string
 // POST /open-apis/im/v1/images  (multipart: image_type=message, image=<binary>)
 func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL string) (string, error) {
 	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
-		// Agent24 KB-OBS-01: a parse failure quotes the signed image URL.
-		return "", fmt.Errorf("ssrf validation: %w", im.RedactURLErrorInChain(err))
+		return "", fmt.Errorf("ssrf validation: %w", err)
 	}
 
 	imgReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", im.RedactRequestError(err)
+		return "", err
 	}
 	imgResp, err := feishuImageDownloadClient.Do(imgReq)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes a signed image URL.
-		return "", fmt.Errorf("download image: %w", im.RedactRequestError(err))
+		return "", fmt.Errorf("download image: %w", err)
 	}
 	defer imgResp.Body.Close()
 	if imgResp.StatusCode != http.StatusOK {

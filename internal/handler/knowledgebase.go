@@ -352,8 +352,8 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query_len=%d, effectiveTenantID: %d",
-		secutils.SanitizeForLog(id), len(req.QueryText), effectiveTenantID)
+	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
+		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
 
 	// Resolve before retrieving so a typo or a rejected scope costs nothing.
 	rewriter, err := h.resolveResourceRewriter(c)

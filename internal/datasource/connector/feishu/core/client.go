@@ -151,7 +151,16 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	}
 	c.tokenExpAt = time.Now().Add(ttl)
 
-	logger.Infof(ctx, "[Feishu] got tenant_access_token: expire=%ds", result.Expire)
+	prefixLen := 8
+	if len(result.TenantAccessToken) < prefixLen {
+		prefixLen = len(result.TenantAccessToken)
+	}
+	suffixLen := 4
+	if len(result.TenantAccessToken) < suffixLen {
+		suffixLen = len(result.TenantAccessToken)
+	}
+	logger.Infof(ctx, "[Feishu] got tenant_access_token: %s...%s expire=%ds",
+		result.TenantAccessToken[:prefixLen], result.TenantAccessToken[len(result.TenantAccessToken)-suffixLen:], result.Expire)
 
 	return c.tokenCache, nil
 }
@@ -277,8 +286,8 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 			return lastErr
 		}
 
-		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d",
-			method, path, resp.StatusCode, len(respBody))
+		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
+			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
 
 		if isFeishuRateLimited(resp.StatusCode, respBody) {
 			wait := feishuRateLimitWait(resp.Header, time.Now())
@@ -360,14 +369,13 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 			return nil, fmt.Errorf("list wiki spaces: %w", err)
 		}
 		if resp.Code != 0 {
-			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg_len=%d", resp.Code, len(resp.Msg))
+			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg=%s", resp.Code, resp.Msg)
 			return nil, fmt.Errorf("list wiki spaces error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
 		logger.Infof(ctx, "[Feishu] ListWikiSpaces: got %d spaces, has_more=%v", len(resp.Data.Items), resp.Data.HasMore)
 		for i, s := range resp.Data.Items {
-			logger.Infof(ctx, "[Feishu]   space[%d]: id=%s name_len=%d visibility=%s",
-				i, s.SpaceID, len(s.Name), s.Visibility)
+			logger.Infof(ctx, "[Feishu]   space[%d]: id=%s name=%q visibility=%s", i, s.SpaceID, s.Name, s.Visibility)
 		}
 
 		allSpaces = append(allSpaces, resp.Data.Items...)
@@ -478,9 +486,8 @@ func (c *Client) listAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 						Node: node,
 						Err:  wrappedErr,
 					})
-					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s "+
-						"error_len=%d error_type=%T",
-						spaceID, node.NodeToken, len(err.Error()), err)
+					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+						spaceID, node.NodeToken, err)
 					continue
 				}
 				walk(children)
@@ -522,8 +529,8 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 	children, err := c.ListWikiNodes(ctx, spaceID, root.NodeToken)
 	if err != nil {
 		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
-		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s error_len=%d error_type=%T",
-			spaceID, root.NodeToken, len(err.Error()), err)
+		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+			spaceID, root.NodeToken, err)
 		return nil, &PartialWikiNodeListError{
 			Failures: []WikiNodeListFailure{{
 				Node: root,
@@ -550,9 +557,8 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 					Node: node,
 					Err:  wrappedErr,
 				})
-				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s "+
-					"error_len=%d error_type=%T",
-					spaceID, node.NodeToken, len(err.Error()), err)
+				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+					spaceID, node.NodeToken, err)
 				continue
 			}
 			walk(grandChildren)
@@ -783,8 +789,8 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			if !isFeishuRateLimited(resp.StatusCode, body) {
-				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d bodyLen=%d",
-					path, resp.StatusCode, len(body))
+				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
+					path, resp.StatusCode, truncate(string(body), 500))
 				return nil, fmt.Errorf("download failed: status=%d body=%s",
 					resp.StatusCode, truncate(string(body), 500))
 			}
@@ -816,7 +822,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
-			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d bodyLen=%d", path, resp.StatusCode, len(body))
+			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
 			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 		}
 
@@ -962,8 +968,8 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 				FolderToken: folderToken,
 				Err:         wrappedErr,
 			})
-			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s error_len=%d error_type=%T",
-				folderToken, len(err.Error()), err)
+			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s err=%v",
+				folderToken, err)
 			return
 		}
 

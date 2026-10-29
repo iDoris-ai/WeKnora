@@ -38,22 +38,3 @@ func TestSendReplyUsesOfficialSessionWebhook(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, called)
 }
-
-func TestSendReplySessionWebhookDoRedactsSessionToken(t *testing.T) {
-	secutils.SetSSRFWhitelistFromRaw("oapi.dingtalk.com")
-	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
-	previousClient := httpClient
-	t.Cleanup(func() { httpClient = previousClient })
-	const sentinel = "S3NT1NEL"
-	target := "https://oapi.dingtalk.com/robot/sendBySession?session=" + sentinel
-	httpClient = &http.Client{Transport: sessionReplyTransport(func(*http.Request) (*http.Response, error) {
-		return nil, context.DeadlineExceeded
-	})}
-	err := (&Adapter{}).SendReply(context.Background(),
-		&im.IncomingMessage{Extra: map[string]string{"session_webhook": target}},
-		&im.ReplyMessage{Content: "hello"})
-	require.Error(t, err)
-	require.NotContains(t, err.Error(), sentinel)
-	require.Contains(t, err.Error(), "send reply:")
-	require.Contains(t, err.Error(), "deadline exceeded")
-}

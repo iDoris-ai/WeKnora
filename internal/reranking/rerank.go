@@ -150,9 +150,7 @@ func Rerank(
 	scores, scoredAsImage, err := scoreCandidates(ctx, model, query, res.Passages, imagePositions, images)
 	res.Diagnostics.ImagesScored = len(scoredAsImage)
 	if err != nil {
-		// Vendor errors carry the response body, so the log keeps its length and type only.
-		logger.Warnf(ctx, "[Rerank] Model call failed, keeping retrieval order: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Warnf(ctx, "[Rerank] Model call failed, keeping retrieval order: %v", err)
 		res.Diagnostics.Outcome = types.RerankOutcomeModelError
 		res.Diagnostics.Error = err.Error()
 		res.Results = results

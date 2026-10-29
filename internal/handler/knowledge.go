@@ -228,8 +228,7 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 ) bool {
 	if dupErr, ok := err.(*types.DuplicateKnowledgeError); ok {
 		ctx := c.Request.Context()
-		// The message quotes the existing URL or file name.
-		logger.Warnf(ctx, "Detected duplicate %s: message_len=%d", duplicateType, len(dupErr.Error()))
+		logger.Warnf(ctx, "Detected duplicate %s: %s", duplicateType, secutils.SanitizeForLog(dupErr.Error()))
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"message": dupErr.Error(),
@@ -366,13 +365,11 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	displayFileName = secutils.SanitizeForLog(displayFileName)
 	if customFileName != "" {
 		displayFileName = customFileName
-		logger.Infof(ctx, "Using custom filename: file_name_len=%d (original_len=%d)",
-			len(customFileName), len(file.Filename))
+		logger.Infof(ctx, "Using custom filename: %s (original: %s)", customFileName, displayFileName)
 	}
 
-	logger.Infof(ctx, "File upload successful, file_name_len=%d, size: %.2f KB",
-		len(displayFileName), float64(file.Size)/1024)
-	logger.Infof(ctx, "Creating knowledge, knowledge base ID: %s, file_name_len=%d", kbID, len(displayFileName))
+	logger.Infof(ctx, "File upload successful, filename: %s, size: %.2f KB", displayFileName, float64(file.Size)/1024)
+	logger.Infof(ctx, "Creating knowledge, knowledge base ID: %s, filename: %s", kbID, displayFileName)
 
 	// Parse metadata if provided
 	var metadata map[string]string
@@ -383,7 +380,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("Invalid metadata format").WithDetails(err.Error()))
 			return
 		}
-		logger.Infof(ctx, "Received file metadata: keys=%d", len(metadata))
+		logger.Infof(ctx, "Received file metadata: %s", secutils.SanitizeForLog(fmt.Sprintf("%v", metadata)))
 	}
 
 	enableMultimodelForm := c.PostForm("enable_multimodel")
@@ -430,8 +427,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 	}
 	if err := service.ValidateJSONUploadContent(jsonCheckName, file); err != nil {
-		logger.Errorf(ctx, "Invalid JSON upload content: file_name_len=%d error_len=%d error_type=%T",
-			len(jsonCheckName), len(err.Error()), err)
+		logger.Errorf(ctx, "Invalid JSON upload content for %s: %v", jsonCheckName, err)
 		_ = c.Error(err)
 		return
 	}
@@ -454,9 +450,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Knowledge created successfully, ID: %s, title_len=%d",
+		"Knowledge created successfully, ID: %s, title: %s",
 		secutils.SanitizeForLog(knowledge.ID),
-		len(knowledge.Title),
+		secutils.SanitizeForLog(knowledge.Title),
 	)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -513,15 +509,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Received URL request: %s, file_name_len=%d, file_type: %s",
-		secutils.RedactURL(req.URL),
-		len(req.FileName),
+	logger.Infof(ctx, "Received URL request: %s, file_name: %s, file_type: %s",
+		secutils.SanitizeForLog(req.URL),
+		secutils.SanitizeForLog(req.FileName),
 		secutils.SanitizeForLog(req.FileType),
 	)
 
 	// SSRF validation for user-supplied URL
 	if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
-		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
 		c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("URL", req.URL, err)))
 		return
 	}
@@ -529,7 +525,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	logger.Infof(ctx,
 		"Creating knowledge from URL, knowledge base ID: %s, URL: %s",
 		secutils.SanitizeForLog(kbID),
-		secutils.RedactURL(req.URL),
+		secutils.SanitizeForLog(req.URL),
 	)
 
 	// Create knowledge entry from the URL
@@ -552,9 +548,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Knowledge created successfully from URL, ID: %s, title_len=%d",
+		"Knowledge created successfully from URL, ID: %s, title: %s",
 		secutils.SanitizeForLog(knowledge.ID),
-		len(knowledge.Title),
+		secutils.SanitizeForLog(knowledge.Title),
 	)
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
@@ -660,8 +656,8 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Knowledge retrieved successfully, ID: %s, title_len=%d",
-		secutils.SanitizeForLog(knowledge.ID), len(knowledge.Title))
+	logger.Infof(ctx, "Knowledge retrieved successfully, ID: %s, title: %s",
+		secutils.SanitizeForLog(knowledge.ID), secutils.SanitizeForLog(knowledge.Title))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledge,
@@ -1100,12 +1096,12 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword_len=%d file_type=%s "+
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s "+
 			"parse_status=%s source=%s start_time=%s end_time=%s folder_path=%s folder_scope=%s "+
 			"sort_by=%s sort_order=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
-		len(filter.Keyword),
+		secutils.SanitizeForLog(filter.Keyword),
 		secutils.SanitizeForLog(filter.FileType),
 		secutils.SanitizeForLog(filter.ParseStatus),
 		secutils.SanitizeForLog(filter.Source),

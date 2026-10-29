@@ -9,10 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
@@ -373,47 +371,4 @@ func newMultipartFileHeader(t *testing.T, filename string, content string) *mult
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	require.NoError(t, req.ParseMultipartForm(1024))
 	return req.MultipartForm.File["file"][0]
-}
-
-// localhost is a restricted host, so ValidateURLForSSRF fails before any fetch
-// and the rejection log (as well as the earlier URL log) is reached.
-func TestCreateKnowledgeFromURLLogOmitsSentinel(t *testing.T) {
-	// The test relies on localhost being refused; a whitelist from the environment would let it through.
-	t.Setenv("SSRF_WHITELIST", "")
-	t.Setenv("SSRF_WHITELIST_EXTRA", "")
-	utils.ResetSSRFWhitelistForTest()
-	t.Cleanup(utils.ResetSSRFWhitelistForTest)
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	rawURL := "https://localhost/a?token=" + sentinel
-	svc := &knowledgeService{
-		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{
-			ID:                    "kb-1",
-			StorageProviderConfig: &types.StorageProviderConfig{Provider: "local"},
-		}},
-	}
-
-	knowledge, err := svc.CreateKnowledgeFromURL(
-		context.Background(),
-		"kb-1",
-		rawURL,
-		"",
-		"",
-		nil,
-		"",
-		nil,
-		"",
-		nil,
-	)
-	require.ErrorIs(t, err, ErrInvalidURL)
-	require.Nil(t, knowledge)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "token=%2A%2A%2A")
-	require.Contains(t, logs, "Knowledge base ID:")
-	require.Contains(t, logs, "URL rejected for SSRF protection")
 }

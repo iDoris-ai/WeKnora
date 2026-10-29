@@ -51,9 +51,7 @@ func (e *AgentEngine) breakdownContext(messages []chat.Message, tools []chat.Too
 		if msgTokens > b.LargestTokens {
 			b.LargestTokens = msgTokens
 			b.LargestKind = msg.Role
-			if msg.Role == "tool" && msg.Name != "" {
-				b.LargestKind += ":" + e.loggedToolName(msg.Name)
-			} else if msg.Name != "" {
+			if msg.Name != "" {
 				b.LargestKind += ":" + msg.Name
 			}
 		}

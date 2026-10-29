@@ -327,12 +327,7 @@ func (r *syncRun) fetchError(p string, e dirent, err error, code string) error {
 	if errors.Is(err, errRetryAfterTooLong) {
 		return r.abort(err)
 	}
-	errLen := 0
-	if err != nil {
-		errLen = len(err.Error())
-	}
-	logger.Warnf(r.ctx, "[Seafile] fetch failed: repo=%s path_len=%d code=%s error_len=%d error_type=%T",
-		r.repoID, len(p), code, errLen, err)
+	logger.Warnf(r.ctx, "[Seafile] fetch failed: repo=%s path=%s code=%s: %v", r.repoID, p, code, err)
 	return r.failFile(p, e, code, statusOf(err))
 }
 

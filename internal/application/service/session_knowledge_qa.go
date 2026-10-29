@@ -29,9 +29,9 @@ func (s *sessionService) KnowledgeQA(
 	webSearchEnabled := resolveWebSearchEnabled(req)
 	logger.Infof(
 		ctx,
-		"Knowledge base question answering parameters, session ID: %s, query_len=%d, webSearchEnabled: %v",
+		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
 		req.Session.ID,
-		len(req.Query),
+		req.Query,
 		webSearchEnabled,
 	)
 	// IM/MCP call KnowledgeQA without executeQA's send-side lease, so hold one
@@ -693,8 +693,8 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	chatManage *types.ChatManage, eventList []types.EventType,
 ) error {
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
-	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query_len=%d",
-		chatManage.SessionID, len(chatManage.Query))
+	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
+		chatManage.SessionID, chatManage.Query)
 
 	methods := make([]string, len(eventList))
 	for i, event := range eventList {
@@ -837,10 +837,8 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	opts *types.KnowledgeSearchOptions,
 ) (*types.RetrievalResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
-	logger.Infof(ctx,
-		"Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, "+
-			"tag scopes: %d, query_len=%d",
-		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), len(query))
+	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
+		knowledgeBaseIDs, knowledgeIDs, len(tagScopes), query)
 	if opts == nil {
 		opts = &types.KnowledgeSearchOptions{}
 	}
@@ -1028,8 +1026,8 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 		}
 
 		if err != nil {
-			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, "+
-				"error_len=%d error_type=%T", event, err.ErrorType, err.Description, len(fmt.Sprint(err.Err)), err.Err)
+			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
+				event, err.ErrorType, err.Description, err.Err)
 			return nil, err.Err
 		}
 		logger.Infof(ctx, "Event %v triggered successfully", event)
@@ -1101,8 +1099,7 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to start streaming fallback response: error_len=%d error_type=%T, "+
-			"falling back to fixed response", len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)
 		return
 	}

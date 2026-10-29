@@ -217,54 +217,6 @@ const (
 	pipelineTruncateEll     = "..."
 )
 
-// agent24PipelineContentKeys are pipeline log fields that carry query, document, prompt, answer or error
-// text (fork patch A24-OBS-03, Agent24 KB-OBS-01). PipelineLog writes a string, []byte, json.RawMessage
-// or error value under one of these as "<key>_len=<bytes>" instead of the value; other value types
-// (counts) are logged as before.
-var agent24PipelineContentKeys = map[string]struct{}{
-	"user_query":        {},
-	"query":             {},
-	"rewrite_query":     {},
-	"user_question":     {},
-	"query_preview":     {},
-	"content":           {},
-	"image_description": {},
-	"system_prompt":     {},
-	"prompt":            {},
-	"answer":            {},
-	"answer_preview":    {},
-	"original_output":   {},
-	"args":              {},
-	"neighbor_content":  {},
-	"base_content":      {},
-	"after_content":     {},
-	"thought":           {},
-	"output":            {},
-	"title":             {},
-	"question":          {},
-	"sql":               {},
-	"error":             {},
-}
-
-// agent24PipelineContentLen reports the byte length of a text or error value under a content key.
-// An error is measured through fmt, which also copes with a typed nil whose Error method would panic.
-func agent24PipelineContentLen(key string, value interface{}) (int, bool) {
-	if _, ok := agent24PipelineContentKeys[key]; !ok {
-		return 0, false
-	}
-	switch v := value.(type) {
-	case string:
-		return len(v), true
-	case []byte:
-		return len(v), true
-	case json.RawMessage:
-		return len(v), true
-	case error:
-		return len(fmt.Sprint(v)), true
-	}
-	return 0, false
-}
-
 // PipelineLog builds a structured pipeline log string.
 func PipelineLog(stage, action string, fields map[string]interface{}) string {
 	if stage == "" {
@@ -289,13 +241,6 @@ func PipelineLog(stage, action string, fields map[string]interface{}) string {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			if n, ok := agent24PipelineContentLen(key, fields[key]); ok {
-				builder.WriteString(" ")
-				builder.WriteString(key)
-				builder.WriteString("_len=")
-				builder.WriteString(strconv.Itoa(n))
-				continue
-			}
 			builder.WriteString(" ")
 			builder.WriteString(key)
 			builder.WriteString("=")

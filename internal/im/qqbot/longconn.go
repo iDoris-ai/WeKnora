@@ -42,8 +42,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 			}
 			attempt++
 			delay := reconnectDelay(attempt)
-			logger.Warnf(ctx, "[QQBot] connection lost: error_len=%d error_type=%T, reconnecting in %v",
-				len(fmt.Sprint(err)), err, delay)
+			logger.Warnf(ctx, "[QQBot] connection lost: %v, reconnecting in %v", err, delay)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -95,8 +94,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		}
 		var payload gatewayPayload
 		if err := json.Unmarshal(data, &payload); err != nil {
-			logger.Warnf(ctx, "[QQBot] invalid payload: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[QQBot] invalid payload: %v", err)
 			continue
 		}
 		if payload.S != nil {
@@ -110,14 +108,12 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		case opDispatch:
 			msg, err := parseGatewayPayload(&payload)
 			if err != nil {
-				logger.Warnf(ctx, "[QQBot] parse event failed: error_len=%d error_type=%T",
-					len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[QQBot] parse event failed: %v", err)
 				continue
 			}
 			if msg != nil {
 				if err := c.handler(ctx, msg); err != nil {
-					logger.Errorf(ctx, "[QQBot] handle message failed: error_len=%d error_type=%T",
-						len(err.Error()), err)
+					logger.Errorf(ctx, "[QQBot] handle message failed: %v", err)
 				}
 			}
 		case opReconnect, opInvalidSession:

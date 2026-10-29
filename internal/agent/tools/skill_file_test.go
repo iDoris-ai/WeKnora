@@ -1,15 +1,12 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -195,69 +192,4 @@ func TestSkillFileToolsRefuseToWriteWhenBoundToNoSkillDirectory(t *testing.T) {
 		require.False(t, result.Success, "skillDir %q must not authorise any write", dir)
 		assert.Empty(t, store.writes)
 	}
-}
-
-// The path is a tool argument, and a write error can quote it. The failure and success logs record
-// path_len only; the failure also records error_len (A24-OBS-12, #97 review G1).
-func TestWriteSkillFileLogsOmitPath(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	path := testSkillDir + "/" + sentinel + ".txt"
-	store := &fakeSkillFileStore{writeErr: fmt.Errorf("write %q denied", path)}
-
-	result, err := NewWriteSkillFileTool(store, testSkillDir).Execute(
-		sandboxFileTestContext(), mustWriteSandboxArgs(path, "x"))
-	require.NoError(t, err)
-	require.False(t, result.Success)
-
-	store.writeErr = nil
-	result, err = NewWriteSkillFileTool(store, testSkillDir).Execute(
-		sandboxFileTestContext(), mustWriteSandboxArgs(path, "x"))
-	require.NoError(t, err)
-	require.True(t, result.Success, result.Error)
-
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "write failed: session=")
-	assert.Equal(t, 1, strings.Count(logs, "error_len="))
-	assert.Equal(t, 2, strings.Count(logs, "path_len="))
-}
-
-func TestEditSkillFileLogsOmitPath(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	path := testSkillDir + "/" + sentinel + ".txt"
-	store := &fakeSkillFileStore{
-		existing: map[string][]byte{path: []byte("old\n")},
-		writeErr: fmt.Errorf("write %q denied", path),
-	}
-	args, err := json.Marshal(map[string]any{
-		"path":       path,
-		"old_string": "old",
-		"new_string": "new",
-	})
-	require.NoError(t, err)
-
-	result, err := NewEditSkillFileTool(store, testSkillDir).Execute(sandboxFileTestContext(), args)
-	require.NoError(t, err)
-	require.False(t, result.Success)
-
-	store.writeErr = nil
-	result, err = NewEditSkillFileTool(store, testSkillDir).Execute(sandboxFileTestContext(), args)
-	require.NoError(t, err)
-	require.True(t, result.Success, result.Error)
-
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "write failed: session=")
-	assert.Equal(t, 1, strings.Count(logs, "error_len="))
-	assert.Equal(t, 2, strings.Count(logs, "path_len="))
 }

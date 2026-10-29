@@ -1,15 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -189,67 +184,4 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 	assert.Equal(t, "WeKnora 是一个知识库问答系统。", chatModel.lastMessages[2].Content)
 	assert.Equal(t, "user", chatModel.lastMessages[3].Role)
 	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
-}
-
-// lockedLogBuffer is a log sink that can be read while another goroutine writes to it.
-type lockedLogBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedLogBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedLogBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-// streamFailChat fails ChatStream with err.
-type streamFailChat struct {
-	captureChatModel
-	err error
-}
-
-func (m *streamFailChat) ChatStream(
-	context.Context, []chat.Message, *chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	return nil, m.err
-}
-
-// A vendor's error reply can echo the question; the fallback's start-failure log keeps its length and type.
-func TestHandleModelFallback_StreamFailureLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	// A fallback stream from an earlier test may still log; the lock keeps its write apart from the read below.
-	buf := &lockedLogBuffer{}
-	logger.SetOutput(buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	svc := &sessionService{
-		modelService: &stubModelService{chatModel: &streamFailChat{err: errors.New("vendor echoed " + sentinel)}},
-	}
-	bus := event.NewEventBus()
-	cm := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{
-			SessionID:        "session-1",
-			Query:            "q",
-			ChatModelID:      "chat-model",
-			FallbackPrompt:   "Answer: {{query}}",
-			FallbackResponse: "fixed",
-		},
-		PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
-	}
-
-	svc.handleModelFallback(context.Background(), cm)
-
-	out := buf.String()
-	require.Contains(t, out, "Failed to start streaming fallback response: error_len=")
-	assert.False(t, strings.Contains(out, sentinel), "log carries the vendor error text: %s", out)
-	require.NotNil(t, cm.ChatResponse)
-	assert.Equal(t, "fixed", cm.ChatResponse.Content)
 }

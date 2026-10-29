@@ -278,14 +278,13 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
+		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes the bot token in the path.
-		return fmt.Errorf("do request: %w", im.RedactRequestError(err))
+		return fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -423,8 +422,7 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	state.mu.Unlock()
 
 	if err := a.editMessage(ctx, chatID, msgID, fullContent, ""); err != nil {
-		logger.Warnf(ctx, "[Telegram] Failed to update stream content: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Warnf(ctx, "[Telegram] Failed to update stream content: %v", err)
 	}
 	return nil
 }
@@ -445,11 +443,9 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 	state.mu.Unlock()
 
 	if err := a.editMessage(ctx, chatID, msgID, finalContent, "Markdown"); err != nil {
-		logger.Warnf(ctx, "[Telegram] Markdown finalize failed, retrying plain: error_len=%d error_type=%T",
-			len(err.Error()), err)
+		logger.Warnf(ctx, "[Telegram] Markdown finalize failed, retrying plain: %v", err)
 		if retryErr := a.editMessage(ctx, chatID, msgID, finalContent, ""); retryErr != nil {
-			logger.Warnf(ctx, "[Telegram] Failed to finalize stream: error_len=%d error_type=%T",
-				len(retryErr.Error()), retryErr)
+			logger.Warnf(ctx, "[Telegram] Failed to finalize stream: %v", retryErr)
 		}
 	}
 	return nil
@@ -493,13 +489,12 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	downloadURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", a.botToken, fileInfo.FilePath)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create download request: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("create download request: %w", err)
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes the bot token in the file path.
-		return nil, "", fmt.Errorf("download file: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("download file: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()

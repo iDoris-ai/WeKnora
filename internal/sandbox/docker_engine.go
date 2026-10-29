@@ -21,11 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // dockerEngineAPI is the slice of the Docker Engine API the sandbox adapter
@@ -231,12 +229,6 @@ func newDockerEngineClient(endpoint dockerEndpoint) (*client.Client, error) {
 		opts = append(opts, client.WithDialContext(
 			GuardedDialContext(OutboundURLPolicy{AllowPrivate: endpoint.AllowPrivate}),
 		))
-	}
-
-	// When body export is off, Docker calls emit no spans, so transport error
-	// text does not reach Langfuse (fork patch A24-OBS-10).
-	if !langfuse.GetManager().ExportBodies() {
-		opts = append(opts, client.WithTraceProvider(noop.NewTracerProvider()))
 	}
 
 	built, err := client.New(opts...)

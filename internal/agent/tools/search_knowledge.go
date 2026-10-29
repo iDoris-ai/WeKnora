@@ -228,8 +228,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	kbIDs := searchTargets.GetAllKnowledgeBaseIDs()
 	kbList, err := t.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load knowledge bases %v: error_len=%d error_type=%T",
-			kbIDs, len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load knowledge bases %v: %v", kbIDs, err)
 	}
 	kbModes, msg := resolveKBSearchModes(mode, kbList)
 	if msg != "" {
@@ -248,8 +247,8 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 	topK, vectorThreshold, keywordThreshold := t.retrievalParams(retrievalLimit)
 	logger.Infof(ctx,
-		"[Tool][SearchKnowledge] query_len=%d mode=%s limit=%d top_k=%d targets=%d kbs=%d",
-		len(query), mode, limit, topK, len(searchTargets), len(kbIDs))
+		"[Tool][SearchKnowledge] query=%q mode=%s limit=%d top_k=%d targets=%d kbs=%d",
+		query, mode, limit, topK, len(searchTargets), len(kbIDs))
 
 	allResults, searchFailures, searchCalls, embedFallbacks := t.concurrentSearchByTargets(ctx, query, mode,
 		kbModes, searchTargets, kbList, topK, vectorThreshold, keywordThreshold, kbTypeMap)
@@ -274,9 +273,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	if t.rerankModel != nil && len(deduplicated) > 0 {
 		reranked, err := t.rerankResults(ctx, query, deduplicated, mode == SearchModeKeyword)
 		if err != nil {
-			logger.Warnf(ctx,
-				"[Tool][SearchKnowledge] Rerank failed, using retrieval order: error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank failed, using retrieval order: %v", err)
 		} else {
 			ranked = reranked
 			if len(reranked) == 0 {
@@ -697,8 +694,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			if modelKey != "" && needsEmbedding {
 				emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, query)
 				if err != nil {
-					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding: model_key_len=%d "+
-						"error_len=%d error_type=%T", len(modelKey), len(fmt.Sprint(err)), err)
+					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding for model %s: %v",
+						modelKey, err)
 					embedErr = err
 				} else {
 					queryEmbedding = emb
@@ -767,8 +764,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						SkipContextEnrichment: true,
 					})
 					if err != nil {
-						logger.Warnf(ctx, "[Tool][SearchKnowledge] Combined search failed for KBs %v: "+
-							"error_len=%d error_type=%T", fullKBIDs, len(fmt.Sprint(err)), err)
+						logger.Warnf(ctx, "[Tool][SearchKnowledge] Combined search failed for KBs %v: %v",
+							fullKBIDs, err)
 						fail(fullKBIDs, err)
 						return
 					}
@@ -805,9 +802,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						SkipContextEnrichment: true,
 					})
 					if err != nil {
-						logger.Warnf(ctx,
-							"[Tool][SearchKnowledge] Failed to search KB %s: error_len=%d error_type=%T",
-							st.KnowledgeBaseID, len(fmt.Sprint(err)), err)
+						logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
 						fail([]string{st.KnowledgeBaseID}, err)
 						return
 					}
@@ -863,8 +858,8 @@ func (t *SearchKnowledgeTool) rerankResults(
 	}
 	res := reranking.Rerank(ctx, t.rerankModel, query, rows, opts)
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: error_len=%d",
-			len(res.Diagnostics.Error))
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",
+			res.Diagnostics.Error)
 		return results, nil
 	}
 
@@ -1052,9 +1047,8 @@ func (t *SearchKnowledgeTool) formatOutput(
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
 			meta, err := faqMetadataFromResult(result.SearchResult)
 			if err != nil {
-				logger.Warnf(ctx,
-					"[Tool][SearchKnowledge] Failed to load FAQ metadata for chunk %s: error_len=%d error_type=%T",
-					result.ID, len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load FAQ metadata for chunk %s: %v",
+					result.ID, err)
 			} else {
 				faqMeta = meta
 			}
@@ -1151,8 +1145,7 @@ func (t *SearchKnowledgeTool) getEnrichedPassage(ctx context.Context, result *ty
 	}
 	var imageInfos []types.ImageInfo
 	if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err != nil {
-		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to parse image info: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to parse image info: %v", err)
 		return result.Content
 	}
 	if len(imageInfos) == 0 {

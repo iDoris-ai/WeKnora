@@ -1,16 +1,12 @@
 package tools
 
 import (
-	"bytes"
-	"context"
 	"database/sql"
-	"encoding/json"
 	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -99,37 +95,5 @@ func TestDatabaseQueryRejectsEmptyScope(t *testing.T) {
 				t.Fatalf("empty scope produced executable SQL %q, error %v", secured, err)
 			}
 		})
-	}
-}
-
-func TestDatabaseQueryValidationFailureLogOmitsSentinel(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	tool := NewDatabaseQueryTool(nil, types.SearchTargets{{
-		Type:            types.SearchTargetTypeKnowledgeBase,
-		KnowledgeBaseID: "kb-1",
-	}})
-	sqlText := `SELECT id FROM "S3NT1NEL"`
-	args, err := json.Marshal(map[string]string{"sql": sqlText})
-	if err != nil {
-		t.Fatalf("marshal args: %v", err)
-	}
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
-	result, err := tool.Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
-		t.Fatalf("validation error = %v, want the sentinel in the error", err)
-	}
-	if result == nil || !strings.Contains(result.Error, "S3NT1NEL") {
-		t.Fatalf("tool result = %#v, want the returned error text unchanged", result)
-	}
-	logs := buf.String()
-	if strings.Contains(logs, "S3NT1NEL") {
-		t.Fatalf("log contains sentinel: %s", logs)
-	}
-	if !strings.Contains(logs, "error_len=") || !strings.Contains(logs, "error_type=") {
-		t.Fatalf("log = %s, want error_len= and error_type=", logs)
 	}
 }

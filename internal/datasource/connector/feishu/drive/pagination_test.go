@@ -1,7 +1,6 @@
 package drive
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
-	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // TestClientDriveListFilesPagination is the Drive (云盘) counterpart of the wiki
@@ -143,43 +141,5 @@ func TestClientDriveListFilesPagination(t *testing.T) {
 				t.Fatalf("files = %v, want %v", gotFiles, tt.wantFiles)
 			}
 		})
-	}
-}
-
-func TestResolveAncestorsListFailureLogOmitsErrorBody(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, core.TokenResponse{
-			ApiResponse:       core.ApiResponse{Code: 0},
-			TenantAccessToken: "fake-token",
-			Expire:            7200,
-		})
-	})
-	mux.HandleFunc("/open-apis/drive/v1/files", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(sentinel))
-	})
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close)
-
-	cfg := &core.Config{AppID: "a", AppSecret: "b", BaseURL: ts.URL}
-	_, err := NewDriveConnector(core.RegionFeishuDrive).ResolveResourceAncestors(
-		context.Background(), makeConfig(cfg, nil), []string{"fld-root:file-child"},
-	)
-	if err != nil {
-		t.Fatalf("ResolveResourceAncestors: %v", err)
-	}
-	logs := buf.String()
-	if strings.Contains(logs, sentinel) {
-		t.Fatalf("log contains sentinel:\n%s", logs)
-	}
-	if !strings.Contains(logs, "resolve ancestors: list fld-root: error_len=") {
-		t.Fatalf("log missing ancestor list line:\n%s", logs)
 	}
 }

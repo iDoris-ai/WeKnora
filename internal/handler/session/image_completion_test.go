@@ -1,18 +1,13 @@
 package session
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -145,76 +140,5 @@ func TestSharedImageCompletionWaitsForPersistedReferences(t *testing.T) {
 				})
 			}
 		})
-	}
-}
-
-type failingAnalysisVLM struct {
-	err error
-}
-
-func (v *failingAnalysisVLM) Predict(context.Context, [][]byte, string) (string, error) {
-	return "", v.err
-}
-
-func (v *failingAnalysisVLM) GetModelName() string { return "vlm" }
-
-func (v *failingAnalysisVLM) GetModelID() string { return "vlm-1" }
-
-type vlmFailureModelService struct {
-	interfaces.ModelService
-	model vlm.VLM
-}
-
-func (s *vlmFailureModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) {
-	return s.model, nil
-}
-
-func TestAnalyzeImageAttachmentsVLMFailureOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	h := &Handler{modelService: &vlmFailureModelService{
-		model: &failingAnalysisVLM{err: errors.New(sentinel)},
-	}}
-	images := []ImageAttachment{{Data: "data:image/png;base64,aGk="}}
-	h.analyzeImageAttachments(context.Background(), images, "vlm-1", "what is in the picture")
-
-	logs := buf.String()
-	if strings.Contains(logs, sentinel) {
-		t.Fatalf("log leaked error text: %s", logs)
-	}
-	if !strings.Contains(logs, "VLM analysis failed for image 0: error_len=") {
-		t.Fatalf("log = %s, want the VLM analysis failure", logs)
-	}
-}
-
-func TestResolveImageFileServiceUnsupportedProviderLogOmitsURL(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	provider := "https://" + sentinel + ".example/x"
-	cfg := &types.StorageEngineConfig{}
-	_, _, factoryErr := filesvc.NewFileServiceFromStorageConfig(provider, cfg, "")
-	if factoryErr == nil || factoryErr.Error() == "" {
-		t.Fatal("NewFileServiceFromStorageConfig returned no error text")
-	}
-
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{
-		StorageEngineConfig: cfg,
-	})
-	_ = (&Handler{}).resolveImageFileService(ctx, provider)
-
-	logs := buf.String()
-	if strings.Contains(logs, sentinel) || strings.Contains(logs, factoryErr.Error()) {
-		t.Fatalf("log leaked the storage provider or error text: %s", logs)
-	}
-	if !strings.Contains(logs, "(unsupported len=") {
-		t.Fatalf("log = %s, want unsupported provider length", logs)
 	}
 }

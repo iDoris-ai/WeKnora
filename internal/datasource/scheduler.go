@@ -81,9 +81,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			continue
 		}
 		if err := s.addEntry(ds); err != nil {
-			logger.Warnf(ctx, "[Scheduler] failed to register cron for ds=%s schedule=%q: "+
-				"error_len=%d error_type=%T",
-				ds.ID, ds.SyncSchedule, len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[Scheduler] failed to register cron for ds=%s schedule=%q: %v",
+				ds.ID, ds.SyncSchedule, err)
 		}
 	}
 
@@ -197,8 +196,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 		StartedAt:    time.Now().UTC(),
 	}
 	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "[Scheduler] failed to create sync log for ds=%s: error_len=%d error_type=%T",
-			dataSourceID, len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "[Scheduler] failed to create sync log for ds=%s: %v", dataSourceID, err)
 		return
 	}
 
@@ -232,8 +230,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 			_ = s.syncLogRepo.Update(ctx, syncLog)
 			return
 		}
-		logger.Errorf(ctx, "[Scheduler] failed to enqueue sync task for ds=%s: error_len=%d error_type=%T",
-			dataSourceID, len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "[Scheduler] failed to enqueue sync task for ds=%s: %v", dataSourceID, err)
 		syncLog.Status = types.SyncLogStatusFailed
 		now := time.Now().UTC()
 		syncLog.FinishedAt = &now

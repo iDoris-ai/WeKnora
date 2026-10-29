@@ -76,7 +76,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "QueryUnderstand", "input", map[string]interface{}{
 		"session_id":     chatManage.SessionID,
 		"tenant_id":      chatManage.TenantID,
-		"user_query_len": len(chatManage.Query),
+		"user_query":     chatManage.Query,
 		"has_images":     hasImages,
 		"enable_rewrite": chatManage.EnableRewrite,
 	})
@@ -158,11 +158,11 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	pipelineInfo(ctx, "QueryUnderstand", "output", map[string]interface{}{
 		"session_id":          chatManage.SessionID,
-		"rewrite_query_len":   len(chatManage.RewriteQuery),
+		"rewrite_query":       chatManage.RewriteQuery,
 		"intent":              chatManage.Intent,
 		"has_image_desc":      chatManage.ImageDescription != "",
 		"has_prompt_override": chatManage.SystemPromptOverride != "",
-		"original_output_len": len(response.Content),
+		"original_output":     response.Content,
 	})
 	return next()
 }
@@ -369,6 +369,9 @@ func (p *PluginQueryUnderstand) memoryBackground(ctx context.Context, chatManage
 		"interests":  len(memCtx.Interests),
 		"documents":  len(memCtx.Documents),
 		"items":      len(memCtx.Items),
+	}
+	if len(memCtx.Interests) > 0 {
+		fields["interest_previews"] = memCtx.Interests
 	}
 	pipelineInfo(ctx, "QueryUnderstand", "memory_background", fields)
 	return b.String()

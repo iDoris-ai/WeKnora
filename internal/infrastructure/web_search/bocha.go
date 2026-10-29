@@ -107,7 +107,7 @@ func (p *BochaProvider) Search(ctx context.Context, query string, maxResults int
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
-	logger.Infof(ctx, "[WebSearch][Bocha] query_len=%d maxResults=%d freshness=%s", len(query), maxResults, p.freshness)
+	logger.Infof(ctx, "[WebSearch][Bocha] query=%q maxResults=%d freshness=%s", query, maxResults, p.freshness)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute Bocha request: %w", err)

@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,7 +20,6 @@ type fakeSandboxFileSource struct {
 	data        []byte
 	readErr     error
 	entries     []sandbox.RemoteDirEntry
-	listErr     error
 	statCalls   int
 	readCalls   int
 	listedDir   string
@@ -34,9 +31,6 @@ type fakeSandboxFileSource struct {
 
 func (f *fakeSandboxFileSource) ListSessionFiles(_ context.Context, _, dir string) ([]sandbox.RemoteDirEntry, error) {
 	f.listedDir = dir
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
 	return f.entries, nil
 }
 
@@ -373,44 +367,6 @@ func TestReadFileWorkspaceReturnsSmallTextOnlyInOutput(t *testing.T) {
 	assert.False(t, duplicated)
 }
 
-// The path comes from the model, and so does any backend error that echoes it,
-// so the read logs carry their lengths only.
-func TestReadFileWorkspaceLogsOmitPath(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	path := "/workspace/output/" + sentinel + ".txt"
-	args := json.RawMessage(`{"path":"` + path + `"}`)
-	content := []byte("hello\n")
-	source := &fakeSandboxFileSource{statErr: fmt.Errorf("stat %q failed", path)}
-	result, err := NewReadFileTool(source).Execute(sandboxFileTestContext(), args)
-	require.NoError(t, err)
-	require.False(t, result.Success)
-
-	source.statErr = nil
-	source.stat = &sandbox.RemoteStatEntry{Path: path, Type: sandbox.RemoteEntryFile, Size: int64(len(content))}
-	source.readErr = fmt.Errorf("read %q failed", path)
-	result, err = NewReadFileTool(source).Execute(sandboxFileTestContext(), args)
-	require.NoError(t, err)
-	require.False(t, result.Success)
-
-	source.readErr = nil
-	source.data = content
-	result, err = NewReadFileTool(source).Execute(sandboxFileTestContext(), args)
-	require.NoError(t, err)
-	require.True(t, result.Success, result.Error)
-
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "stat failed: session=")
-	assert.Contains(t, logs, "read failed: session=")
-	assert.Equal(t, 2, strings.Count(logs, "error_len="))
-	assert.Equal(t, 3, strings.Count(logs, "path_len="))
-}
-
 // The output-directory guard is a string prefix test, so a symlink planted
 // under that directory satisfies it while pointing anywhere. The backends stat
 // the final component without following it, and this is the check that turns
@@ -635,60 +591,4 @@ func TestReadFileOutsideWorkspaceStillRequiresSession(t *testing.T) {
 	assert.Contains(t, result.Error, "no session ID")
 	assert.Zero(t, source.statCalls)
 	assert.Zero(t, source.readCalls)
-}
-
-// The directory is a tool argument, and a list error can quote it. The failure log records lengths only
-// (A24-OBS-12, #97 review G1).
-func TestListSandboxFilesLogsOmitDir(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	dir := "/tmp/" + sentinel
-	source := &fakeSandboxFileSource{listErr: fmt.Errorf("list %q denied", dir)}
-	result, err := NewListSandboxFilesTool(source).Execute(
-		sandboxFileTestContext(),
-		json.RawMessage(`{"path":"`+dir+`"}`),
-	)
-	require.NoError(t, err)
-	require.False(t, result.Success)
-
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "list failed: session=")
-	assert.Equal(t, 1, strings.Count(logs, "dir_len="))
-	assert.Equal(t, 1, strings.Count(logs, "error_len="))
-}
-
-// The success listing records dir_len for the resolved directory, including a
-// parent directory that itself contains the sentinel (#99).
-func TestListSandboxFilesSuccessLogsOmitDir(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	dir := "/tmp/" + sentinel + "/sub"
-	source := &fakeSandboxFileSource{
-		entries: []sandbox.RemoteDirEntry{{
-			Name: sentinel + ".txt",
-			Path: dir + "/" + sentinel + ".txt",
-			Type: sandbox.RemoteEntryFile,
-		}},
-	}
-	result, err := NewListSandboxFilesTool(source).Execute(
-		sandboxFileTestContext(),
-		json.RawMessage(`{"path":"`+dir+`"}`),
-	)
-	require.NoError(t, err)
-	require.True(t, result.Success, result.Error)
-
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "[Tool][ListSandboxFiles] session=")
-	assert.Equal(t, 1, strings.Count(logs, "dir_len="))
-	assert.Equal(t, 1, strings.Count(logs, fmt.Sprintf("dir_len=%d ", len(dir))))
 }

@@ -52,20 +52,18 @@ func (s *localFileService) SaveFile(ctx context.Context,
 	file *multipart.FileHeader, tenantID uint64, knowledgeID string,
 ) (string, error) {
 	logger.Info(ctx, "Starting to save file locally")
-	logger.Infof(ctx, "File information: name_len=%d, size=%d, tenant ID=%d, knowledge ID=%s",
-		len(file.Filename), file.Size, tenantID, knowledgeID)
+	logger.Infof(ctx, "File information: name=%s, size=%d, tenant ID=%d, knowledge ID=%s",
+		file.Filename, file.Size, tenantID, knowledgeID)
 
 	// Create storage directory with tenant and knowledge ID
 	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), knowledgeID)
 	if _, err := secutils.SafePathUnderBase(s.baseDir, dir); err != nil {
-		logger.Errorf(ctx, "Path traversal denied for SaveFile dir: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Path traversal denied for SaveFile dir: %v", err)
 		return "", fmt.Errorf("invalid path: %w", err)
 	}
 	logger.Infof(ctx, "Creating directory: %s", dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		logger.Errorf(ctx, "Failed to create directory: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to create directory: %v", err)
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -73,14 +71,13 @@ func (s *localFileService) SaveFile(ctx context.Context,
 	ext := filepath.Ext(file.Filename)
 	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
 	filePath := filepath.Join(dir, filename)
-	logger.Infof(ctx, "Generated file path: path_len=%d", len(filePath))
+	logger.Infof(ctx, "Generated file path: %s", filePath)
 
 	// Open source file for reading
 	logger.Info(ctx, "Opening source file")
 	src, err := file.Open()
 	if err != nil {
-		logger.Errorf(ctx, "Failed to open source file: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to open source file: %v", err)
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
 	defer src.Close()
@@ -89,8 +86,7 @@ func (s *localFileService) SaveFile(ctx context.Context,
 	logger.Info(ctx, "Creating destination file")
 	dst, err := os.Create(filePath)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to create destination file: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to create destination file: %v", err)
 		return "", fmt.Errorf("failed to create file: %w", err)
 	}
 	defer dst.Close()
@@ -98,12 +94,11 @@ func (s *localFileService) SaveFile(ctx context.Context,
 	// Copy content from source to destination
 	logger.Info(ctx, "Copying file content")
 	if _, err := io.Copy(dst, src); err != nil {
-		logger.Errorf(ctx, "Failed to copy file content: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to copy file content: %v", err)
 		return "", fmt.Errorf("failed to save file: %w", err)
 	}
 
-	logger.Infof(ctx, "File saved successfully: path_len=%d", len(filePath))
+	logger.Infof(ctx, "File saved successfully: %s", filePath)
 	// Return provider:// path format: local://{relative_path}
 	relPath, _ := filepath.Rel(s.baseDir, filePath)
 	return localScheme + filepath.ToSlash(relPath), nil
@@ -114,23 +109,21 @@ func (s *localFileService) SaveFile(ctx context.Context,
 // Supports both provider scheme: local://{relative_path} and legacy absolute paths.
 // 路径必须在 baseDir 下，防止路径遍历（如 ../../）
 func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
-	logger.Infof(ctx, "Getting file: path_len=%d", len(filePath))
+	logger.Infof(ctx, "Getting file: %s", filePath)
 
 	candidate := s.normalizePathForBase(filePath)
 	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
 	if err != nil {
-		logger.Errorf(ctx, "Path traversal denied for GetFile: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Path traversal denied for GetFile: %v", err)
 		return nil, fmt.Errorf("invalid file path: %w", err)
 	}
 
 	file, err := os.Open(resolved)
 	if err != nil {
-		// baseDir is logged so a storage base-dir mismatch (e.g.
+		// baseDir/resolved are logged so a storage base-dir mismatch (e.g.
 		// writer and reader started with different LOCAL_STORAGE_BASE_DIR)
 		// is immediately visible instead of just "no such file or directory".
-		logger.Errorf(ctx, "Failed to open file: baseDir=%s path_len=%d error_len=%d error_type=%T",
-			s.baseDir, len(resolved), len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to open file: baseDir=%s resolvedPath=%s err=%v", s.baseDir, resolved, err)
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 
@@ -142,20 +135,18 @@ func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.Rea
 // Returns an error if deletion fails
 // 路径必须在 baseDir 下，防止路径遍历（如 ../../）
 func (s *localFileService) DeleteFile(ctx context.Context, filePath string) error {
-	logger.Infof(ctx, "Deleting file: path_len=%d", len(filePath))
+	logger.Infof(ctx, "Deleting file: %s", filePath)
 
 	candidate := s.normalizePathForBase(filePath)
 	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
 	if err != nil {
-		logger.Errorf(ctx, "Path traversal denied for DeleteFile: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Path traversal denied for DeleteFile: %v", err)
 		return fmt.Errorf("invalid file path: %w", err)
 	}
 
 	err = os.Remove(resolved)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to delete file: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to delete file: %v", err)
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
 
@@ -181,16 +172,14 @@ func (s *localFileService) CopyFile(ctx context.Context,
 	srcCandidate := s.normalizePathForBase(srcPath)
 	srcResolved, err := secutils.SafePathUnderBase(s.baseDir, srcCandidate)
 	if err != nil {
-		logger.Errorf(ctx, "Path traversal denied for CopyFile src: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Path traversal denied for CopyFile src: %v", err)
 		return "", fmt.Errorf("invalid source path: %w", err)
 	}
 
 	// Build destination path with the knowledge-owned layout.
 	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), knowledgeID)
 	if _, err := secutils.SafePathUnderBase(s.baseDir, dir); err != nil {
-		logger.Errorf(ctx, "Path traversal denied for CopyFile dir: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Path traversal denied for CopyFile dir: %v", err)
 		return "", fmt.Errorf("invalid path: %w", err)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -219,7 +208,7 @@ func (s *localFileService) CopyFile(ctx context.Context,
 
 	relPath, _ := filepath.Rel(s.baseDir, dstPath)
 	newPath := localScheme + filepath.ToSlash(relPath)
-	logger.Infof(ctx, "Copied local file src_len=%d dst_len=%d", len(srcPath), len(newPath))
+	logger.Infof(ctx, "Copied local file %s to %s", srcPath, newPath)
 	return newPath, nil
 }
 
@@ -227,21 +216,18 @@ func (s *localFileService) CopyFile(ctx context.Context,
 // temp parameter is ignored for local storage (no auto-expiration support)
 // fileName 仅允许安全文件名，禁止路径遍历（如 ../../）
 func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
-	logger.Infof(ctx, "Saving bytes data: name_len=%d, size=%d, tenantID=%d, temp=%v",
-		len(fileName), len(data), tenantID, temp)
+	logger.Infof(ctx, "Saving bytes data: fileName=%s, size=%d, tenantID=%d, temp=%v", fileName, len(data), tenantID, temp)
 
 	safeName, err := secutils.SafeFileName(fileName)
 	if err != nil {
-		logger.Errorf(ctx, "Invalid fileName for SaveBytes: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Invalid fileName for SaveBytes: %v", err)
 		return "", fmt.Errorf("invalid file name: %w", err)
 	}
 
 	// Create storage directory with tenant ID
 	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), "exports")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		logger.Errorf(ctx, "Failed to create directory: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to create directory: %v", err)
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -253,12 +239,11 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 
 	// Write data to file
 	if err := os.WriteFile(filePath, data, 0o644); err != nil {
-		logger.Errorf(ctx, "Failed to write file: error_len=%d error_type=%T",
-			len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "Failed to write file: %v", err)
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
-	logger.Infof(ctx, "Bytes data saved successfully: path_len=%d", len(filePath))
+	logger.Infof(ctx, "Bytes data saved successfully: %s", filePath)
 	relPath, _ := filepath.Rel(s.baseDir, filePath)
 	return localScheme + filepath.ToSlash(relPath), nil
 }
@@ -288,8 +273,7 @@ func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (str
 		tenantID := secutils.ParseTenantIDFromStoragePath(normalized)
 		presignedURL, err := secutils.SignFileURL(s.externalURL, normalized, tenantID, 0)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to generate presigned URL for path_len=%d: error_len=%d error_type=%T, "+
-				"returning local:// path", len(normalized), len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "Failed to generate presigned URL for %s: %v, returning local:// path", normalized, err)
 			return normalized, nil
 		}
 		return presignedURL, nil

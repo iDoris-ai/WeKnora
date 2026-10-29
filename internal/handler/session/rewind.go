@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	stderrors "errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -119,8 +118,7 @@ func (h *Handler) RewindSession(c *gin.Context) {
 			_ = c.Error(errors.NewBadRequestError("rewind point must be a user or assistant message"))
 			return
 		}
-		logger.Errorf(ctx, "rewind session %s failed: error_len=%d error_type=%T",
-			sessionID, len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "rewind session %s failed: %v", sessionID, err)
 		_ = c.Error(errors.NewInternalServerError("rewind session failed"))
 		return
 	}

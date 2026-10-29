@@ -161,8 +161,7 @@ func (c *Connector) ListResources(
 		}
 		batch, err := cli.GetKnowledgeBase(ctx, ids[i:end])
 		if err != nil {
-			logger.Warnf(ctx, "[IMA] get_knowledge_base batch failed (skipping enrichment): error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[IMA] get_knowledge_base batch failed (skipping enrichment): %v", err)
 			continue
 		}
 		for k, v := range batch {
@@ -450,22 +449,21 @@ func fetchNote(
 ) (types.FetchedItem, fetchOutcome) {
 	noteID := info.NotebookExtInfo.NotebookID
 	if noteID == "" {
-		logger.Warnf(ctx, "[IMA] note %s (title_len=%d) has no notebook_id, skipping", f.MediaID, len(f.Title))
+		logger.Warnf(ctx, "[IMA] note %s (title=%q) has no notebook_id, skipping", f.MediaID, f.Title)
 		return types.FetchedItem{}, fetchSkipped
 	}
 
 	content, err := cli.GetNoteContent(ctx, noteID)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] get_doc_content(note %s, title_len=%d) failed, will retry next sync: "+
-			"error_len=%d error_type=%T",
-			noteID, len(f.Title), len(err.Error()), err)
+		logger.Warnf(ctx, "[IMA] get_doc_content(note %s, title=%q) failed, will retry next sync: %v",
+			noteID, f.Title, err)
 		return types.FetchedItem{}, fetchFailed
 	}
 	if strings.TrimSpace(content) == "" {
 		// A cleared note still exists. Keep its title as content so ingestion
 		// replaces the stale body instead of silently acknowledging the edit:
 		// skipping here would leave the old text indexed forever.
-		logger.Infof(ctx, "[IMA] note %s (title_len=%d) is empty, syncing its title only", noteID, len(f.Title))
+		logger.Infof(ctx, "[IMA] note %s (title=%q) is empty, syncing its title only", noteID, f.Title)
 		content = "# " + f.Title + "\n"
 	}
 
@@ -514,8 +512,7 @@ func fetchOneMedia(
 ) (types.FetchedItem, fetchOutcome) {
 	info, err := cli.GetMediaInfo(ctx, f.MediaID)
 	if err != nil {
-		logger.Warnf(ctx, "[IMA] get_media_info(%s) failed, will retry next sync: error_len=%d error_type=%T",
-			f.MediaID, len(err.Error()), err)
+		logger.Warnf(ctx, "[IMA] get_media_info(%s) failed, will retry next sync: %v", f.MediaID, err)
 		return types.FetchedItem{}, fetchFailed
 	}
 
@@ -524,13 +521,13 @@ func fetchOneMedia(
 	}
 
 	if isSkippableMediaType(info.MediaType) {
-		logger.Infof(ctx, "[IMA] skip media %s (title_len=%d media_type=%d): unsupported by the IMA OpenAPI",
-			f.MediaID, len(f.Title), info.MediaType)
+		logger.Infof(ctx, "[IMA] skip media %s (title=%q media_type=%d): unsupported by the IMA OpenAPI",
+			f.MediaID, f.Title, info.MediaType)
 		return types.FetchedItem{}, fetchSkipped
 	}
 
 	if info.URLInfo.URL == "" {
-		logger.Warnf(ctx, "[IMA] media %s (title_len=%d) has no url_info.url, skipping", f.MediaID, len(f.Title))
+		logger.Warnf(ctx, "[IMA] media %s (title=%q) has no url_info.url, skipping", f.MediaID, f.Title)
 		return types.FetchedItem{}, fetchSkipped
 	}
 
@@ -559,9 +556,8 @@ func fetchOneMedia(
 
 	body, ct, err := cli.DownloadURL(ctx, info.URLInfo)
 	if err != nil {
-		logger.Warnf(ctx,
-			"[IMA] download media %s (title_len=%d) failed, will retry next sync: error_len=%d error_type=%T",
-			f.MediaID, len(f.Title), len(err.Error()), err)
+		logger.Warnf(ctx, "[IMA] download media %s (title=%q) failed, will retry next sync: %v",
+			f.MediaID, f.Title, err)
 		return types.FetchedItem{}, fetchFailed
 	}
 

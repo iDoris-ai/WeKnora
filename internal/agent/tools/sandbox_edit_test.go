@@ -1,14 +1,12 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -389,37 +387,4 @@ func mustEditSandboxArgs(path, oldString, newString string, replaceAll bool) jso
 		panic(err)
 	}
 	return raw
-}
-
-// The path is a tool argument, and a write error can quote it. The failure and success logs record
-// path_len only; the failure also records error_len (A24-OBS-12, #97 review G1).
-func TestEditSandboxFileLogsOmitPath(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	path := "/workspace/output/" + sentinel + "/sub/" + sentinel + ".txt"
-	editor := &fakeSandboxFileEditor{
-		files:    map[string][]byte{path: []byte("old\n")},
-		writeErr: fmt.Errorf("write %q denied", path),
-	}
-	args := mustEditSandboxArgs(path, "old", "new", false)
-
-	result, err := NewEditSandboxFileTool(editor).Execute(sandboxFileTestContext(), args)
-	require.NoError(t, err)
-	require.False(t, result.Success)
-
-	editor.writeErr = nil
-	result, err = NewEditSandboxFileTool(editor).Execute(sandboxFileTestContext(), args)
-	require.NoError(t, err)
-	require.True(t, result.Success, result.Error)
-
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "write failed: session=")
-	assert.Equal(t, 1, strings.Count(logs, "error_len="))
-	assert.Equal(t, 2, strings.Count(logs, "path_len="))
-	assert.Equal(t, 2, strings.Count(logs, fmt.Sprintf("path_len=%d ", len(path))))
 }

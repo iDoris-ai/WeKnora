@@ -2,7 +2,6 @@ package im
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -71,8 +70,7 @@ func RunSupervised(ctx context.Context, cfg SupervisorConfig) {
 			if ctx.Err() != nil {
 				return
 			}
-			logger.Warnf(ctx, "[IM] %s connect failed: error_len=%d error_type=%T, retrying in %v",
-				cfg.Name, len(fmt.Sprint(err)), err, retryDelay)
+			logger.Warnf(ctx, "[IM] %s connect failed: %v, retrying in %v", cfg.Name, err, retryDelay)
 			select {
 			case <-time.After(retryDelay):
 				continue

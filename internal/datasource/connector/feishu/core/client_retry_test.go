@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +10,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // retryTestServer builds a server that always answers the auth-token call and
@@ -302,39 +299,5 @@ func TestDownloadRawBytes_BoundsErrorBodies(t *testing.T) {
 				t.Fatalf("read %d bytes of error bodies, want a bounded preview per response", got)
 			}
 		})
-	}
-}
-
-func TestListWikiSpacesLogsOmitName(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	ts, cfg := retryTestServer(t, "/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, WikiSpaceListResponse{
-			ApiResponse: ApiResponse{Code: 0},
-			Data: WikiSpaceListData{Items: []WikiSpace{{
-				SpaceID: "space-1", Name: sentinel, Description: sentinel, Visibility: "public",
-			}}},
-		})
-	})
-	defer ts.Close()
-
-	spaces, err := NewClient(cfg).ListWikiSpaces(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(spaces) != 1 || spaces[0].Name != sentinel {
-		t.Fatalf("spaces = %+v", spaces)
-	}
-	logs := buf.String()
-	if strings.Contains(logs, sentinel) {
-		t.Fatalf("log contains the space name:\n%s", logs)
-	}
-	want := fmt.Sprintf("name_len=%d ", len(sentinel))
-	if strings.Count(logs, want) != 1 || !strings.Contains(logs, "[Feishu]   space[0]:") {
-		t.Fatalf("space log missing %s:\n%s", want, logs)
 	}
 }

@@ -191,10 +191,7 @@ func parseOutgoingBody(contentType string, body []byte) (*outgoingPayload, error
 		if err := json.Unmarshal(body, &p); err == nil && (p.Token != "" || p.ChannelID != "") {
 			return &p, nil
 		}
-		// Agent24 KB-OBS-01: Content-Type from an unauthenticated request must not be
-		// copied into this error. Callers only log it; the HTTP body is a fixed
-		// "parse failed" or "verification failed".
-		return nil, fmt.Errorf("unsupported content-type (len=%d)", len(contentType))
+		return nil, fmt.Errorf("unsupported content-type: %s", contentType)
 	}
 }
 
@@ -298,7 +295,7 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	state.mu.Unlock()
 
 	if err := a.client.PatchPostMessage(ctx, postID, fullContent); err != nil {
-		logger.Warnf(ctx, "[Mattermost] Patch post failed: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Warnf(ctx, "[Mattermost] Patch post failed: %v", err)
 	}
 	return nil
 }
@@ -327,7 +324,7 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	state.mu.Unlock()
 
 	if err := a.client.PatchPostMessage(ctx, postID, full); err != nil {
-		logger.Warnf(ctx, "[Mattermost] EndStream patch failed: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Warnf(ctx, "[Mattermost] EndStream patch failed: %v", err)
 	}
 	logger.Infof(ctx, "[Mattermost] Streaming ended: post_id=%s", postID)
 	return nil

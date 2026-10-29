@@ -18,13 +18,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// docreader/client builds its own log.Logger, so log.SetOutput does not cover it.
-// Dial lines include the address and the dial error. Wrap that logger here; the
-// client package must not depend on internal/logger.
-func init() {
-	docclient.Logger.SetOutput(logger.LineSafeWriter(os.Stdout))
-}
-
 func getMaxMessageSize() int {
 	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
 		if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {

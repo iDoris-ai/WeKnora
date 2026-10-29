@@ -1,11 +1,9 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -102,95 +100,4 @@ func TestGetSuggestedQuestions_LimitBoundedByMax(t *testing.T) {
 	got, err := svc.GetSuggestedQuestions(ctx, "agent-1", nil, nil, nil, 999)
 	require.NoError(t, err)
 	assert.Len(t, got, suggestionMaxLimit)
-}
-
-// createAgentLogRepo is only used by the log-redaction tests. Existing
-// suggestion stubs embed the repository and would panic on CreateAgent.
-type createAgentLogRepo struct {
-	interfaces.CustomAgentRepository
-	stored *types.CustomAgent
-}
-
-func (r *createAgentLogRepo) CreateAgent(context.Context, *types.CustomAgent) error {
-	return nil
-}
-
-func (r *createAgentLogRepo) GetAgentByID(context.Context, string, uint64) (*types.CustomAgent, error) {
-	return r.stored, nil
-}
-
-func (r *createAgentLogRepo) UpdateAgent(context.Context, *types.CustomAgent) error {
-	return nil
-}
-
-func captureServiceLog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-	return &buf
-}
-
-func TestCreateAgentLogOmitsNameAndUnknownMode(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	buf := captureServiceLog(t)
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
-	svc := &customAgentService{repo: &createAgentLogRepo{}}
-
-	created, err := svc.CreateAgent(ctx, &types.CustomAgent{
-		Name:   sentinel,
-		Config: types.CustomAgentConfig{AgentMode: sentinel + "-mode"},
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, sentinel, created.Name)
-	require.Equal(t, sentinel+"-mode", created.Config.AgentMode)
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "Creating custom agent")
-	require.Contains(t, out, "name_len=8")
-	require.Contains(t, out, "agent_mode: (unknown len=13)")
-	require.Contains(t, out, "Custom agent created successfully")
-}
-
-func TestCreateAgentLogKeepsKnownMode(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	buf := captureServiceLog(t)
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
-	svc := &customAgentService{repo: &createAgentLogRepo{}}
-
-	for _, mode := range []string{types.AgentModeQuickAnswer, types.AgentModeSmartReasoning} {
-		created, err := svc.CreateAgent(ctx, &types.CustomAgent{
-			Name:   sentinel,
-			Config: types.CustomAgentConfig{AgentMode: mode},
-		})
-		require.NoError(t, err)
-		require.Equal(t, mode, created.Config.AgentMode)
-	}
-
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "Creating custom agent")
-	require.Contains(t, out, "name_len=8")
-	require.Contains(t, out, "agent_mode: quick-answer")
-	require.Contains(t, out, "agent_mode: smart-reasoning")
-}
-
-func TestUpdateAgentLogOmitsName(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	buf := captureServiceLog(t)
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
-	svc := &customAgentService{repo: &createAgentLogRepo{
-		stored: &types.CustomAgent{ID: "agent-1", TenantID: 7, Name: "old"},
-	}}
-
-	updated, err := svc.UpdateAgent(ctx, &types.CustomAgent{ID: "agent-1", Name: sentinel}, nil)
-
-	require.NoError(t, err)
-	require.Equal(t, sentinel, updated.Name)
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "Updating custom agent")
-	require.Contains(t, out, "name_len=8")
 }

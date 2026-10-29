@@ -1,12 +1,10 @@
 package session
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -208,50 +206,4 @@ func TestResolveBuiltinWikiFixerTenantScope_FallsBackOnLookupOrPermissionErrors(
 		require.Same(t, agent, gotAgent)
 		require.Zero(t, effectiveTenantID)
 	})
-}
-
-func TestResolveBuiltinWikiFixerTenantScope_LookupErrorLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	resolveBuiltinWikiFixerTenantScope(
-		context.Background(),
-		&types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 10},
-		10,
-		types.TenantRoleContributor,
-		[]string{"kb-shared"},
-		&wikiFixerKBLookupStub{err: errors.New("lookup " + sentinel)},
-		&wikiFixerKBShareStub{permission: types.OrgRoleEditor, isShared: true},
-	)
-
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "failed to resolve KB")
-	require.Contains(t, out, "error_len=")
-}
-
-func TestResolveBuiltinWikiFixerTenantScope_PermissionErrorLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	resolveBuiltinWikiFixerTenantScope(
-		context.Background(),
-		&types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 10},
-		10,
-		types.TenantRoleContributor,
-		[]string{"kb-shared"},
-		&wikiFixerKBLookupStub{kb: &types.KnowledgeBase{ID: "kb-shared", TenantID: 20}},
-		&wikiFixerKBShareStub{err: errors.New("permission " + sentinel)},
-	)
-
-	out := buf.String()
-	require.NotContains(t, out, sentinel)
-	require.Contains(t, out, "failed to check shared KB")
-	require.Contains(t, out, "error_len=")
 }

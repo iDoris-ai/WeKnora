@@ -150,8 +150,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", fmt.Errorf("no file URL in message")
 	}
 	if err := secutils.ValidateURLForSSRF(msg.FileKey); err != nil {
-		// Agent24 KB-OBS-01: a parse failure quotes the CDN URL with encrypted_query_param.
-		return nil, "", fmt.Errorf("file URL rejected by SSRF policy: %w", im.RedactURLErrorInChain(err))
+		return nil, "", fmt.Errorf("file URL rejected by SSRF policy: %w", err)
 	}
 
 	fileName := msg.FileName
@@ -162,13 +161,12 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	// Download the file
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, msg.FileKey, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create download request: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("create download request: %w", err)
 	}
 
 	resp, err := ilinkHTTPClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes encrypted_query_param.
-		return nil, "", fmt.Errorf("download file: %w", im.RedactRequestError(err))
+		return nil, "", fmt.Errorf("download file: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -198,8 +196,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", fmt.Errorf("parse aes key: %w", err)
 	}
 
-	// fileName falls back to FileKey, the download URL, when the message has no name.
-	logger.Debugf(ctx, "[WeChat] Decrypting file: name_len=%d encrypted_size=%d", len(fileName), len(encryptedData))
+	logger.Debugf(ctx, "[WeChat] Decrypting file: name=%s encrypted_size=%d", fileName, len(encryptedData))
 
 	decrypted, err := decryptAES128ECB(encryptedData, aesKey)
 	if err != nil {

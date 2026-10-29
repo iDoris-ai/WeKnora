@@ -97,8 +97,7 @@ func (c *LongPollClient) Start(ctx context.Context) error {
 		}
 
 		delay := pollReconnectDelay(attempts)
-		logger.Warnf(ctx, "[WeChat] Poll error (error_len=%d error_type=%T), retrying in %v (attempt %d)...",
-			len(err.Error()), err, delay, attempts)
+		logger.Warnf(ctx, "[WeChat] Poll error (%v), retrying in %v (attempt %d)...", err, delay, attempts)
 
 		select {
 		case <-time.After(delay):
@@ -173,7 +172,7 @@ func (c *LongPollClient) poll(ctx context.Context) error {
 		// Handle in a detached goroutine so we don't block polling
 		go func(m *im.IncomingMessage) {
 			if err := c.handler(ctx, m); err != nil {
-				logger.Errorf(ctx, "[WeChat] Handle message error: error_len=%d error_type=%T", len(err.Error()), err)
+				logger.Errorf(ctx, "[WeChat] Handle message error: %v", err)
 			}
 		}(incoming)
 	}

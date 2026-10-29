@@ -321,8 +321,8 @@ func (e *AgentEngine) executeToolCallsParallel(
 			// process from a goroutine nothing above can recover.
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf(ctx, "[Agent][Round-%d] Tool call %s panicked: %s\n%s",
-						round, e.loggedToolName(tc.Function.Name), logger.PanicValue(r), debug.Stack())
+					logger.Errorf(ctx, "[Agent][Round-%d] Tool call %s panicked: %v\n%s",
+						round, tc.Function.Name, r, debug.Stack())
 					mu.Lock()
 					results[i] = panickedToolCall(tc, i)
 					mu.Unlock()
@@ -421,13 +421,8 @@ func (e *AgentEngine) runToolCall(
 ) types.ToolCall {
 	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
 	total := "?" // unknown in isolation; callers log the batch size
-	toolLabel := "unknown"
-	_, labelErr := e.toolRegistry.GetTool(tc.Function.Name)
-	if labelErr == nil {
-		toolLabel = tc.Function.Name
-	}
 	toolTag := fmt.Sprintf("[Agent][Round-%d][Tool %s (%d/%s)]",
-		round, toolLabel, i+1, total)
+		round, tc.Function.Name, i+1, total)
 
 	var args map[string]any
 	argsStr := tc.Function.Arguments
@@ -500,13 +495,11 @@ func (e *AgentEngine) runToolCall(
 		target = e.toolRegistry.MCPCallTarget(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 	}
 	executionName, executionArgs := tc.Function.Name, args
-	loggedTool := toolLabel
 	if target != nil {
 		executionName, executionArgs = target.Name, target.Args
-		loggedTool = executionName
 	}
 
-	logger.Debugf(ctx, "%s args_len=%d", toolTag, len(tc.Function.Arguments))
+	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
 
 	toolCallStartTime := time.Now()
 
@@ -528,7 +521,7 @@ func (e *AgentEngine) runToolCall(
 	common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         loggedTool,
+		"tool":         executionName,
 		"tool_call_id": tc.ID,
 		"tool_index":   fmt.Sprintf("%d/%s", i+1, total),
 	})
@@ -548,26 +541,18 @@ func (e *AgentEngine) runToolCall(
 		toolSpanInput["mcp_tool"] = target.ToolName
 	}
 	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
-	spanName := "agent.tool." + toolLabel
-	if target != nil {
-		spanName = "agent.tool." + target.Name
-	}
-	toolMeta := map[string]interface{}{
-		"iteration":               iteration,
-		"round":                   round,
-		"tool_index":              i + 1,
-		"tool_call_id":            tc.ID,
-		"session_id":              sessionID,
-		"argument_resolution":     argumentResolution,
-		"unresolved_handle_count": len(tc.UnresolvedHandles),
-	}
-	if labelErr != nil {
-		toolMeta["tool_name_bytes"] = len(tc.Function.Name)
-	}
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
-		Name:     spanName,
-		Input:    toolSpanInput,
-		Metadata: toolMeta,
+		Name:  "agent.tool." + executionName,
+		Input: toolSpanInput,
+		Metadata: map[string]interface{}{
+			"iteration":               iteration,
+			"round":                   round,
+			"tool_index":              i + 1,
+			"tool_call_id":            tc.ID,
+			"session_id":              sessionID,
+			"argument_resolution":     argumentResolution,
+			"unresolved_handle_count": len(tc.UnresolvedHandles),
+		},
 	})
 
 	principal, _ := types.PrincipalFromContext(ctx)
@@ -620,9 +605,7 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	if err != nil {
-		// Tool errors can quote the call's input (a regex query, MCP output), so
-		// the logs carry their length and type only (fork patch A24-OBS-03).
-		logger.Errorf(ctx, "%s Failed in %dms: error_type=%T error_len=%d", toolTag, duration, err, len(err.Error()))
+		logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
 		toolCall.Result = &types.ToolResult{
 			Success: false,
 			Error:   err.Error(),
@@ -644,13 +627,13 @@ func (e *AgentEngine) runToolCall(
 	pipelineFields := map[string]interface{}{
 		"iteration":    iteration,
 		"round":        round,
-		"tool":         loggedTool,
+		"tool":         executionName,
 		"tool_call_id": tc.ID,
 		"duration_ms":  duration,
 		"success":      toolSuccess,
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
-		pipelineFields["error_len"] = len(toolCall.Result.Error)
+		pipelineFields["error"] = toolCall.Result.Error
 	}
 	if err != nil {
 		common.PipelineError(ctx, "Agent", "tool_call_result", pipelineFields)
@@ -661,10 +644,14 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	if toolCall.Result != nil && toolCall.Result.Output != "" {
-		logger.Debugf(ctx, "%s output_len=%d", toolTag, len(toolCall.Result.Output))
+		preview := toolCall.Result.Output
+		if len(preview) > 500 {
+			preview = preview[:500] + "... (truncated)"
+		}
+		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
-		logger.Debugf(ctx, "%s Tool error: error_len=%d", toolTag, len(toolCall.Result.Error))
+		logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
 	}
 
 	return toolCall

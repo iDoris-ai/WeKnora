@@ -337,7 +337,7 @@ func (e *AgentEngine) Execute(
 	common.PipelineInfo(ctx, "Agent", "execute_start", map[string]interface{}{
 		"session_id":   sessionID,
 		"message_id":   messageID,
-		"query_len":    len(query),
+		"query":        query,
 		"context_msgs": len(llmContext),
 	})
 
@@ -418,7 +418,7 @@ func (e *AgentEngine) Execute(
 
 	_, err := e.executeLoop(ctx, state, query, messages, tools, sessionID, messageID)
 	if err != nil {
-		logger.Errorf(ctx, "[Agent] Execution failed: error_len=%d error_type=%T", len(fmt.Sprint(err)), err)
+		logger.Errorf(ctx, "[Agent] Execution failed: %v", err)
 		e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("error"),
 			Type:      event.EventError,
@@ -642,8 +642,8 @@ loop:
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
 		case <-ctx.Done():
-			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: error_len=%d error_type=%T",
-				state.CurrentRound+1, len(fmt.Sprint(ctx.Err())), ctx.Err())
+			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: %v",
+				state.CurrentRound+1, ctx.Err())
 			// Try to salvage existing results
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
 				logger.Infof(ctx, "[Agent] Synthesizing final answer from %d existing tool results",
@@ -1137,8 +1137,7 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs, prompts
 			defer func() { <-sem }()
 			imgBytes, err := decodeDataURIBytes(dataURI)
 			if err != nil {
-				logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: error_len=%d error_type=%T",
-					i, len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: %v", i, err)
 				return
 			}
 			imageCtx, cancel := context.WithTimeout(ctx, toolImageDescribeTimeout)
@@ -1149,9 +1148,7 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs, prompts
 			}
 			desc, err := e.imageDescriber(imageCtx, imgBytes, prompt)
 			if err != nil {
-				logger.Warnf(ctx,
-					"[Agent] VLM analysis failed for tool result image %d: error_len=%d error_type=%T",
-					i, len(fmt.Sprint(err)), err)
+				logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
 				return
 			}
 			descriptions[i] = strings.TrimSpace(desc)

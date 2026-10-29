@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/im"
@@ -81,17 +80,13 @@ func (c *LongConnClient) Close() {
 
 // feishuLoggerAdapter bridges the Feishu/Lark SDK logger to our unified logger,
 // replacing raw SDK connection messages with a consistent format.
-//
-// Agent24 KB-OBS-01: the SDK's messages carry the wss connection URL with its query,
-// message payloads (Debug) and raw errors. Connect and disconnect keep a fixed text;
-// every other message is logged as its event phrase, integer arguments and length.
 type feishuLoggerAdapter struct {
 	region Region
 	appID  string
 }
 
 func (l *feishuLoggerAdapter) Debug(ctx context.Context, args ...interface{}) {
-	logger.Debugf(ctx, "[%s] sdk debug: %s", l.region.Label, feishuSDKLogShape(args))
+	logger.Debugf(ctx, "[%s] %s", l.region.Label, fmt.Sprint(args...))
 }
 
 func (l *feishuLoggerAdapter) Info(ctx context.Context, args ...interface{}) {
@@ -100,71 +95,15 @@ func (l *feishuLoggerAdapter) Info(ctx context.Context, args ...interface{}) {
 		logger.Infof(ctx, "[IM] %s WebSocket connected successfully (app_id=%s)", l.region.Label, l.appID)
 		return
 	}
-	if strings.HasPrefix(msg, "disconnected to ") {
-		logger.Infof(ctx, "[IM] %s WebSocket disconnected (app_id=%s)", l.region.Label, l.appID)
-		return
-	}
-	logger.Infof(ctx, "[%s] sdk info: %s", l.region.Label, feishuSDKLogShape(args))
+	logger.Infof(ctx, "[%s] %s", l.region.Label, msg)
 }
 
 func (l *feishuLoggerAdapter) Warn(ctx context.Context, args ...interface{}) {
-	logger.Warnf(ctx, "[%s] sdk warn: %s", l.region.Label, feishuSDKLogShape(args))
+	logger.Warnf(ctx, "[%s] %s", l.region.Label, fmt.Sprint(args...))
 }
 
 func (l *feishuLoggerAdapter) Error(ctx context.Context, args ...interface{}) {
-	logger.Errorf(ctx, "[%s] sdk error: %s", l.region.Label, feishuSDKLogShape(args))
-}
-
-// feishuSDKLogEvents are the fixed leading phrases of the SDK ws client's log lines
-// (oapi-sdk-go v3 ws/client.go). Only the phrase is logged, never the text after it.
-var feishuSDKLogEvents = []string{
-	"connect failed", "get conn url failed", "trying to reconnect", "response status code",
-	"ping loop panic", "ping failed", "ping success", "receive pong",
-	"receive message loop panic", "connection is closed", "receive message failed",
-	"receive unknown message", "receive message", "handle message panic", "handle message failed",
-	"unmarshal message failed", "unmarshal client config failed", "response message failed",
-}
-
-// feishuSDKLogShape describes an SDK log call without its text: the event phrase
-// (longest known prefix of the first argument), the reconnect attempt, integer
-// arguments such as an HTTP status code, the argument types and the message length.
-func feishuSDKLogShape(args []interface{}) string {
-	// One call passes fmtLog's slice without "...": Debug(ctx, c.fmtLog(...)).
-	if len(args) == 1 {
-		if inner, ok := args[0].([]interface{}); ok {
-			args = inner
-		}
-	}
-	event, first := "unknown", ""
-	if len(args) > 0 {
-		first, _ = args[0].(string)
-	}
-	for _, e := range feishuSDKLogEvents {
-		if strings.HasPrefix(first, e) && (event == "unknown" || len(e) > len(event)) {
-			event = e
-		}
-	}
-	var extra strings.Builder
-	if event == "trying to reconnect" {
-		// The attempt number is formatted into the string: "trying to reconnect: 3".
-		if n, err := strconv.Atoi(strings.TrimPrefix(first, "trying to reconnect: ")); err == nil {
-			fmt.Fprintf(&extra, " attempt=%d", n)
-		}
-	}
-	types := make([]string, len(args))
-	var ints []string
-	for i, arg := range args {
-		types[i] = fmt.Sprintf("%T", arg)
-		switch arg.(type) {
-		case int, int32, int64, uint, uint32, uint64:
-			ints = append(ints, fmt.Sprint(arg))
-		}
-	}
-	if len(ints) > 0 {
-		fmt.Fprintf(&extra, " int_args=[%s]", strings.Join(ints, ","))
-	}
-	return fmt.Sprintf("event=%q%s arg_types=[%s] len=%d",
-		event, extra.String(), strings.Join(types, ","), len(fmt.Sprint(args...)))
+	logger.Errorf(ctx, "[%s] %s", l.region.Label, fmt.Sprint(args...))
 }
 
 // convertEvent converts a Feishu/Lark SDK event to a unified IncomingMessage.
@@ -181,11 +120,11 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	// delivers (or doesn't). This is the single chokepoint for all message
 	// types — adding it here catches text/file/image/post uniformly.
 	logger.Infof(context.Background(),
-		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content_len=%d",
+		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q",
 		region.Label,
 		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
 		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
-		ptrStr(msg.ThreadId), len(ptrStr(msg.Content)),
+		ptrStr(msg.ThreadId), ptrStr(msg.Content),
 	)
 
 	if msg.MessageType == nil {

@@ -85,8 +85,7 @@ func (c *client) doRequest(ctx context.Context, method, path string, result inte
 	backoff := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
 	c.logTokenOnce.Do(func() {
-		logger.Infof(ctx, "[Yuque] client configured token=%s base=%s", redactToken(c.token),
-			datasource.ConnectorBaseURLForLog(c.baseURL))
+		logger.Infof(ctx, "[Yuque] client configured token=%s base=%s", redactToken(c.token), c.baseURL)
 	})
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -131,8 +130,8 @@ func (c *client) doRequest(ctx context.Context, method, path string, result inte
 		}
 
 		bodyPreview := truncate(string(body), 500)
-		logger.Infof(ctx, "[Yuque] %s %s → status=%d bodyLen=%d",
-			method, path, resp.StatusCode, len(body))
+		logger.Infof(ctx, "[Yuque] %s %s → status=%d bodyLen=%d body=%s",
+			method, path, resp.StatusCode, len(body), bodyPreview)
 
 		if resp.StatusCode == 429 {
 			wait := parseRetryAfter(resp.Header.Get("Retry-After"), backoff[min(attempt, len(backoff)-1)])

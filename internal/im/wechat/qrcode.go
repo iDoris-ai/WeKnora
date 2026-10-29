@@ -21,7 +21,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/im"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -132,8 +131,7 @@ func (s *QRCodeService) PollQRCodeStatus(ctx context.Context, qrcode string) (*L
 		if pollCtx.Err() != nil {
 			return &LoginResult{Status: "wait"}, nil
 		}
-		// Agent24 KB-OBS-01: the qrcode in the query can be polled for the bot token.
-		return nil, fmt.Errorf("request qrcode status: %w", im.RedactRequestError(err))
+		return nil, fmt.Errorf("request qrcode status: %w", err)
 	}
 	defer resp.Body.Close()
 

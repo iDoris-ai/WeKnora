@@ -104,9 +104,8 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 		attempt++
 		reconnectCount := c.reconnectCount.Add(1)
 		logger.Warnf(ctx,
-			"[Yunzhijia] WebSocket connection lost channel_id=%s reconnect_count=%d "+
-				"error_len=%d error_type=%T; reconnecting in %v; %s",
-			c.channelID, reconnectCount, len(fmt.Sprint(err)), err, delay, c.healthStatus(),
+			"[Yunzhijia] WebSocket connection lost channel_id=%s reconnect_count=%d reason=%v; reconnecting in %v; %s",
+			c.channelID, reconnectCount, err, delay, c.healthStatus(),
 		)
 		select {
 		case <-ctx.Done():
@@ -187,8 +186,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		frame, err := parseWebSocketFrame(data)
 		if err != nil {
 			invalidFrames++
-			logger.Warnf(ctx, "[Yunzhijia] Invalid WebSocket frame channel_id=%s: error_len=%d error_type=%T",
-				c.channelID, len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[Yunzhijia] Invalid WebSocket frame channel_id=%s: %v", c.channelID, err)
 			if invalidFrames >= webSocketMaxInvalidFrames {
 				return fmt.Errorf("too many invalid websocket frames")
 			}
@@ -266,8 +264,7 @@ func (c *LongConnClient) handleMessages(ctx context.Context) {
 			return
 		case msg := <-c.messages:
 			if err := c.handler(ctx, msg); err != nil {
-				logger.Errorf(ctx, "[Yunzhijia] Handle WebSocket message failed: error_len=%d error_type=%T",
-					len(err.Error()), err)
+				logger.Errorf(ctx, "[Yunzhijia] Handle WebSocket message failed: %v", err)
 			}
 		}
 	}
@@ -283,8 +280,8 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn) {
 		case <-ticker.C:
 			if err := conn.WriteControl(ws.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
 				logger.Warnf(ctx,
-					"[Yunzhijia] WebSocket heartbeat failed channel_id=%s error_len=%d error_type=%T; %s",
-					c.channelID, len(fmt.Sprint(err)), err, c.healthStatus(),
+					"[Yunzhijia] WebSocket heartbeat failed channel_id=%s reason=%v; %s",
+					c.channelID, err, c.healthStatus(),
 				)
 				_ = conn.Close()
 				return

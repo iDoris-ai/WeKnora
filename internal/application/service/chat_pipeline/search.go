@@ -76,11 +76,11 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	}
 
 	pipelineInfo(ctx, "Search", "input", map[string]interface{}{
-		"session_id":        chatManage.SessionID,
-		"rewrite_query_len": len(chatManage.RewriteQuery),
-		"search_targets":    len(chatManage.SearchTargets),
-		"tenant_id":         chatManage.TenantID,
-		"web_enabled":       chatManage.WebSearchEnabled,
+		"session_id":     chatManage.SessionID,
+		"rewrite_query":  chatManage.RewriteQuery,
+		"search_targets": len(chatManage.SearchTargets),
+		"tenant_id":      chatManage.TenantID,
+		"web_enabled":    chatManage.WebSearchEnabled,
 	})
 
 	// Run KB search and web search concurrently
@@ -122,15 +122,13 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	wg.Wait()
 	if kbSearchErr != nil && len(allResults) == 0 {
 		pipelineError(ctx, "Search", "kb_search_failed", map[string]interface{}{
-			"error_len":  len(kbSearchErr.Error()),
-			"error_type": fmt.Sprintf("%T", kbSearchErr),
+			"error": kbSearchErr.Error(),
 		})
 		return ErrSearch.WithError(kbSearchErr)
 	}
 	if kbSearchErr != nil {
 		pipelineWarn(ctx, "Search", "kb_search_partial_failure", map[string]interface{}{
-			"error_len":    len(kbSearchErr.Error()),
-			"error_type":   fmt.Sprintf("%T", kbSearchErr),
+			"error":        kbSearchErr.Error(),
 			"result_count": len(allResults),
 		})
 	}
@@ -198,8 +196,8 @@ func removeDuplicateResults(results []*types.SearchResult) []*types.SearchResult
 		if sig != "" {
 			if firstChunk, exists := contentSig[sig]; exists {
 				logger.Debugf(context.Background(),
-					"Dedup: chunk %s removed due to content signature (dup of %s)",
-					r.ID, firstChunk.ID)
+					"Dedup: chunk %s removed due to content signature (dup of %s, sig prefix: %.50s...)",
+					r.ID, firstChunk.ID, sig)
 				searchutil.InheritImageEvidence(firstChunk, r)
 				continue
 			}
@@ -395,8 +393,7 @@ func (p *PluginSearch) searchByTargets(
 		}
 	} else {
 		pipelineWarn(ctx, "Search", "batch_kb_fetch_error", map[string]interface{}{
-			"error_len":  len(err.Error()),
-			"error_type": fmt.Sprintf("%T", err),
+			"error": err.Error(),
 		})
 	}
 
@@ -452,8 +449,7 @@ func (p *PluginSearch) searchByTargets(
 					pipelineWarn(ctx, "Search", "group_embed_degrade_keyword", map[string]interface{}{
 						"model_key":        modelKey,
 						"kb_id":            targets[0].KnowledgeBaseID,
-						"error_len":        len(err.Error()),
-						"error_type":       fmt.Sprintf("%T", err),
+						"error":            err.Error(),
 						"fallback_targets": len(searchableTargets),
 						"failed_targets":   len(targets) - len(searchableTargets),
 					})
@@ -504,9 +500,8 @@ func (p *PluginSearch) searchByTargets(
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
 					if err != nil {
 						pipelineWarn(ctx, "Search", "combined_kb_search_error", map[string]interface{}{
-							"kb_ids":     fullKBIDs,
-							"error_len":  len(err.Error()),
-							"error_type": fmt.Sprintf("%T", err),
+							"kb_ids": fullKBIDs,
+							"error":  err.Error(),
 						})
 						recordError(err)
 						return
@@ -590,10 +585,8 @@ func (p *PluginSearch) searchSingleTarget(
 		pipelineWarn(ctx, "Search", "kb_search_error", map[string]interface{}{
 			"kb_id":       t.KnowledgeBaseID,
 			"target_type": t.Type,
-			"query_len":   len(params.QueryText),
-			// Backend errors can echo the query, so only their length and type are logged.
-			"error_len":  len(err.Error()),
-			"error_type": fmt.Sprintf("%T", err),
+			"query":       params.QueryText,
+			"error":       err.Error(),
 		})
 		return err
 	}
@@ -651,9 +644,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	}, nil, err)
 	if err != nil {
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
-			"tenant_id":  chatManage.TenantID,
-			"error_len":  len(err.Error()),
-			"error_type": fmt.Sprintf("%T", err),
+			"tenant_id": chatManage.TenantID,
+			"error":     err.Error(),
 		})
 		return nil
 	}

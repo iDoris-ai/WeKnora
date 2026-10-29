@@ -736,8 +736,8 @@ func (c *Connector) sync(
 			// Never infer deletions from an incomplete tree. Other independent
 			// selections may still complete, while this scope keeps its previous
 			// cursor and is retried on the next run.
-			logger.Warnf(ctx, "[DingTalk] scan scope %s failed, will retry next sync: error_len=%d error_type=%T",
-				scopeLabel(scope), len(err.Error()), err)
+			logger.Warnf(ctx, "[DingTalk] scan scope %s failed, will retry next sync: %v",
+				scopeLabel(scope), err)
 			complete = false
 			next.Resources[scope.ResourceID] = cloneRevisions(oldRevisions)
 			items = append(items, failedResource(scope.ResourceID, err))
@@ -748,8 +748,8 @@ func (c *Connector) sync(
 		// them, so they are reported once and never retried — unlike a failed
 		// read below, which must stay retryable.
 		for _, node := range skipped {
-			logger.Infof(ctx, "[DingTalk] skip node %s (name_len=%d type=%s category=%s extension_len=%d): %s",
-				node.ID, len(node.title()), node.Type, node.Category, len(node.Extension), skipReason(node, settings))
+			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
+				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node, settings))
 		}
 
 		newRevisions := make(map[string]string, len(documents))
@@ -776,9 +776,8 @@ func (c *Connector) sync(
 					return nil, nil, err
 				}
 				logger.Warnf(ctx,
-					"[DingTalk] read document %s (name_len=%d extension_len=%d) failed, will retry next sync: "+
-						"error_len=%d error_type=%T",
-					document.ID, len(document.title()), len(document.Extension), len(err.Error()), err)
+					"[DingTalk] read document %s (name=%q extension=%s) failed, will retry next sync: %v",
+					document.ID, document.title(), document.Extension, err)
 				items = append(items, failedDocument(
 					scope.ResourceID, scope.Reference.WorkspaceID, document, err,
 				))
@@ -1117,8 +1116,8 @@ func collectUnknownBlockTypes(document node, rendered renderResult) (unknownBloc
 func (u unknownBlockTypes) fields() map[string]interface{} {
 	return map[string]interface{}{
 		"node_id":     u.NodeID,
-		"title":       u.Title, // PipelineLog logs only the length of this key
-		"url_len":     len(u.URL),
+		"title":       u.Title,
+		"url":         u.URL,
 		"block_types": strings.Join(u.BlockTypes, ","),
 		"count":       len(u.BlockTypes),
 	}
@@ -1135,8 +1134,8 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 		return
 	}
 	logger.Warnf(ctx,
-		"[DingTalk] document %s (title_len=%d) contains unmodelled block types %s; their text is not rendered",
-		unknown.NodeID, len(unknown.Title), strings.Join(unknown.BlockTypes, ", "))
+		"[DingTalk] document %s (%s) contains unmodelled block types %s; their text is not rendered",
+		unknown.NodeID, unknown.Title, strings.Join(unknown.BlockTypes, ", "))
 	common.PipelineWarn(ctx, "DingTalkConnector", "unknown_block_types", unknown.fields())
 }
 

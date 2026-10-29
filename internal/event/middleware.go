@@ -58,7 +58,7 @@ func WithRecovery() Middleware {
 		return func(ctx context.Context, event Event) (err error) {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf(ctx, "Event handler panic: type=%s, panic=%s", event.Type, logger.PanicValue(r))
+					logger.Errorf(ctx, "Event handler panic: type=%s, panic=%v", event.Type, r)
 					err = &PanicError{Panic: r}
 				}
 			}()

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,48 +101,4 @@ func TestLegacyHistoryDoesNotGuessExpandedImageIdentity(t *testing.T) {
 		}, 1)
 	require.Len(t, images, 1)
 	assert.Equal(t, []int{0}, positions)
-}
-
-// The image reader's error quotes the image URL; the log keeps its length and type.
-func TestContextImagesUnreadableImageLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	results := []*types.SearchResult{evidenceResult("broken", string(types.ChunkTypeImageVector), "u1")}
-	read := func(context.Context, *types.SearchResult) ([]byte, error) {
-		return nil, errors.New("download https://files.example/" + sentinel + ".png: gone")
-	}
-	images, _ := ContextImages(context.Background(), results, read, 2)
-	assert.Empty(t, images)
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.Contains(t, logs, "Image of broken unreadable: error_len=")
-}
-
-// Prepare rejects bytes that are not an image. The sentinel is those bytes;
-// the error names only the detected type.
-func TestContextImagesUnpreparedImageLogOmitsErrorText(t *testing.T) {
-	const sentinel = "S3NT1NEL"
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	_, prepErr := imageprep.Prepare([]byte(sentinel), VisionImageLimits)
-	require.Error(t, prepErr)
-	require.NotEmpty(t, prepErr.Error())
-
-	results := []*types.SearchResult{evidenceResult("broken", string(types.ChunkTypeImageVector), "u1")}
-	read := func(context.Context, *types.SearchResult) ([]byte, error) {
-		return []byte(sentinel), nil
-	}
-	images, _ := ContextImages(context.Background(), results, read, 2)
-	assert.Empty(t, images)
-	logs := buf.String()
-	assert.NotContains(t, logs, sentinel)
-	assert.NotContains(t, logs, prepErr.Error())
-	assert.Contains(t, logs, "Image of broken does not fit a vision model: error_len=")
 }

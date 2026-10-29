@@ -1,16 +1,12 @@
 package adapter
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/localsandbox"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/require"
 )
@@ -97,35 +93,4 @@ func TestInstallManagerIsNotAChatBackend(t *testing.T) {
 	_, isDestroyer := m.(sandbox.SessionDestroyer)
 	require.False(t, isDestroyer)
 	require.Equal(t, sandbox.SandboxTypeHost, m.(sandbox.Manager).GetType())
-}
-
-type failingInstallRunner struct{ err error }
-
-func (r failingInstallRunner) RunWithPolicy(
-	context.Context, localsandbox.Policy, localsandbox.RunRequest,
-) (*localsandbox.RunResult, error) {
-	return nil, r.err
-}
-
-func TestInstallExecLogsOmitDir(t *testing.T) {
-	logger.SetLogLevel(logger.LevelDebug)
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	dir := filepath.Clean(filepath.Join(t.TempDir(), sentinel, "sub"))
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	m := NewInstallManager(failingInstallRunner{err: fmt.Errorf("exec %s failed", dir)}, dirInstallPolicies{})
-	m.Bind("s1", dir)
-	_, err := m.ExecShellCommandWithOptions(context.Background(), "s1", "uv venv", sandbox.ShellExecOptions{})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), sentinel)
-
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "[LocalSandbox] install exec session=")
-	require.Equal(t, 1, strings.Count(logs, fmt.Sprintf("dir_len=%d ", len(dir))))
-	require.Contains(t, logs, "error_len=")
-	require.Contains(t, logs, "error_type=")
 }

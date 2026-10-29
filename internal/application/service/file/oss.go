@@ -291,7 +291,7 @@ func (s *ossFileService) CopyFile(ctx context.Context,
 	}
 
 	newPath := fmt.Sprintf("oss://%s/%s", s.bucketName, destKey)
-	logger.Infof(ctx, "Copied OSS object src_len=%d dst_len=%d", len(srcPath), len(newPath))
+	logger.Infof(ctx, "Copied OSS object %s to %s", srcPath, newPath)
 	return newPath, nil
 }
 

@@ -102,15 +102,14 @@ func (c *Connector) ListResources(
 			// Yuque returns 404 when the user has not joined any groups (teams),
 			// instead of an empty list. Treat this as "no groups" and continue
 			// — personal repos were already fetched above.
-			logger.Warnf(ctx, "[Yuque] list user groups failed (treating as empty): error_len=%d error_type=%T",
-				len(err.Error()), err)
+			logger.Warnf(ctx, "[Yuque] list user groups failed (treating as empty): %v", err)
 			groups = nil
 		}
 		for _, g := range groups {
 			teamRepos, err := cli.ListGroupRepos(ctx, g.Login)
 			if err != nil {
 				// Skip this group but continue others (e.g., 403 on a restricted group).
-				logger.Warnf(ctx, "[Yuque] skip group %s: error_len=%d error_type=%T", g.Login, len(err.Error()), err)
+				logger.Warnf(ctx, "[Yuque] skip group %s: %v", g.Login, err)
 				continue
 			}
 			for _, r := range teamRepos {
@@ -195,9 +194,8 @@ func (c *Connector) walk(
 		if settings.FolderMode == folderModeTOC {
 			toc, tocErr := cli.ListBookTOC(ctx, bookID)
 			if tocErr != nil {
-				logger.Warnf(ctx, "[Yuque] book %d: fetch TOC failed, falling back to flat file names: "+
-					"error_len=%d error_type=%T",
-					bookID, len(tocErr.Error()), tocErr)
+				logger.Warnf(ctx, "[Yuque] book %d: fetch TOC failed, falling back to flat file names: %v",
+					bookID, tocErr)
 			} else {
 				tocSegs, inTOC = buildTOCPaths(toc)
 				tocOK = true
@@ -216,14 +214,14 @@ func (c *Connector) walk(
 			if d.Type != "" && d.Type != "Doc" {
 				skippedType++
 				if sampleSkipType == "" {
-					sampleSkipType = fmt.Sprintf("id=%d type=%q title_len=%d", d.ID, d.Type, len(d.Title))
+					sampleSkipType = fmt.Sprintf("id=%d type=%q title=%q", d.ID, d.Type, d.Title)
 				}
 				continue
 			}
 			if d.Status != "" && d.Status != "1" {
 				skippedDraft++
 				if sampleSkipDraft == "" {
-					sampleSkipDraft = fmt.Sprintf("id=%d status=%q title_len=%d", d.ID, d.Status, len(d.Title))
+					sampleSkipDraft = fmt.Sprintf("id=%d status=%q title=%q", d.ID, d.Status, d.Title)
 				}
 				continue
 			}
@@ -244,7 +242,7 @@ func (c *Connector) walk(
 			if settings.TOCOnly && tocOK && !inTOC[d.ID] {
 				skippedNotInTOC++
 				if sampleSkipNotInTOC == "" {
-					sampleSkipNotInTOC = fmt.Sprintf("id=%d title_len=%d", d.ID, len(d.Title))
+					sampleSkipNotInTOC = fmt.Sprintf("id=%d title=%q", d.ID, d.Title)
 				}
 				continue
 			}
@@ -307,8 +305,8 @@ func (c *Connector) walk(
 			// verified against the v2 API. Any other format (e.g. "html") may
 			// put non-Markdown content in `body`, so skip defensively.
 			if detail.Format != "" && detail.Format != "markdown" && detail.Format != "lake" {
-				logger.Warnf(ctx, "[Yuque] skip doc %d (title_len=%d): unsupported format %q",
-					d.ID, len(d.Title), detail.Format)
+				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): unsupported format %q",
+					d.ID, d.Title, detail.Format)
 				out = append(out, types.FetchedItem{
 					ExternalID:       docIDStr,
 					Title:            d.Title,

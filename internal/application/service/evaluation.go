@@ -315,8 +315,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		if err := e.EvalDataset(newCtx, detail, knowledgeBaseID); err != nil {
 			detail.Task.Status = types.EvaluationStatueFailed
 			detail.Task.ErrMsg = err.Error()
-			logger.Errorf(newCtx, "Evaluation task failed: error_len=%d error_type=%T, task ID: %s",
-				len(err.Error()), err, taskID)
+			logger.Errorf(newCtx, "Evaluation task failed: %v, task ID: %s", err, taskID)
 			return
 		}
 
@@ -396,7 +395,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 		qaPair := qaPair
 		i := i
 		g.Go(func() error {
-			logger.Infof(ctx, "Processing QA pair %d, question_len=%d", i, len(qaPair.Question))
+			logger.Infof(ctx, "Processing QA pair %d, question: %s", i, qaPair.Question)
 
 			// Prepare chat management parameters for this QA pair
 			chatManage := detail.Params.Clone()
@@ -412,12 +411,10 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			}
 
 			// Execute knowledge QA pipeline
-			logger.Infof(ctx, "Running knowledge QA for question_len=%d", len(qaPair.Question))
-			// Local err: workers run in parallel, and a shared err could be nil by the time it is logged.
-			err := e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
+			logger.Infof(ctx, "Running knowledge QA for question: %s", qaPair.Question)
+			err = e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
 			if err != nil {
-				logger.Errorf(ctx, "Failed to process question %d: error_len=%d error_type=%T",
-					i, len(err.Error()), err)
+				logger.Errorf(ctx, "Failed to process question %d: %v", i, err)
 				return err
 			}
 
@@ -447,7 +444,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	// Wait for all parallel evaluations to complete
 	logger.Info(ctx, "Waiting for all evaluation tasks to complete")
 	if err := g.Wait(); err != nil {
-		logger.Errorf(ctx, "Evaluation error: error_len=%d error_type=%T", len(err.Error()), err)
+		logger.Errorf(ctx, "Evaluation error: %v", err)
 		return err
 	}
 

@@ -468,14 +468,16 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 	if reason := checkShellExecBlacklist(command); reason != "" {
-		logger.Warnf(ctx, "[Tool][ShellExec] rejected by blacklist: %s command_len=%d", reason, len(command))
+		logger.Warnf(ctx, "[Tool][ShellExec] rejected by blacklist: %s command=%q",
+			reason, maskCommandAssignments(command))
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("command rejected by shell_exec safety guard: %s", reason),
 		}, nil
 	}
 	if reason := rejectExecutableStdin(command, input.Stdin); reason != "" {
-		logger.Warnf(ctx, "[Tool][ShellExec] rejected executable stdin: %s command_len=%d", reason, len(command))
+		logger.Warnf(ctx, "[Tool][ShellExec] rejected executable stdin: %s command=%q",
+			reason, maskCommandAssignments(command))
 		return &types.ToolResult{Success: false, Error: reason}, nil
 	}
 	sessionID := resolveSessionID(ctx)
@@ -520,9 +522,8 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		timeout = shellExecMaxTimeout
 	}
 
-	// work_dir is a tool argument from the model: logged by length (A24-OBS-12).
-	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir_len=%d timeout=%s command_len=%d",
-		sessionID, len(workDir), timeout, len(command))
+	logger.Infof(ctx, "[Tool][ShellExec] session=%s work_dir=%s timeout=%s command=%q",
+		sessionID, workDir, timeout, maskCommandAssignments(command))
 
 	// The caller's config-wide variables apply to every command; a skill's
 	// declared credentials are added only when the model names the skill.
@@ -613,8 +614,7 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	finishOutput()
 	noteSandboxMutation()
 	if err != nil {
-		logger.Warnf(ctx, "[Tool][ShellExec] execution error: session=%s error_len=%d error_type=%T",
-			sessionID, len(err.Error()), err)
+		logger.Warnf(ctx, "[Tool][ShellExec] execution error: session=%s err=%v", sessionID, err)
 		errorText, _ := truncateShellStream(fmt.Sprintf("shell_exec failed: %v", err), maxShellExecErrorBytes)
 		return &types.ToolResult{
 			Success: false,

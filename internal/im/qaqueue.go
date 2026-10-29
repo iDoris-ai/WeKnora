@@ -327,9 +327,7 @@ func (q *qaQueue) acquireGlobalGate(ctx context.Context) bool {
 		).Int64()
 		if err != nil {
 			// Redis error — skip global check to avoid blocking the worker.
-			logger.Warnf(ctx,
-				"[IM] Global gate Redis error (proceeding without limit): error_len=%d error_type=%T",
-				len(fmt.Sprint(err)), err)
+			logger.Warnf(ctx, "[IM] Global gate Redis error (proceeding without limit): %v", err)
 			return true
 		}
 		if result == 1 {

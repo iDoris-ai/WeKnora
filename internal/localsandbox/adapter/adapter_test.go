@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/localsandbox"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
@@ -237,13 +236,6 @@ func (stubProjects) ProjectDirForSession(context.Context, string) (string, bool,
 	return "", false, nil
 }
 
-// projectDir puts every session in one project directory, the host directory a user picks.
-type projectDir string
-
-func (p projectDir) ProjectDirForSession(context.Context, string) (string, bool, error) {
-	return string(p), true, nil
-}
-
 func testService(t *testing.T, backend localsandbox.Backend) *localsandbox.Service {
 	t.Helper()
 	base := t.TempDir()
@@ -299,79 +291,4 @@ func (p *stubProcess) Kill() error       { return nil }
 func (p *stubProcess) PID() int          { return 1 }
 func (p *stubProcess) Wait(context.Context) (localsandbox.ExitStatus, error) {
 	return p.exit, nil
-}
-
-type logTestProject string
-
-func (p logTestProject) ProjectDirForSession(context.Context, string) (string, bool, error) {
-	return string(p), true, nil
-}
-
-type logTestMode localsandbox.ApprovalMode
-
-func (m logTestMode) ModeForSession(context.Context, string) localsandbox.ApprovalMode {
-	return localsandbox.ApprovalMode(m)
-}
-
-// A refused mkdir logs the model-chosen path by length only (A24-OBS-09). Only the path guard is
-// exercised, so the service needs no backend.
-func TestEnsureSessionDirDeniedLogOmitsPath(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	project, err := filepath.EvalSymlinks(t.TempDir())
-	require.NoError(t, err)
-	home := filepath.Join(t.TempDir(), "home")
-	resolver := localsandbox.NewWorkspaceResolver(localsandbox.DirLayout{
-		SessionRoot: filepath.Join(home, "Documents", "WeKnora"),
-	}, logTestProject(project))
-	svc := localsandbox.NewService(nil, resolver,
-		localsandbox.NewPolicyBuilder(home, filepath.Join(home, "App Support", "WeKnora Lite")),
-		logTestMode(localsandbox.ModeAuto))
-
-	err = New(svc).EnsureSessionDir(context.Background(), "s1", "/"+sentinel+"-outside/x")
-	require.ErrorIs(t, err, localsandbox.ErrPathDenied)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "mkdir denied")
-	require.Contains(t, logs, "path_len=")
-}
-
-func TestAdapterSessionWorkspaceLayoutLogOmitsRoot(t *testing.T) {
-	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	logger.SetLogLevel(logger.LevelDebug)
-	t.Cleanup(logger.ConfigureFromEnv)
-
-	const sentinel = "S3NT1NEL"
-	home := filepath.Join(t.TempDir(), "home")
-	project := filepath.Join(home, sentinel)
-	require.NoError(t, os.MkdirAll(project, 0o755))
-	resolver := localsandbox.NewWorkspaceResolver(localsandbox.DirLayout{
-		SessionRoot: filepath.Join(home, "Documents", "WeKnora"),
-	}, projectDir(project))
-	svc := localsandbox.NewService(&stubBackend{}, resolver,
-		localsandbox.NewPolicyBuilder(home, filepath.Join(home, "App Support", "WeKnora Lite")), nil)
-
-	layout, err := New(svc).SessionWorkspaceLayout(context.Background(), "s1")
-	require.NoError(t, err)
-	require.Contains(t, layout.Root, sentinel)
-	logs := buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "layout session=s1 root_len=")
-
-	buf.Reset()
-	missing := localsandbox.NewWorkspaceResolver(localsandbox.DirLayout{
-		SessionRoot: filepath.Join(home, "Documents", "WeKnora"),
-	}, projectDir(filepath.Join(home, "gone", sentinel)))
-	svc = localsandbox.NewService(&stubBackend{}, missing,
-		localsandbox.NewPolicyBuilder(home, filepath.Join(home, "App Support", "WeKnora Lite")), nil)
-	_, err = New(svc).SessionWorkspaceLayout(context.Background(), "s1")
-	require.Error(t, err)
-	logs = buf.String()
-	require.NotContains(t, logs, sentinel)
-	require.Contains(t, logs, "layout session=s1: error_len=")
 }

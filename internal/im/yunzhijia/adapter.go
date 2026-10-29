@@ -171,8 +171,7 @@ func toIncomingMessage(ctx context.Context, msg *callbackMessage) *im.IncomingMe
 
 	param, err := parseMessageParam(msg.MsgParam)
 	if err != nil {
-		logger.Warnf(ctx, "[Yunzhijia] Failed to parse msgParam: msgId=%s error_len=%d error_type=%T",
-			msg.MsgID, len(fmt.Sprint(err)), err)
+		logger.Warnf(ctx, "[Yunzhijia] Failed to parse msgParam: msgId=%s err=%v", msg.MsgID, err)
 	}
 	if param != nil {
 		// Keep topic diagnostics to identifiers only: they are sufficient to
@@ -362,14 +361,13 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.sendMsgURL, bytes.NewReader(jsonBody))
 	if err != nil {
-		return fmt.Errorf("create request: %w", im.RedactRequestError(err))
+		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		// Agent24 KB-OBS-01: Do's *url.Error quotes yzjtoken in the query.
-		return fmt.Errorf("send reply: %w", im.RedactRequestError(err))
+		return fmt.Errorf("send reply: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -488,17 +486,16 @@ func (a *Adapter) fetchDownloadOnce(
 ) (*http.Response, error) {
 	currentURL := downloadURL
 	for redirects := 0; ; redirects++ {
-		// Agent24 KB-OBS-01: after a redirect, currentURL is the signed target.
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, currentURL, nil)
 		if err != nil {
-			return nil, fmt.Errorf("create download request: %w", im.RedactRequestError(err))
+			return nil, fmt.Errorf("create download request: %w", err)
 		}
 		if redirects == 0 {
 			req.Header.Set("Authorization", "Bearer "+accessToken)
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("download file: %w", im.RedactRequestError(err))
+			return nil, fmt.Errorf("download file: %w", err)
 		}
 		if resp.StatusCode < http.StatusMultipleChoices || resp.StatusCode >= http.StatusBadRequest {
 			return resp, nil
@@ -515,10 +512,10 @@ func (a *Adapter) fetchDownloadOnce(
 		}
 		resolved, err := resolveRedirectURL(currentURL, location)
 		if err != nil {
-			return nil, fmt.Errorf("download file: invalid redirect location: %w", im.RedactURLErrorInChain(err))
+			return nil, fmt.Errorf("download file: invalid redirect location: %w", err)
 		}
 		if err := validateDownloadFileURL(resolved); err != nil {
-			return nil, fmt.Errorf("download redirect rejected: %w", im.RedactURLErrorInChain(err))
+			return nil, fmt.Errorf("download redirect rejected: %w", err)
 		}
 		currentURL = resolved
 	}
