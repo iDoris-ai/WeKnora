@@ -22,8 +22,10 @@ import (
 // policyEmbedder guards one already-resolved destination. chargesCalls is
 // false for remote embedders: every request they send goes through
 // api.withRetry, which charges one call per attempt, so a split batch is
-// counted per request. The Ollama embedder sends one request per call and is
-// charged the call here.
+// counted per request. The Ollama embedder is charged one call here per embed
+// call; the Heartbeat and List probes it sends first carry no user input, go to
+// the same approved host and are not charged (a redirect on them is, in
+// guardedRedirect).
 type policyEmbedder struct {
 	inner        Embedder
 	dest         types.ProcessingDestination
