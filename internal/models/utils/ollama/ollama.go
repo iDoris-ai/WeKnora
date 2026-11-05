@@ -1,3 +1,6 @@
+// Agent24 fork product patch A24-KB-17, A24-KB-28 (CONTRACT-READONLY-v1 r10
+// R3.11, R6.6, §6, WeKnora#42).
+
 package ollama
 
 import (
@@ -158,7 +161,8 @@ func guardedRedirect(req *http.Request, via []*http.Request) error {
 	if errFrom != nil || errTo != nil || from != to {
 		return fmt.Errorf("%w", types.ErrProcessingDenied)
 	}
-	return nil
+	// Agent24 A24-KB-28: a followed redirect is one more HTTP request; it is charged as a call.
+	return types.ChargeProcessingCall(req.Context())
 }
 
 // processingSafeErr (Agent24 A24-KB-17): under a processing guard, net/http errors come back as a *url.Error that
@@ -269,6 +273,10 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 // allowModelDownload asks the context guard before a pull. No guard means
 // standalone mode: the pull proceeds. A destination that cannot be normalized
 // is refused. The list-only path of EnsureModelAvailable does not call this.
+// A budget, when the guard carries one, is charged one call and no bytes.
+// The download does not take an in-flight slot: it is a synchronous step in
+// front of the embedding call, which already holds one, and taking another
+// would deadlock on this same limit.
 func (s *OllamaService) allowModelDownload(ctx context.Context, modelName string) error {
 	guard := types.ProcessingGuardFromContext(ctx)
 	if guard == nil {
@@ -278,9 +286,16 @@ func (s *OllamaService) allowModelDownload(ctx context.Context, modelName string
 	if err != nil {
 		return fmt.Errorf("%w", types.ErrProcessingDenied)
 	}
-	return guard.Allow(ctx, types.ProcessingDestination{
+	if err := guard.Allow(ctx, types.ProcessingDestination{
 		Category: types.ProcessingModelDownload, Endpoint: endpoint, Model: modelName,
-	})
+	}); err != nil {
+		return err
+	}
+	budget, ok := guard.(types.ProcessingBudget)
+	if !ok || budget == nil {
+		return nil
+	}
+	return budget.Charge(ctx, 1, 0)
 }
 
 // EnsureModelAvailable ensures the model is available, pulls it if not available

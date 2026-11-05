@@ -223,12 +223,15 @@ func guardedProcessingClient(c *http.Client) *http.Client {
 				return err
 			}
 			// Agent24 A24-KB-21: next may have rewritten req.URL after the check above.
-			return types.CheckProcessingRequestURL(ctx, req.URL.String())
-		}
-		if len(via) >= 10 {
+			if err := types.CheckProcessingRequestURL(ctx, req.URL.String()); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
-		return nil
+		// Agent24 A24-KB-28: a followed redirect is one more HTTP request (307/308 replay the body), so it is
+		// charged as a call like an attempt in withRetry; an exhausted budget stops the redirect unsent.
+		return types.ChargeProcessingCall(ctx)
 	}
 	return &guarded
 }

@@ -1,5 +1,5 @@
-// Agent24 fork product patch A24-KB-17 (CONTRACT-READONLY-v1 r10 R3.11,
-// §6 policy_denied, WeKnora#42).
+// Agent24 fork product patch A24-KB-17, A24-KB-28 (CONTRACT-READONLY-v1 r10
+// R3.11, R6.6, §6 policy_denied, WeKnora#42).
 //
 // Processing destinations and the context guard shared by the embedding
 // decorators and the Ollama client. Both packages can import types; neither
@@ -33,9 +33,14 @@ type ProcessingDestination struct {
 }
 
 // ErrProcessingDenied is the sentinel a guard returns when a destination is
-// not allowed. Denial errors wrap it and carry neither the endpoint nor the
-// model name.
+// not allowed, or a per-request budget is exhausted. Denial errors wrap it
+// and carry neither the endpoint nor the model name.
 var ErrProcessingDenied = errors.New("processing destination not allowed by policy")
+
+// ErrProcessingOverloaded is the sentinel a guard returns when the process-wide
+// in-flight limit is full. Overload errors wrap it and carry neither the
+// endpoint nor the model name.
+var ErrProcessingOverloaded = errors.New("processing concurrency limit reached")
 
 // NormalizeProcessingEndpoint returns scheme://host:port. The scheme and host
 // are lowercased, the default port is filled in (http 80, https 443), and the
@@ -82,6 +87,17 @@ func NormalizeProcessingEndpoint(raw string) (string, error) {
 // ProcessingGuard allows or refuses one actual processing destination.
 type ProcessingGuard interface {
 	Allow(ctx context.Context, d ProcessingDestination) error
+}
+
+// ProcessingBudget is the per-request budget a guard may carry.
+type ProcessingBudget interface {
+	// Charge counts calls external requests and inputBytes of input. A
+	// refused charge spends nothing. An exhausted budget returns an error
+	// wrapping ErrProcessingDenied.
+	Charge(ctx context.Context, calls, inputBytes int) error
+	// Acquire takes one process-wide in-flight slot without waiting.
+	// A full limit returns an error wrapping ErrProcessingOverloaded.
+	Acquire(ctx context.Context) (release func(), err error)
 }
 
 type processingGuardKey struct{}
@@ -145,4 +161,16 @@ func ProcessingGuardFromContext(ctx context.Context) ProcessingGuard {
 	}
 	g, _ := ctx.Value(processingGuardKey{}).(ProcessingGuard)
 	return g
+}
+
+// ChargeProcessingCall charges one HTTP attempt: one call and no bytes (the
+// caller charged the input once; a retry resends it). A context with no
+// guard, or a guard that does not carry a budget, costs nothing: standalone
+// mode, and a test guard that only answers Allow.
+func ChargeProcessingCall(ctx context.Context) error {
+	budget, ok := ProcessingGuardFromContext(ctx).(ProcessingBudget)
+	if !ok || budget == nil {
+		return nil
+	}
+	return budget.Charge(ctx, 1, 0)
 }

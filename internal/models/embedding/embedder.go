@@ -156,7 +156,8 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	// the address the client dials, including a vendor default substituted for
 	// an empty BaseURL.
 	dest, destErr := ProcessingDestinationForConfig(config, ollamaService)
-	e = &policyEmbedder{inner: e, dest: dest, destErr: destErr}
+	remote := strings.EqualFold(string(config.Source), string(types.ModelSourceRemote))
+	e = &policyEmbedder{inner: e, dest: dest, destErr: destErr, chargesCalls: !remote}
 	// Gate the real provider round-trips (including the per-sub-batch pool
 	// callbacks) before debug/langfuse wrap for logging/tracing. See
 	// concurrencyEmbedder for why this sits below the observability decorators.

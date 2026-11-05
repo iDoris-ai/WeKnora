@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -75,5 +76,50 @@ func TestCheckProcessingRequestURL(t *testing.T) {
 		if strings.Contains(err.Error(), "S3NT1NEL") || strings.Contains(err.Error(), "example") {
 			t.Fatalf("error quotes the URL: %s", err.Error())
 		}
+	}
+}
+
+type retryAllowGuard struct{}
+
+func (retryAllowGuard) Allow(context.Context, ProcessingDestination) error { return nil }
+
+type retryBudgetGuard struct {
+	calls int
+	bytes int
+	err   error
+}
+
+func (retryBudgetGuard) Allow(context.Context, ProcessingDestination) error { return nil }
+
+func (g *retryBudgetGuard) Charge(_ context.Context, calls, n int) error {
+	g.calls, g.bytes = calls, n
+	return g.err
+}
+
+func (g *retryBudgetGuard) Acquire(context.Context) (func(), error) {
+	return func() {}, nil
+}
+
+func TestChargeProcessingCall(t *testing.T) {
+	if err := ChargeProcessingCall(context.Background()); err != nil {
+		t.Fatalf("no guard: %v", err)
+	}
+	var nilCtx context.Context // a nil context is tolerated, like ProcessingGuardFromContext
+	if err := ChargeProcessingCall(nilCtx); err != nil {
+		t.Fatalf("nil context: %v", err)
+	}
+	ctx := WithProcessingGuard(context.Background(), retryAllowGuard{})
+	if err := ChargeProcessingCall(ctx); err != nil {
+		t.Fatalf("guard without a budget: %v", err)
+	}
+	denied := fmt.Errorf("budget: %w", ErrProcessingDenied)
+	budget := &retryBudgetGuard{err: denied}
+	ctx = WithProcessingGuard(context.Background(), budget)
+	err := ChargeProcessingCall(ctx)
+	if !errors.Is(err, ErrProcessingDenied) {
+		t.Fatalf("budget: %v", err)
+	}
+	if budget.calls != 1 || budget.bytes != 0 {
+		t.Fatalf("charged %d calls and %d bytes, want 1 and 0", budget.calls, budget.bytes)
 	}
 }

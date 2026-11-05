@@ -32,11 +32,12 @@ type agent24SearchCall struct {
 }
 
 type fakeAgent24Searcher struct {
-	results []*types.SearchResult
-	err     error
-	degrade bool // mark the retrieval degraded, as upstream retainPartialResults does
-	calls   []agent24SearchCall
-	guards  []bool // whether each HybridSearch ctx carried a processing guard
+	results  []*types.SearchResult
+	err      error
+	degrade  bool // mark the retrieval degraded, as upstream retainPartialResults does
+	calls    []agent24SearchCall
+	guards   []bool // whether each HybridSearch ctx carried a processing guard
+	attached []types.ProcessingGuard
 }
 
 func (f *fakeAgent24Searcher) HybridSearch(ctx context.Context, id string, p types.SearchParams) (
@@ -45,6 +46,7 @@ func (f *fakeAgent24Searcher) HybridSearch(ctx context.Context, id string, p typ
 	d, _ := ctx.Deadline()
 	f.calls = append(f.calls, agent24SearchCall{id, p, time.Until(d), types.CallerFromContext(ctx).TenantID})
 	f.guards = append(f.guards, types.ProcessingGuardFromContext(ctx) != nil)
+	f.attached = append(f.attached, types.ProcessingGuardFromContext(ctx))
 	if f.degrade {
 		types.MarkRetrievalDegraded(ctx)
 	}
@@ -845,6 +847,48 @@ func TestAgent24KnowledgeSearchPolicy(t *testing.T) {
 		require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()))
 		assert.Contains(t, w.Body.String(), `"reason":"policy_denied"`)
 		require.Len(t, e.searcher.calls, 1)
+	})
+
+	t.Run("overloaded", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.policy = agent24FixedGuard{allow: true}
+		e.h.destinations = agent24FixedDest{dest: dest, ok: true}
+		e.searcher.err = fmt.Errorf("embed: %w", types.ErrProcessingOverloaded)
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+		require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()))
+		var got struct {
+			Error struct {
+				Code    string         `json:"code"`
+				Details map[string]any `json:"details"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		assert.Equal(t, "unavailable", got.Error.Code)
+		assert.Equal(t, "overloaded", got.Error.Details["reason"])
+		assert.Equal(t, true, got.Error.Details["retryable"])
+		assert.EqualValues(t, agent24PolicyRetryAfterMS, got.Error.Details["retry_after_ms"])
+	})
+
+	t.Run("per-request budget", func(t *testing.T) {
+		p, err := agent24ParseProcessingPolicy([]byte(`{"version":"v1","destinations":[` +
+			`{"category":"embedding","endpoint":"https://api.example.com","model":"m"}],` +
+			`"budget":{"max_external_calls":1,"max_input_bytes":64,"max_inflight_external":1}}`))
+		require.NoError(t, err)
+		e := newAgent24SearchEnv()
+		e.h.policy = p
+		e.h.destinations = agent24FixedDest{dest: dest, ok: true}
+		for range 2 {
+			w := e.run(agent24TenantCtx(), t, body)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		}
+		require.Len(t, e.searcher.attached, 2)
+		first, ok := e.searcher.attached[0].(*agent24RequestGuard)
+		require.True(t, ok, "a parsed policy attaches a per-request guard, got %T", e.searcher.attached[0])
+		second, ok := e.searcher.attached[1].(*agent24RequestGuard)
+		require.True(t, ok)
+		assert.NotSame(t, first, second, "each request gets its own budget")
+		assert.Same(t, p, first.policy)
 	})
 
 	t.Run("standalone", func(t *testing.T) {

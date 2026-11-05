@@ -2,13 +2,18 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func fastPolicy() RetryPolicy { return RetryPolicy{MaxRetries: 3} }
@@ -170,4 +175,51 @@ func TestReadFailureIsReportedAsSuch(t *testing.T) {
 	var transportErr *TransportError
 	require.ErrorAs(t, err, &transportErr)
 	assert.Equal(t, "read response", transportErr.Op)
+}
+
+// retryChargeGuard counts calls; withRetry charges every attempt, the first
+// included.
+type retryChargeGuard struct {
+	calls atomic.Int64
+	max   int64
+}
+
+func (*retryChargeGuard) Allow(context.Context, types.ProcessingDestination) error { return nil }
+
+func (g *retryChargeGuard) Charge(_ context.Context, calls, n int) error {
+	if calls != 1 || n != 0 {
+		return errors.New("an attempt must charge one call and no bytes")
+	}
+	if g.calls.Add(1) > g.max {
+		return fmt.Errorf("%w", types.ErrProcessingDenied)
+	}
+	return nil
+}
+
+func (g *retryChargeGuard) Acquire(context.Context) (func(), error) {
+	return func() {}, nil
+}
+
+func TestWithRetryChargesProcessingBudget(t *testing.T) {
+	guard := &retryChargeGuard{max: 2}
+	ctx := types.WithProcessingGuard(context.Background(), guard)
+	sends := 0
+	err := withRetry(ctx, RetryPolicy{MaxRetries: 3}, "test", func() error {
+		sends++
+		return &TransportError{Op: "send request", Err: errors.New("down")}
+	})
+	require.ErrorIs(t, err, types.ErrProcessingDenied)
+	assert.Equal(t, 2, sends)
+	assert.NotContains(t, err.Error(), "S3NT1NEL")
+}
+
+func TestWithRetryWithoutGuardUsesMaxRetries(t *testing.T) {
+	sends := 0
+	err := withRetry(context.Background(), RetryPolicy{MaxRetries: 3}, "test", func() error {
+		sends++
+		return &TransportError{Op: "send request", Err: errors.New("down")}
+	})
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, types.ErrProcessingDenied)
+	assert.Equal(t, 4, sends)
 }

@@ -1,4 +1,5 @@
-// Agent24 fork product patch A24-KB-10 (CONTRACT-READONLY-v1 r10 §3, R6.4, R9.3).
+// Agent24 fork product patch A24-KB-10, A24-KB-28 (CONTRACT-READONLY-v1 r10 §3,
+// R6.4, R9.3, R3.11, R6.6, §6, WeKnora#42).
 //
 // POST /agent24/knowledge/search: the request (agent24_knowledge_search_plan.go), E, the branch plan,
 // one upstream retrieval over the searchable KBs, then the hits read in one database snapshot
@@ -333,8 +334,10 @@ func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) 
 
 // applyProcessingPolicy runs the pre-check after E and before retrieval. A nil policy (standalone) does
 // nothing. No searchable KB does nothing. A destination error is a storage failure. A refusal is
-// policy_denied and does not call HybridSearch. A pass, including a scope with nothing to embed, puts the
-// guard on ctx so a fallback inside HybridSearch is refused at the call site.
+// policy_denied and does not call HybridSearch. The pre-check does not spend the budget. A pass, including
+// a scope with nothing to embed, puts this request's guard on ctx so a fallback inside HybridSearch is
+// refused at the call site. A parsed policy gets a fresh per-request budget; a guard that has none (a test
+// double that only answers Allow) is attached as it is.
 func (h *Agent24KnowledgeSearchHandler) applyProcessingPolicy(ctx context.Context, plan agent24SearchPlan) (
 	context.Context, *agent24KnowledgeError, bool,
 ) {
@@ -364,7 +367,13 @@ func (h *Agent24KnowledgeSearchHandler) applyProcessingPolicy(ctx context.Contex
 			return ctx, agent24Forbidden("policy_denied"), false
 		}
 	}
-	return types.WithProcessingGuard(ctx, h.policy), nil, false
+	// h.policy is the ProcessingGuard interface: tests install a guard that has
+	// no budget. forRequest exists on the parsed policy only.
+	guard := h.policy
+	if parsed, ok := h.policy.(*agent24ProcessingPolicy); ok {
+		guard = parsed.forRequest()
+	}
+	return types.WithProcessingGuard(ctx, guard), nil, false
 }
 
 // agent24SearchableKBs returns plan.Searchable in that order, from the KBs plan resolved.

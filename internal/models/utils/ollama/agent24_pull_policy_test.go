@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -301,5 +302,73 @@ func TestOllamaGetModelInfoOmitsBodyUnderGuard(t *testing.T) {
 	_, err = svc.GetModelInfo(context.Background(), "m")
 	if err == nil || !strings.Contains(err.Error(), "S3NT1NEL") {
 		t.Fatalf("standalone keeps the error as it was: %v", err)
+	}
+}
+
+// pullBudget allows the destination and then refuses: the budget is already spent.
+type pullBudget struct {
+	acquired int
+}
+
+func (g *pullBudget) Allow(context.Context, types.ProcessingDestination) error { return nil }
+
+func (g *pullBudget) Charge(context.Context, int, int) error {
+	return fmt.Errorf("%w", types.ErrProcessingDenied)
+}
+
+func (g *pullBudget) Acquire(context.Context) (func(), error) {
+	g.acquired++
+	return func() {}, nil
+}
+
+func TestPullModelBudgetExhaustedDoesNotRequest(t *testing.T) {
+	srv, requests := ollamaStub(t)
+	svc, err := GetOllamaService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	*requests = 0
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	logger.SetLogLevel(logger.LevelDebug)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+	guard := &pullBudget{}
+	err = svc.PullModel(types.WithProcessingGuard(context.Background(), guard), "S3NT1NEL")
+	if !errors.Is(err, types.ErrProcessingDenied) {
+		t.Fatalf("PullModel = %v", err)
+	}
+	if *requests != 0 {
+		t.Fatalf("requests = %d, want 0", *requests)
+	}
+	if guard.acquired != 0 {
+		t.Fatalf("acquired = %d, download must not take a slot", guard.acquired)
+	}
+	if strings.Contains(err.Error(), "S3NT1NEL") || strings.Contains(err.Error(), srv.URL) {
+		t.Fatalf("error leaks: %s", err.Error())
+	}
+	if strings.Contains(logs.String(), "S3NT1NEL") || strings.Contains(logs.String(), srv.URL) {
+		t.Fatalf("log leaks: %s", logs.String())
+	}
+}
+
+// A same-origin redirect is one more request: under a budget it is charged as a call, and a spent budget stops
+// it (Agent24 A24-KB-28). A guard without a budget only judges the origin.
+func TestGuardedRedirectChargesTheHop(t *testing.T) {
+	req := func(ctx context.Context, raw string) *http.Request {
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, raw, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	spent := types.WithProcessingGuard(context.Background(), &pullBudget{})
+	if err := guardedRedirect(req(spent, "http://127.0.0.1:11434/api/embed"),
+		[]*http.Request{req(spent, "http://127.0.0.1:11434/api/embed")}); !errors.Is(err, types.ErrProcessingDenied) {
+		t.Fatalf("spent budget: err = %v", err)
+	}
+	free := types.WithProcessingGuard(context.Background(), &pullGuard{allow: true})
+	if err := guardedRedirect(req(free, "http://127.0.0.1:11434/api/embed"),
+		[]*http.Request{req(free, "http://127.0.0.1:11434/api/embed")}); err != nil {
+		t.Fatalf("no budget: err = %v", err)
 	}
 }

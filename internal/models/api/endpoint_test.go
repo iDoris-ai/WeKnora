@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,4 +122,42 @@ func TestGuardedProcessingClientRechecksURLAfterCheckRedirect(t *testing.T) {
 	}
 	require.ErrorIs(t, err, types.ErrProcessingDenied)
 	require.Equal(t, 1, bHits)
+}
+
+// A same-origin 307 replays the POST body to the approved server: the hop is one more HTTP request and is
+// charged as a call (Agent24 A24-KB-28). With no call left the redirect is not followed.
+func TestGuardedProcessingClientChargesEachRedirect(t *testing.T) {
+	nextHits := 0
+	var a *httptest.Server
+	a = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/next" {
+			nextHits++
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, a.URL+"/next", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(a.Close)
+	approved, err := types.NormalizeProcessingEndpoint(a.URL)
+	require.NoError(t, err)
+	post := func(guard *retryChargeGuard) error {
+		ctx := types.WithProcessingApprovedEndpoint(types.WithProcessingGuard(context.Background(), guard), approved)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.URL+"/", strings.NewReader(`{"input":"q"}`))
+		require.NoError(t, err)
+		resp, err := guardedProcessingClient(&http.Client{}).Do(req)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return err
+	}
+
+	spent := &retryChargeGuard{max: 0}
+	require.ErrorIs(t, post(spent), types.ErrProcessingDenied)
+	require.Zero(t, nextHits)
+	require.EqualValues(t, 1, spent.calls.Load())
+
+	left := &retryChargeGuard{max: 1}
+	require.NoError(t, post(left))
+	require.Equal(t, 1, nextHits)
+	require.EqualValues(t, 1, left.calls.Load())
 }
