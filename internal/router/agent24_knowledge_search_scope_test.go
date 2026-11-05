@@ -159,7 +159,7 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 			tenants, keys := agent24RecheckServices(tc.scope)
 			RegisterAgent24KnowledgeRoutes(v1, nil,
 				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs, tenants, keys, nil,
-					nil, nil, nil), nil, g)
+					nil, nil, nil, nil), nil, g)
 
 			body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},` +

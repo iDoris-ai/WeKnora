@@ -19,6 +19,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -55,35 +56,112 @@ type agent24Searcher interface {
 	HybridSearch(ctx context.Context, id string, params types.SearchParams) ([]*types.SearchResult, error)
 }
 
+// agent24EmbeddingDestinations resolves the query-embedding destination HybridSearch would use.
+type agent24EmbeddingDestinations interface {
+	// QueryEmbedding is the destination of the query embedding HybridSearch would compute for these
+	// KBs. ok is false when none of them embeds.
+	QueryEmbedding(ctx context.Context, kbs []*types.KnowledgeBase) (types.ProcessingDestination, bool, error)
+}
+
 // Agent24KnowledgeSearchHandler serves POST /agent24/knowledge/search.
 type Agent24KnowledgeSearchHandler struct {
-	key     []byte // nil: search is disabled
-	probe   Agent24KnowledgeReadyProbe
-	scope   agent24ScopeResolver
-	index   agent24IndexReader
-	search  agent24Searcher
-	hits    agent24HitReader
-	recheck agent24CredentialRechecker
+	key          []byte // nil: search is disabled
+	probe        Agent24KnowledgeReadyProbe
+	scope        agent24ScopeResolver
+	index        agent24IndexReader
+	search       agent24Searcher
+	hits         agent24HitReader
+	recheck      agent24CredentialRechecker
+	policy       types.ProcessingGuard // nil in standalone mode: no pre-check, no guard on the context
+	destinations agent24EmbeddingDestinations
 }
 
 // NewAgent24KnowledgeSearchHandler builds the handler with the default dependencies; the key is taken once,
-// at construction, from agent24SearchTagKey (the process-wide read).
+// at construction, from agent24SearchTagKey (the process-wide read). In integration mode the processing
+// policy is taken from the same once-read; standalone mode leaves it unset and does not read the policy.
 func NewAgent24KnowledgeSearchHandler(
 	db *gorm.DB, registry interfaces.RetrieveEngineRegistry,
 	kbService interfaces.KnowledgeBaseService,
 	tenants interfaces.TenantService, keys interfaces.TenantAPIKeyService,
 	revocations interfaces.Agent24CredentialRevocationStore,
 	users interfaces.UserService, members interfaces.TenantMemberService, cfg *config.Config,
+	modelRepo interfaces.ModelRepository,
 ) *Agent24KnowledgeSearchHandler {
-	return &Agent24KnowledgeSearchHandler{
-		key:     agent24SearchTagKey(),
-		probe:   agent24DefaultReadyProbe{db: db, registry: registry},
-		scope:   agent24DefaultScopeResolver{kbs: kbService},
-		index:   agent24DBIndexReader{db: db},
-		search:  kbService,
-		hits:    agent24DBHitReader{db: db},
-		recheck: newAgent24Rechecker(tenants, keys, revocations, users, members, cfg),
+	h := &Agent24KnowledgeSearchHandler{
+		key:          agent24SearchTagKey(),
+		probe:        agent24DefaultReadyProbe{db: db, registry: registry},
+		scope:        agent24DefaultScopeResolver{kbs: kbService},
+		index:        agent24DBIndexReader{db: db},
+		search:       kbService,
+		hits:         agent24DBHitReader{db: db},
+		recheck:      newAgent24Rechecker(tenants, keys, revocations, users, members, cfg),
+		destinations: agent24ModelEmbeddingDestinations{models: modelRepo},
 	}
+	if mode, err := Agent24KnowledgeModeFromEnv(); err == nil && mode == Agent24KnowledgeModeIntegration {
+		// Startup validation already refused an unreadable policy; should construction still see one, deny
+		// everything rather than run without a policy.
+		p, err := agent24ProcessingPolicyFromEnv()
+		if err != nil || p == nil {
+			p = &agent24ProcessingPolicy{Version: "agent24-invalid-policy"}
+		}
+		h.policy = p
+	}
+	return h
+}
+
+// agent24ModelEmbeddingDestinations computes the query-embedding destination from the model row, without
+// building the embedder: construction runs the SSRF check, which resolves the host, and the pre-check must
+// not reach the network before the policy has allowed the destination. The slice is plan.Searchable, in that
+// order: the primary is kbs[0], and the first KB with an embedding model is used when the primary has none
+// (knowledgebase_search.go). The row is read under the KB's own tenant, as GetQueryEmbedding does for a
+// cross-tenant KB.
+type agent24ModelEmbeddingDestinations struct {
+	models interfaces.ModelRepository
+}
+
+func (d agent24ModelEmbeddingDestinations) QueryEmbedding(
+	ctx context.Context, kbs []*types.KnowledgeBase,
+) (types.ProcessingDestination, bool, error) {
+	kb := agent24QueryEmbeddingKB(kbs)
+	if kb == nil {
+		return types.ProcessingDestination{}, false, nil
+	}
+	if d.models == nil {
+		return types.ProcessingDestination{}, false, errors.New(
+			"agent24 knowledge: embedding model repository is unavailable")
+	}
+	model, err := d.models.GetByID(ctx, kb.TenantID, kb.EmbeddingModelID)
+	if err != nil {
+		return types.ProcessingDestination{}, false, err
+	}
+	if model == nil || model.Status != types.ModelStatusActive {
+		return types.ProcessingDestination{}, false, errors.New("agent24 knowledge: embedding model is not active")
+	}
+	dest, err := embedding.ProcessingDestinationForConfig(embedding.ConfigFromModel(model, "", ""), nil)
+	if err != nil {
+		return types.ProcessingDestination{}, false, err
+	}
+	return dest, true, nil
+}
+
+// agent24QueryEmbeddingKB picks the KB whose embedding model HybridSearch would call.
+func agent24QueryEmbeddingKB(kbs []*types.KnowledgeBase) *types.KnowledgeBase {
+	if len(kbs) == 0 {
+		return nil
+	}
+	if agent24HasEmbeddingModel(kbs[0]) {
+		return kbs[0]
+	}
+	for _, candidate := range kbs {
+		if agent24HasEmbeddingModel(candidate) {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func agent24HasEmbeddingModel(kb *types.KnowledgeBase) bool {
+	return kb != nil && kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
 }
 
 type agent24EffectiveScope struct {
@@ -146,6 +224,16 @@ func (h *Agent24KnowledgeSearchHandler) Search(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(req.Budget.DeadlineMS)*time.Millisecond)
 	defer cancel()
 	plan, kerr, gone := h.plan(ctx, req.KBIDs)
+	if gone {
+		agent24NoteCancelled(c, echo, plan.Scope)
+		return
+	}
+	if kerr != nil {
+		agent24NoteScope(c, plan.Scope)
+		writeAgent24KnowledgeError(c, kerr, echo)
+		return
+	}
+	ctx, kerr, gone = h.applyProcessingPolicy(ctx, plan)
 	if gone {
 		agent24NoteCancelled(c, echo, plan.Scope)
 		return
@@ -239,7 +327,61 @@ func (h *Agent24KnowledgeSearchHandler) plan(ctx context.Context, ids []string) 
 		}
 	}
 	plan, kerr := agent24PlanSearch(agent24State(storageErr == nil && engineErr == nil), kbs, facts)
+	plan.resolved = kbs
 	return plan, kerr, false
+}
+
+// applyProcessingPolicy runs the pre-check after E and before retrieval. A nil policy (standalone) does
+// nothing. No searchable KB does nothing. A destination error is a storage failure. A refusal is
+// policy_denied and does not call HybridSearch. A pass, including a scope with nothing to embed, puts the
+// guard on ctx so a fallback inside HybridSearch is refused at the call site.
+func (h *Agent24KnowledgeSearchHandler) applyProcessingPolicy(ctx context.Context, plan agent24SearchPlan) (
+	context.Context, *agent24KnowledgeError, bool,
+) {
+	if h.policy == nil || len(plan.Searchable) == 0 {
+		return ctx, nil, false
+	}
+	var (
+		dest types.ProcessingDestination
+		ok   bool
+		err  error
+	)
+	if h.destinations == nil {
+		err = errors.New("agent24 knowledge: embedding destinations are not configured")
+	} else {
+		dest, ok, err = h.destinations.QueryEmbedding(ctx, agent24SearchableKBs(plan))
+	}
+	// A caller gone or a deadline passed during the lookup wins over a policy answer, as for a storage error.
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		e, gone := agent24StorageError(ctx, err)
+		return ctx, e, gone
+	}
+	if ok {
+		if err = h.policy.Allow(ctx, dest); err != nil {
+			return ctx, agent24Forbidden("policy_denied"), false
+		}
+	}
+	return types.WithProcessingGuard(ctx, h.policy), nil, false
+}
+
+// agent24SearchableKBs returns plan.Searchable in that order, from the KBs plan resolved.
+func agent24SearchableKBs(plan agent24SearchPlan) []*types.KnowledgeBase {
+	byID := make(map[string]*types.KnowledgeBase, len(plan.resolved))
+	for _, kb := range plan.resolved {
+		if kb != nil {
+			byID[kb.ID] = kb
+		}
+	}
+	out := make([]*types.KnowledgeBase, 0, len(plan.Searchable))
+	for _, id := range plan.Searchable {
+		if kb := byID[id]; kb != nil {
+			out = append(out, kb)
+		}
+	}
+	return out
 }
 
 // retrieve runs the one retrieval over plan.Searchable, without context expansion (R3.8), and reads its hits

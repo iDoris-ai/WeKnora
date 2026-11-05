@@ -36,6 +36,7 @@ type fakeAgent24Searcher struct {
 	err     error
 	degrade bool // mark the retrieval degraded, as upstream retainPartialResults does
 	calls   []agent24SearchCall
+	guards  []bool // whether each HybridSearch ctx carried a processing guard
 }
 
 func (f *fakeAgent24Searcher) HybridSearch(ctx context.Context, id string, p types.SearchParams) (
@@ -43,6 +44,7 @@ func (f *fakeAgent24Searcher) HybridSearch(ctx context.Context, id string, p typ
 ) {
 	d, _ := ctx.Deadline()
 	f.calls = append(f.calls, agent24SearchCall{id, p, time.Until(d), types.CallerFromContext(ctx).TenantID})
+	f.guards = append(f.guards, types.ProcessingGuardFromContext(ctx) != nil)
 	if f.degrade {
 		types.MarkRetrievalDegraded(ctx)
 	}
@@ -615,7 +617,7 @@ func TestAgent24KnowledgeTagKeyReadOnce(t *testing.T) {
 			t.Setenv(Agent24KnowledgeTagKeyEnv, tc.later)
 			ops := BuildAgent24KnowledgeCapability().SupportedOperations
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			assert.Equal(t, []bool{tc.enabled, !tc.enabled, tc.enabled},
 				[]bool{slices.Contains(ops, "search"), ready.keyMissing, search.key != nil})
 		})
@@ -635,7 +637,7 @@ func TestAgent24KnowledgeSearchKeyAgreement(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			agent24SetTagKey(t, tc.env)
 			ready := NewAgent24KnowledgeReadyHandler(nil, nil, nil)
-			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			search := NewAgent24KnowledgeSearchHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			assert.Equal(t, !tc.enabled, ready.keyMissing)
 			if tc.enabled {
 				assert.Equal(t, agent24TestKey, search.key)
@@ -714,5 +716,142 @@ func TestAgent24KnowledgeSearchRecheck(t *testing.T) {
 		w := e.run(agent24TenantCtx(), t, body)
 		require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
 		agent24RequireErrorCode(t, w.Body.Bytes(), "internal", "")
+	})
+}
+
+type agent24FixedGuard struct{ allow bool }
+
+func (g agent24FixedGuard) Allow(context.Context, types.ProcessingDestination) error {
+	if g.allow {
+		return nil
+	}
+	return fmt.Errorf("%w", types.ErrProcessingDenied)
+}
+
+type agent24FixedDest struct {
+	dest types.ProcessingDestination
+	ok   bool
+	err  error
+}
+
+func (d agent24FixedDest) QueryEmbedding(context.Context, []*types.KnowledgeBase) (
+	types.ProcessingDestination, bool, error,
+) {
+	return d.dest, d.ok, d.err
+}
+
+// agent24CancelDest cancels the request while it resolves the destination, and still answers.
+type agent24CancelDest struct {
+	dest   types.ProcessingDestination
+	cancel context.CancelFunc
+}
+
+func (d agent24CancelDest) QueryEmbedding(context.Context, []*types.KnowledgeBase) (
+	types.ProcessingDestination, bool, error,
+) {
+	d.cancel()
+	return d.dest, true, nil
+}
+
+func TestAgent24KnowledgeSearchPolicy(t *testing.T) {
+	_, _, errSchema := agent24SearchSchemas(t)
+	dest := types.ProcessingDestination{
+		Category: types.ProcessingEmbedding, Endpoint: "https://api.example.com:443", Model: "m",
+	}
+	body := agent24SearchBody(`"a"`, agent24Budget)
+
+	t.Run("denied", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.policy = agent24FixedGuard{}
+		e.h.destinations = agent24FixedDest{dest: dest, ok: true}
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()))
+		var got struct {
+			Error struct {
+				Code    string         `json:"code"`
+				Details map[string]any `json:"details"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		assert.Equal(t, "forbidden", got.Error.Code)
+		assert.Equal(t, "policy_denied", got.Error.Details["reason"])
+		assert.NotContains(t, w.Body.String(), "api.example.com")
+		assert.Empty(t, e.searcher.calls)
+	})
+
+	t.Run("allowed", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.policy = agent24FixedGuard{allow: true}
+		e.h.destinations = agent24FixedDest{dest: dest, ok: true}
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Len(t, e.searcher.calls, 1)
+		assert.Equal(t, []bool{true}, e.searcher.guards)
+	})
+
+	t.Run("no embedding", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.policy = agent24FixedGuard{}
+		e.h.destinations = agent24FixedDest{ok: false}
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Len(t, e.searcher.calls, 1)
+	})
+
+	t.Run("denial and cancel are audited with E", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.policy = agent24FixedGuard{}
+		e.h.destinations = agent24FixedDest{dest: dest, ok: true}
+		w, c := agent24RunWithContext(agent24TenantCtx(), body, e.h.Search)
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		require.Equal(t, []string{"a"}, agent24NotedScope(t, c))
+
+		e = newAgent24SearchEnv()
+		e.h.policy = agent24FixedGuard{allow: true}
+		e.h.destinations = agent24FixedDest{err: context.Canceled}
+		ctx, cancel := context.WithCancel(agent24TenantCtx())
+		cancel()
+		w, c = agent24RunWithContext(ctx, body, e.h.Search)
+		v, ok := c.Get(agent24AuditFactsKey)
+		require.True(t, ok, w.Body.String())
+		facts := v.(*agent24AuditFacts)
+		assert.Equal(t, agent24AuditCancelled, facts.Outcome)
+		assert.Equal(t, []string{"a"}, facts.EffectiveScope)
+		assert.Empty(t, e.searcher.calls)
+	})
+
+	t.Run("cancelled during the lookup is not a denial", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		ctx, cancel := context.WithCancel(agent24TenantCtx())
+		defer cancel()
+		e.h.policy = agent24FixedGuard{}
+		e.h.destinations = agent24CancelDest{dest: dest, cancel: cancel}
+		w, c := agent24RunWithContext(ctx, body, e.h.Search)
+		assert.NotContains(t, w.Body.String(), "policy_denied")
+		v, ok := c.Get(agent24AuditFactsKey)
+		require.True(t, ok, w.Body.String())
+		assert.Equal(t, agent24AuditCancelled, v.(*agent24AuditFacts).Outcome)
+		assert.Empty(t, e.searcher.calls)
+	})
+
+	t.Run("call site denial", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		e.h.policy = agent24FixedGuard{allow: true}
+		e.h.destinations = agent24FixedDest{dest: dest, ok: true}
+		e.searcher.err = fmt.Errorf("fallback: %w", types.ErrProcessingDenied)
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()))
+		assert.Contains(t, w.Body.String(), `"reason":"policy_denied"`)
+		require.Len(t, e.searcher.calls, 1)
+	})
+
+	t.Run("standalone", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		w := e.run(agent24TenantCtx(), t, body)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Len(t, e.searcher.calls, 1)
+		assert.Equal(t, []bool{false}, e.searcher.guards)
 	})
 }

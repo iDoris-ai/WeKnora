@@ -82,6 +82,20 @@ func TestInstallAgent24IntegrationModeErrors(t *testing.T) {
 	require.Empty(t, r.Handlers)
 }
 
+func TestInstallAgent24IntegrationModeRejectsInvalidPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+	t.Setenv(handler.Agent24KnowledgePolicyEnv,
+		`{"version":"v","destinations":[{"category":"embedding","endpoint":"S3NT1NEL"}]}`)
+	t.Setenv(handler.Agent24KnowledgePolicyFileEnv, "")
+	handler.ResetAgent24ProcessingPolicyForTest()
+	t.Cleanup(handler.ResetAgent24ProcessingPolicyForTest)
+	err := installAgent24IntegrationMode(gin.New(), &config.Config{Tenant: &config.TenantConfig{}})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "S3NT1NEL")
+}
+
 type agent24FakeKeySvc struct {
 	interfaces.TenantAPIKeyService
 	key *types.TenantAPIKey
@@ -756,7 +770,7 @@ func TestAgent24IntegrationRecheckRevokedInFlight(t *testing.T) {
 	tenants := agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}}
 	audit := &agent24KnowledgeAuditStub{}
 	search := handler.NewAgent24KnowledgeSearchHandler(
-		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, keys, nil, nil, nil, nil,
+		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, keys, nil, nil, nil, nil, nil,
 	)
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
@@ -866,7 +880,7 @@ func agent24RequireBearerInFlight(t *testing.T, revoke bool) {
 	tenants := agent24FakeTenantSvc{tenant: &types.Tenant{ID: 1}}
 	audit := &agent24KnowledgeAuditStub{}
 	search := handler.NewAgent24KnowledgeSearchHandler(
-		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, nil, nil, users, members, cfg,
+		agent24SearchScopeDB(t), nil, &agent24SearchScopeKBs{}, tenants, nil, nil, users, members, cfg, nil,
 	)
 	r := NewRouter(RouterParams{
 		Config: cfg, SystemHandler: &handler.SystemHandler{},

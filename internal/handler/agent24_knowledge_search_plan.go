@@ -50,6 +50,7 @@ type agent24SearchPlan struct {
 	Searchable []string               // has a servable chunk: searched in one retrieval call
 	Empty      []string               // no counted documents: a successful branch with 0 hits (R3.4)
 	Failures   []agent24SearchFailure // no searchable content (R3.5), E order
+	resolved   []*types.KnowledgeBase // E in request order; set by the handler, not by agent24PlanSearch
 }
 
 // parseAgent24SearchRequest validates the body after the common fields (R3.2, R3.3, R2.5).

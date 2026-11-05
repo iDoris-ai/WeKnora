@@ -60,8 +60,10 @@ func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) error {
 		return fmt.Errorf("agent24 integration config: %w", err)
 	}
 	applyAgent24IntegrationGate(r)
-	logger.Infof(context.Background(), "Agent24 knowledge integration mode: only %d allowlisted routes are served",
-		len(agent24IntegrationAllowlist))
+	// The policy version goes to the log only (decided 2026-11-06, D-B): the wire field waits for contract r11.
+	// Validation above refused a version with control characters or over 128 runes.
+	logger.Infof(context.Background(), "Agent24 knowledge integration mode: only %d allowlisted routes are served; "+
+		"processing policy version %q", len(agent24IntegrationAllowlist), handler.Agent24ProcessingPolicyVersion())
 	return nil
 }
 
