@@ -350,3 +350,25 @@ func TestPullModelBudgetExhaustedDoesNotRequest(t *testing.T) {
 		t.Fatalf("log leaks: %s", logs.String())
 	}
 }
+
+// A same-origin redirect is one more request: under a budget it is charged as a call, and a spent budget stops
+// it (Agent24 A24-KB-28). A guard without a budget only judges the origin.
+func TestGuardedRedirectChargesTheHop(t *testing.T) {
+	req := func(ctx context.Context, raw string) *http.Request {
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, raw, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	spent := types.WithProcessingGuard(context.Background(), &pullBudget{})
+	if err := guardedRedirect(req(spent, "http://127.0.0.1:11434/api/embed"),
+		[]*http.Request{req(spent, "http://127.0.0.1:11434/api/embed")}); !errors.Is(err, types.ErrProcessingDenied) {
+		t.Fatalf("spent budget: err = %v", err)
+	}
+	free := types.WithProcessingGuard(context.Background(), &pullGuard{allow: true})
+	if err := guardedRedirect(req(free, "http://127.0.0.1:11434/api/embed"),
+		[]*http.Request{req(free, "http://127.0.0.1:11434/api/embed")}); err != nil {
+		t.Fatalf("no budget: err = %v", err)
+	}
+}

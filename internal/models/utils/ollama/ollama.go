@@ -161,7 +161,8 @@ func guardedRedirect(req *http.Request, via []*http.Request) error {
 	if errFrom != nil || errTo != nil || from != to {
 		return fmt.Errorf("%w", types.ErrProcessingDenied)
 	}
-	return nil
+	// Agent24 A24-KB-28: a followed redirect is one more HTTP request; it is charged as a call.
+	return types.ChargeProcessingCall(req.Context())
 }
 
 // processingSafeErr (Agent24 A24-KB-17): under a processing guard, net/http errors come back as a *url.Error that
