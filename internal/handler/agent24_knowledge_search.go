@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-10, A24-KB-28 (CONTRACT-READONLY-v1 r10 §3,
+// Agent24 fork product patch A24-KB-10, A24-KB-27, A24-KB-28, A24-KB-29 (CONTRACT-READONLY-v1 r10 §3,
 // R6.4, R9.3, R3.11, R6.6, §6, WeKnora#42).
 //
 // POST /agent24/knowledge/search: the request (agent24_knowledge_search_plan.go), E, the branch plan,
@@ -349,6 +349,13 @@ func (h *Agent24KnowledgeSearchHandler) applyProcessingPolicy(ctx context.Contex
 		ok   bool
 		err  error
 	)
+	// A24-KB-29: a KB bound to a vector store the tenant defined (its address is a database row, not the
+	// deployment's own engine config) is a retrieval destination no policy registers: refused, nothing sent.
+	for _, kb := range agent24SearchableKBs(plan) {
+		if kb.HasVectorStore() {
+			return ctx, agent24Forbidden("policy_denied"), false
+		}
+	}
 	if h.destinations == nil {
 		err = errors.New("agent24 knowledge: embedding destinations are not configured")
 	} else {

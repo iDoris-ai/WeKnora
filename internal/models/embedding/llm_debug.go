@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // debugEmbedder wraps an Embedder with LLM debug logging.
@@ -82,15 +83,8 @@ func logEmbeddingDebug(ctx context.Context, model string, inputs []string, outpu
 		Duration: dur,
 	}
 
-	// Input section: show each text with a preview
-	var inputBuf strings.Builder
-	inputBuf.WriteString(fmt.Sprintf("count=%d\n", len(inputs)))
-	for i, t := range inputs {
-		preview := strings.ReplaceAll(t, "\n", "\\n")
-		preview = logger.TruncateRunes(preview, 200)
-		inputBuf.WriteString(fmt.Sprintf("[%d] (len=%d) %s\n", i, len([]rune(t)), preview))
-	}
-	record.Sections = append(record.Sections, logger.RecordSection{Title: "Input", Content: inputBuf.String()})
+	input := embeddingDebugInput(ctx, inputs)
+	record.Sections = append(record.Sections, logger.RecordSection{Title: "Input", Content: input})
 
 	// Output section
 	if outputs != nil {
@@ -118,4 +112,23 @@ func safeIdx(v []float32, i int) float32 {
 		return v[i]
 	}
 	return 0
+}
+
+// embeddingDebugInput is the Input section: each text with a preview. Under a processing guard (Agent24
+// A24-KB-29) only the lengths are kept: the text is a Knowledge query or document content, and the debug file
+// is written whatever the policy allows.
+func embeddingDebugInput(ctx context.Context, inputs []string) string {
+	guarded := types.ProcessingGuardFromContext(ctx) != nil
+	var inputBuf strings.Builder
+	fmt.Fprintf(&inputBuf, "count=%d\n", len(inputs))
+	for i, t := range inputs {
+		if guarded {
+			fmt.Fprintf(&inputBuf, "[%d] (len=%d)\n", i, len([]rune(t)))
+			continue
+		}
+		preview := strings.ReplaceAll(t, "\n", "\\n")
+		preview = logger.TruncateRunes(preview, 200)
+		fmt.Fprintf(&inputBuf, "[%d] (len=%d) %s\n", i, len([]rune(t)), preview)
+	}
+	return inputBuf.String()
 }
