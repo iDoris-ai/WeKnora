@@ -837,6 +837,28 @@ func TestAgent24KnowledgeSearchPolicy(t *testing.T) {
 		assert.Empty(t, e.searcher.calls)
 	})
 
+	t.Run("tenant-defined vector store", func(t *testing.T) {
+		vs := "vs-1"
+		for _, policy := range []types.ProcessingGuard{agent24FixedGuard{allow: true}, nil} {
+			e := newAgent24SearchEnv()
+			e.scope.kbs["a"].VectorStoreID = &vs
+			e.h.policy = policy
+			e.h.destinations = agent24FixedDest{dest: dest, ok: true}
+			w := e.run(agent24TenantCtx(), t, body)
+			if policy == nil {
+				// Standalone: no policy, the bound store is searched as upstream does.
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				require.Len(t, e.searcher.calls, 1)
+				continue
+			}
+			require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+			require.NoError(t, agent24Validate(errSchema, w.Body.Bytes()))
+			assert.Contains(t, w.Body.String(), `"reason":"policy_denied"`)
+			assert.NotContains(t, w.Body.String(), vs)
+			assert.Empty(t, e.searcher.calls)
+		}
+	})
+
 	t.Run("call site denial", func(t *testing.T) {
 		e := newAgent24SearchEnv()
 		e.h.policy = agent24FixedGuard{allow: true}
