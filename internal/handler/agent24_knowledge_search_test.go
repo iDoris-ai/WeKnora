@@ -740,6 +740,19 @@ func (d agent24FixedDest) QueryEmbedding(context.Context, []*types.KnowledgeBase
 	return d.dest, d.ok, d.err
 }
 
+// agent24CancelDest cancels the request while it resolves the destination, and still answers.
+type agent24CancelDest struct {
+	dest   types.ProcessingDestination
+	cancel context.CancelFunc
+}
+
+func (d agent24CancelDest) QueryEmbedding(context.Context, []*types.KnowledgeBase) (
+	types.ProcessingDestination, bool, error,
+) {
+	d.cancel()
+	return d.dest, true, nil
+}
+
 func TestAgent24KnowledgeSearchPolicy(t *testing.T) {
 	_, _, errSchema := agent24SearchSchemas(t)
 	dest := types.ProcessingDestination{
@@ -805,6 +818,20 @@ func TestAgent24KnowledgeSearchPolicy(t *testing.T) {
 		facts := v.(*agent24AuditFacts)
 		assert.Equal(t, agent24AuditCancelled, facts.Outcome)
 		assert.Equal(t, []string{"a"}, facts.EffectiveScope)
+		assert.Empty(t, e.searcher.calls)
+	})
+
+	t.Run("cancelled during the lookup is not a denial", func(t *testing.T) {
+		e := newAgent24SearchEnv()
+		ctx, cancel := context.WithCancel(agent24TenantCtx())
+		defer cancel()
+		e.h.policy = agent24FixedGuard{}
+		e.h.destinations = agent24CancelDest{dest: dest, cancel: cancel}
+		w, c := agent24RunWithContext(ctx, body, e.h.Search)
+		assert.NotContains(t, w.Body.String(), "policy_denied")
+		v, ok := c.Get(agent24AuditFactsKey)
+		require.True(t, ok, w.Body.String())
+		assert.Equal(t, agent24AuditCancelled, v.(*agent24AuditFacts).Outcome)
 		assert.Empty(t, e.searcher.calls)
 	})
 

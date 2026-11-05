@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-17 (CONTRACT-READONLY-v1 r10 R3.11,
+// Agent24 fork product patch A24-KB-17, A24-KB-27 (CONTRACT-READONLY-v1 r10 R3.11,
 // §6 policy_denied, WeKnora#42).
 //
 // The integration-mode processing policy. It is read once per process.

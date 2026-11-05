@@ -351,6 +351,10 @@ func (h *Agent24KnowledgeSearchHandler) applyProcessingPolicy(ctx context.Contex
 	} else {
 		dest, ok, err = h.destinations.QueryEmbedding(ctx, agent24SearchableKBs(plan))
 	}
+	// A caller gone or a deadline passed during the lookup wins over a policy answer, as for a storage error.
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	if err != nil {
 		e, gone := agent24StorageError(ctx, err)
 		return ctx, e, gone
