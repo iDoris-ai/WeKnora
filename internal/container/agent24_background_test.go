@@ -66,15 +66,18 @@ var agent24ForegroundInvokes = map[string]bool{
 	"registerLiteModelConcurrencyLimiter": true,
 	"ensureAgent24CredentialRevocations":  true,
 	"registerChatLocalImageResolver":      true,
-	// The BrowserSkill cleanup Promote closure; any other closure is unreviewed.
-	"func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager)": true,
+	// The BrowserSkill cleanup Promote closure, keyed by its whole text; any
+	// other closure, or a change to its body, is unreviewed.
+	"func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) " +
+		`{ cleaner.Promote("BrowserSkill") }`: true,
 }
 
-// invokeArgName names an Invoke argument: a function name, or the signature of
-// a function literal.
+// invokeArgName names an Invoke argument: a function name, or the whole text
+// of a function literal with whitespace collapsed.
 func invokeArgName(src []byte, fset *token.FileSet, e ast.Expr) string {
 	if lit, ok := e.(*ast.FuncLit); ok {
-		return string(src[fset.Position(lit.Type.Pos()).Offset:fset.Position(lit.Type.End()).Offset])
+		text := src[fset.Position(lit.Pos()).Offset:fset.Position(lit.End()).Offset]
+		return strings.Join(strings.Fields(string(text)), " ")
 	}
 	return stepName(e)
 }
