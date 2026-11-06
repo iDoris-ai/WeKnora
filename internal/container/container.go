@@ -473,7 +473,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
 	must(container.Provide(service.NewTemporaryDocumentService))
-	must(container.Invoke(startTemporaryDocumentCleanup))
+	invokeBackground(container, "TemporaryDocumentCleanup", startTemporaryDocumentCleanup) // A24-KB-30
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -483,13 +483,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initConnectorRegistry))
 	must(container.Provide(datasource.NewScheduler))
 	must(container.Provide(service.NewDataSourceService))
-	must(container.Invoke(startDataSourceScheduler))
+	invokeBackground(container, "DataSourceScheduler", startDataSourceScheduler) // A24-KB-30
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
-	must(container.Invoke(startAuditLogRetention))
+	invokeBackground(container, "AuditLogRetention", startAuditLogRetention) // A24-KB-30
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
 	must(container.Invoke(ensureAgent24CredentialRevocations)) // A24-KB-22
 	must(container.Provide(service.NewHousekeepingService))
-	must(container.Invoke(startHousekeepingService))
+	invokeBackground(container, "KnowledgeHousekeeping", startHousekeepingService) // A24-KB-30
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
@@ -515,7 +515,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// it), but Invoke constructs the whole chain. SessionService needs
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
-	must(container.Invoke(startTenantSkillReaper))
+	invokeBackground(container, "TenantSkillReaper", startTenantSkillReaper) // A24-KB-30
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 	must(container.Provide(func(
 		sessions interfaces.SessionRepository,
@@ -526,7 +526,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 			sessions, service.NewResolverForkSnapshotDeleter(resolver, mgr),
 		)
 	}))
-	must(container.Invoke(startForkSnapshotReaper))
+	invokeBackground(container, "ForkSnapshotReaper", startForkSnapshotReaper) // A24-KB-30
 	logger.Debugf(ctx, "[Container] Fork snapshot reaper registered")
 
 	// HTTP handlers layer
@@ -595,7 +595,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
-	must(container.Invoke(registerIMService))
+	invokeBackground(container, "IMChannels", registerIMService) // A24-KB-30
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewMCPEndpointHandler))
@@ -611,15 +611,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering router and starting task server...")
 	must(container.Provide(router.NewRouter))
 	if redisAvailable {
-		must(container.Invoke(router.RunAsynqServer))
+		invokeBackground(container, "AsynqServer", router.RunAsynqServer) // A24-KB-30
 	} else {
-		must(container.Invoke(router.RegisterSyncHandlers))
+		invokeBackground(container, "SyncTaskHandlers", router.RegisterSyncHandlers) // A24-KB-30
 	}
 	// Wiki operation rows are durable, while their wake-up triggers may be
 	// lost across a process restart (always in Lite mode, and in Redis mode if
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
-	must(container.Invoke(recoverPendingWikiTasks))
+	invokeBackground(container, "WikiTaskRecovery", recoverPendingWikiTasks) // A24-KB-30
 
 	// BrowserSkill is registered when its manager is constructed, which is
 	// early, so reverse-order cleanup would run it last. Force the manager
@@ -989,8 +989,15 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	// code, which could push values past the DB sequence counter.
 	syncSequences(db)
 
-	// Reset any pending tasks left over from previous aborted runs (Lite App mode)
-	resetPendingTasks(db)
+	// Reset any pending tasks left over from previous aborted runs (Lite App mode).
+	// An integration process shares the database with standalone and must not
+	// touch rows standalone may be processing (A24-KB-30).
+	if agent24BackgroundJobsDisabled() {
+		logger.Infof(context.Background(),
+			"[Container] agent24 integration mode: background job ResetPendingTasks not started")
+	} else {
+		resetPendingTasks(db)
+	}
 }
 
 // migrateLegacyStorageBackends backfills the storage_backends table from each
