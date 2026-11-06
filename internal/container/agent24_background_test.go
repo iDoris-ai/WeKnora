@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -49,6 +51,34 @@ var agent24BackgroundSteps = map[string]bool{
 	"recoverPendingWikiTasks":       true,
 }
 
+// agent24ForegroundInvokes are the steps container.go may pass to
+// container.Invoke directly, each checked to start no background work that an
+// integration process must not run: cleanup registration, provider and limiter
+// registration, chat pipeline plugins, and the A24-KB-22 revocation purge
+// (integration-only, on the fork's own table). A new direct Invoke fails the
+// test until it is reviewed and added here or moved to invokeBackground.
+var agent24ForegroundInvokes = map[string]bool{
+	"registerLangfuseCleanup":             true,
+	"registerPoolCleanup":                 true,
+	"registerMCPCleanup":                  true,
+	"registerWebSearchProviders":          true,
+	"registerModelConcurrencyLimiter":     true,
+	"registerLiteModelConcurrencyLimiter": true,
+	"ensureAgent24CredentialRevocations":  true,
+	"registerChatLocalImageResolver":      true,
+	// The BrowserSkill cleanup Promote closure; any other closure is unreviewed.
+	"func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager)": true,
+}
+
+// invokeArgName names an Invoke argument: a function name, or the signature of
+// a function literal.
+func invokeArgName(src []byte, fset *token.FileSet, e ast.Expr) string {
+	if lit, ok := e.(*ast.FuncLit); ok {
+		return string(src[fset.Position(lit.Type.Pos()).Offset:fset.Position(lit.Type.End()).Offset])
+	}
+	return stepName(e)
+}
+
 func stepName(e ast.Expr) string {
 	switch v := e.(type) {
 	case *ast.Ident:
@@ -59,12 +89,18 @@ func stepName(e ast.Expr) string {
 	return ""
 }
 
-// TestBackgroundStepsGoThroughInvokeBackground reads container.go: no
-// background step is passed to container.Invoke directly, every one is passed
-// to invokeBackground, and resetPendingTasks runs only in the else branch of
+// TestBackgroundStepsGoThroughInvokeBackground reads container.go: every
+// direct container.Invoke is a reviewed foreground step or a chat pipeline
+// plugin, every background step is passed to invokeBackground, and
+// resetPendingTasks runs only in the else branch of
 // agent24BackgroundJobsDisabled.
 func TestBackgroundStepsGoThroughInvokeBackground(t *testing.T) {
-	f, err := parser.ParseFile(token.NewFileSet(), "container.go", nil, 0)
+	src, err := os.ReadFile("container.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "container.go", src, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +120,17 @@ func TestBackgroundStepsGoThroughInvokeBackground(t *testing.T) {
 		switch fn := stepName(call.Fun); fn {
 		case "Invoke":
 			for _, a := range call.Args {
-				if agent24BackgroundSteps[stepName(a)] {
-					t.Errorf("%s is passed to Invoke directly; use invokeBackground", stepName(a))
+				name := invokeArgName(src, fset, a)
+				plugin := false
+				if sel, ok := a.(*ast.SelectorExpr); ok {
+					if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "chatpipeline" &&
+						strings.HasPrefix(sel.Sel.Name, "NewPlugin") {
+						plugin = true
+					}
+				}
+				if !plugin && !agent24ForegroundInvokes[name] {
+					t.Errorf("%s is passed to Invoke directly: review it, then use invokeBackground "+
+						"or add it to agent24ForegroundInvokes", name)
 				}
 			}
 		case "invokeBackground":

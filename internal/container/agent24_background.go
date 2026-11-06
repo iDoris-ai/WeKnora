@@ -7,7 +7,9 @@
 // outside the processing policy, or under it and fail them. Every step that
 // starts a task consumer, a scheduler, a reaper, a recovery or an IM channel
 // goes through invokeBackground and is skipped here; resetPendingTasks, which
-// rewrites rows standalone may be processing, is skipped too.
+// rewrites rows standalone may be processing, is skipped too. The A24-KB-22
+// revocation purge stays: it runs only in integration mode, on the fork's own
+// table.
 
 package container
 
