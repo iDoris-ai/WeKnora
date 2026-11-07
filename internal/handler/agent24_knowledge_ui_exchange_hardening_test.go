@@ -313,6 +313,14 @@ func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
 			require.Equal(t, "credential_invalid", reason)
 			require.NotContains(t, details, "restarted")
 		}
+		// Order (U3.4, #1646): expiry is decided inside Verify, before the view proof and the epoch, so a
+		// JWT that is both expired and from before the start is credential_expired without restarted.
+		expired := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch.Add(-20*time.Minute), time.Minute)
+		w, _, _ = agent24UIProbeCall(t, h, "Bearer "+expired, proof)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		_, reason, details := agent24UIError(t, w)
+		require.Equal(t, "credential_expired", reason)
+		require.NotContains(t, details, "restarted")
 		fresh := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch, 10*time.Minute)
 		w, _, _ = agent24UIProbeCall(t, h, "Bearer "+fresh, proof)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
