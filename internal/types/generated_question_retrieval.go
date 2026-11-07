@@ -52,6 +52,29 @@ func GeneratedQuestionRowPredicate(alias string) string {
 	)
 }
 
+// GeneratedQuestionRowPredicateBM25 is GeneratedQuestionRowPredicate for the
+// PostgreSQL keyword query (Agent24 fork patch A24-PATCH-02, WeKnora#127;
+// upstream Tencent/WeKnora#4899, fix proposed in #4908). ParadeDB's BM25 scan
+// answers "Unsupported query shape" when the filter compares two columns, as
+// source_id <> chunk_id and substr(...) = chunk_id || '-' do, which broke
+// keyword retrieval for every document KB with question generation off.
+// starts_with(source_id, chunk_id || '-') is the same prefix test and already
+// excludes source_id = chunk_id. PostgreSQL only: SQLite has no starts_with.
+func GeneratedQuestionRowPredicateBM25(alias string) string {
+	col := func(name string) string {
+		if alias == "" {
+			return name
+		}
+		return alias + "." + name
+	}
+	return fmt.Sprintf(
+		"%s = %d AND %s <> '' AND starts_with(%s, %s || '-')",
+		col("source_type"), int(ChunkSourceType),
+		col("chunk_id"),
+		col("source_id"), col("chunk_id"),
+	)
+}
+
 // SearchResultKnowledgeBaseIDs returns the distinct knowledge base IDs on results.
 func SearchResultKnowledgeBaseIDs(results []*SearchResult) []string {
 	seen := make(map[string]struct{}, len(results))

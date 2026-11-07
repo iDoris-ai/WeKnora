@@ -788,6 +788,8 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 	return nil
 }
 
+// generatedQuestionExclusionClause filters the keyword (BM25) query. It uses the
+// BM25-safe predicate (A24-PATCH-02); VectorRetrieve keeps the original one.
 func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
 	if len(kbIDs) == 0 {
 		return nil
@@ -802,7 +804,7 @@ func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
 		SQL: fmt.Sprintf(
 			"NOT (knowledge_base_id IN (%s) AND %s)",
 			strings.Join(placeholders, ", "),
-			types.GeneratedQuestionRowPredicate(""),
+			types.GeneratedQuestionRowPredicateBM25(""),
 		),
 		Vars: vars,
 	}
