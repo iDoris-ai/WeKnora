@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	"github.com/Tencent/WeKnora/internal/config"
 )
 
@@ -53,6 +54,10 @@ func ValidateAgent24IntegrationConfig(cfg *config.Config) error {
 		return err
 	}
 	if _, err := agent24ProcessingPolicyFromEnv(); err != nil {
+		return err
+	}
+	// A configured UI session key must be valid. Unset is not an error: the UI routes stay unregistered.
+	if _, _, err := agent24uisession.KeyFromEnv(); err != nil {
 		return err
 	}
 	return nil
