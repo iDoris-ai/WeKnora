@@ -670,7 +670,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		}
 		return sandboxalloc.NewUserMachineGC(svc, cleaner, configs, client)
 	}))
-	must(container.Invoke(startUserMachineGC))
+	invokeBackground(container, "UserMachineGC", startUserMachineGC) // A24-KB-30
 	logger.Debugf(ctx, "[Container] User machine GC registered")
 
 	// HTTP handlers layer
@@ -751,11 +751,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		}
 		mcp.SetRunResumer(sessions)
 		mcp.SetScheduledPromptRouter(automations.HandlesPrompt)
-		collaboration.Runtime.Start(context.Background())
-		automations.Start(context.Background())
 	}))
+	// A24-KB-30: the collaboration runtime and the automation scheduler start in startAgentRuntimes.
+	invokeBackground(container, "AgentRuntimes", startAgentRuntimes) // A24-KB-30
 	// Start only after the delegation close hook is installed.
-	must(container.Invoke(startAgentPromptReaper))
+	invokeBackground(container, "AgentPromptReaper", startAgentPromptReaper) // A24-KB-30
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
 	must(container.Provide(handler.NewModelCredentialsHandler))
@@ -816,7 +816,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) {
 		cleaner.Promote("BrowserSkill")
 	}))
-	must(container.Invoke(startShellJobSweeper))
+	invokeBackground(container, "ShellJobSweeper", startShellJobSweeper) // A24-KB-30
 	// Background shell jobs shut down before the database and streams: their
 	// watchers write terminal state locally and must not race the cleanup that
 	// follows. Cleanup runs in reverse, so promote runs them first. A missing
