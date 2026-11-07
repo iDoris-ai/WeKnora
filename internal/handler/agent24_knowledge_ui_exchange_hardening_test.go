@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -202,4 +204,39 @@ func TestAgent24UIExchangeFlushesSuppressedRow(t *testing.T) {
 	require.Len(t, stub.entries, 1, "the second unknown-ticket row should have been suppressed")
 	require.True(t, first.Flushed)
 	require.True(t, second.Flushed)
+}
+
+// U2.8 end to end: a session taken from a ticket is refused after a replay, even when the family
+// revocation write failed once and the database then recovered, with the ticket never presented again.
+func TestAgent24UILeakRevocationFailureStillRefusesSession(t *testing.T) {
+	proof, vph := agent24UIViewSecret()
+	db, store := agent24UIHandlerDB(t)
+	raw := agent24UIRawTicket(96)
+	agent24UISeedTicket(t, store, raw, vph, nil)
+	h := agent24UIExchangeHandler(store, agent24UILiveKeysAB(), nil, nil, nil)
+	w, _ := agent24UIExchangeCall(h, raw, proof, "203.0.113.96:1")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp struct {
+		SessionToken string `json:"session_token"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	probe := agent24UISessionHandler(store, agent24UILiveKeysAB(), nil, nil)
+	w, _, _ = agent24UIProbeCall(t, probe, "Bearer "+resp.SessionToken, proof)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	const name = "agent24_test_fail_family_update"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "agent24_ui_families" {
+			_ = tx.AddError(errors.New("write down"))
+		}
+	}))
+	w, _ = agent24UIExchangeCall(h, raw, proof, "203.0.113.96:2")
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	require.NoError(t, db.Callback().Update().Remove(name))
+
+	w, _, _ = agent24UIProbeCall(t, probe, "Bearer "+resp.SessionToken, proof)
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	_, reason, _ := agent24UIError(t, w)
+	require.Equal(t, "credential_invalid", reason)
+	require.NotNil(t, agent24UIFamilyRow(t, db, vph).RevokedAt)
 }

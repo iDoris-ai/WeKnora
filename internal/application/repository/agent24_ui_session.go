@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,11 +17,42 @@ import (
 
 type agent24UISessionStore struct {
 	db *gorm.DB
+	// A24-KB-33: family revocations whose write failed, by vph. U2.8 needs the revocation to hold even
+	// when the write fails and later reads succeed: until the row is written, FamilyRevoked answers true
+	// for these and retries the write. The container provides one store, so this covers the process.
+	pendingMu sync.Mutex
+	pending   map[string]agent24UIPendingRevoke
+}
+
+type agent24UIPendingRevoke struct {
+	tenantID  uint64
+	principal string
+	at        time.Time
 }
 
 // NewAgent24UISessionStore stores UI tickets and view families.
 func NewAgent24UISessionStore(db *gorm.DB) interfaces.Agent24UISessionStore {
-	return &agent24UISessionStore{db: db}
+	return &agent24UISessionStore{db: db, pending: map[string]agent24UIPendingRevoke{}}
+}
+
+func (s *agent24UISessionStore) pendingRevoke(vph string) (agent24UIPendingRevoke, bool) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	p, ok := s.pending[vph]
+	return p, ok
+}
+
+func (s *agent24UISessionStore) setPendingRevoke(vph string, p *agent24UIPendingRevoke) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if s.pending == nil {
+		s.pending = map[string]agent24UIPendingRevoke{}
+	}
+	if p == nil {
+		delete(s.pending, vph)
+		return
+	}
+	s.pending[vph] = *p
 }
 
 func agent24UTCPtr(t *time.Time) *time.Time {
@@ -37,6 +69,10 @@ func (s *agent24UISessionStore) CreateTicket(ctx context.Context, t *types.Agent
 	}
 	if _, err := t.ScopeKnowledgeBaseIDs(); err != nil {
 		return err
+	}
+	// A24-KB-33: a family whose revocation is pending is revoked.
+	if _, ok := s.pendingRevoke(t.VPH); ok {
+		return interfaces.ErrAgent24UIFamilyRevoked
 	}
 	row := *t
 	row.ExpiresAt = row.ExpiresAt.UTC()
@@ -137,6 +173,18 @@ func (s *agent24UISessionStore) RevokeTicket(
 func (s *agent24UISessionStore) RevokeFamily(
 	ctx context.Context, tenantID uint64, principal, vph string, now time.Time,
 ) error {
+	if err := s.writeFamilyRevoke(ctx, tenantID, principal, vph, now); err != nil {
+		// A24-KB-33: the family stays revoked in this process until a later write lands.
+		s.setPendingRevoke(vph, &agent24UIPendingRevoke{tenantID: tenantID, principal: principal, at: now})
+		return err
+	}
+	s.setPendingRevoke(vph, nil)
+	return nil
+}
+
+func (s *agent24UISessionStore) writeFamilyRevoke(
+	ctx context.Context, tenantID uint64, principal, vph string, now time.Time,
+) error {
 	res := s.db.WithContext(ctx).Model(&types.Agent24UIFamily{}).
 		Where("vph = ? AND tenant_id = ? AND principal = ? AND revoked_at IS NULL",
 			vph, tenantID, principal).
@@ -172,6 +220,13 @@ func (s *agent24UISessionStore) TicketRevoked(ctx context.Context, ticketID stri
 }
 
 func (s *agent24UISessionStore) FamilyRevoked(ctx context.Context, vph string) (bool, error) {
+	if p, ok := s.pendingRevoke(vph); ok {
+		// A24-KB-33: a revocation whose write failed is in force. Retry the write; it stays pending on failure.
+		if s.writeFamilyRevoke(ctx, p.tenantID, p.principal, vph, p.at) == nil {
+			s.setPendingRevoke(vph, nil)
+		}
+		return true, nil
+	}
 	var row types.Agent24UIFamily
 	err := s.db.WithContext(ctx).Where("vph = ?", vph).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

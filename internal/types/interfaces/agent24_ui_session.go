@@ -41,7 +41,10 @@ type Agent24UISessionStore interface {
 	// revoked_at is still null. No matching row is not an error: U3.7 makes existence indistinguishable.
 	RevokeTicket(ctx context.Context, tenantID uint64, principal, ticketID string, now time.Time) error
 	// RevokeFamily sets revoked_at on the family whose vph, tenant and principal all match and whose
-	// revoked_at is still null. No matching row is not an error (U3.7).
+	// revoked_at is still null. No matching row is not an error (U3.7). A24-KB-33: when the write fails
+	// the error is returned and the family is still treated as revoked in this process (FamilyRevoked,
+	// CreateTicket) while later calls retry the write, so a failed U2.8 revocation does not leave a leaked
+	// session usable once the database recovers. A restart drops the pending set.
 	RevokeFamily(ctx context.Context, tenantID uint64, principal, vph string, now time.Time) error
 	// TicketRevoked reports whether the ticket is revoked. revoked_at set is true. A missing row is true
 	// too: a JWT whose ticket cannot be found is refused (fail closed).

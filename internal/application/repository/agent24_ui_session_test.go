@@ -535,3 +535,43 @@ func TestAgent24UISessionConsumeTicketReadFailureRollsBack(t *testing.T) {
 	require.True(t, first)
 	require.NotNil(t, row)
 }
+
+// A24-KB-33: a family revocation whose write fails is still in force (U2.8): FamilyRevoked is true and
+// CreateTicket refuses the family, and the next FamilyRevoked after the database recovers writes the row.
+const agent24RevokedVPH = "revoked_at IS NOT NULL AND vph = ?"
+
+func TestAgent24UISessionRevokeFamilyWriteFailureStaysRevoked(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-p", "hash-p", "id-p", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+	revoked, err := store.FamilyRevoked(ctx, "vph-p")
+	require.NoError(t, err)
+	require.False(t, revoked)
+
+	const name = "agent24_test_fail_family_update"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "agent24_ui_families" {
+			_ = tx.AddError(fmt.Errorf("write down"))
+		}
+	}))
+	require.Error(t, store.RevokeFamily(ctx, ticket.TenantID, ticket.Principal, "vph-p", now))
+	revoked, err = store.FamilyRevoked(ctx, "vph-p")
+	require.NoError(t, err)
+	require.True(t, revoked, "a failed revocation must still hold")
+	next := newAgent24UITicket(t, "vph-p", "hash-p2", "id-p2", now.Add(time.Minute))
+	require.ErrorIs(t, store.CreateTicket(ctx, next), interfaces.ErrAgent24UIFamilyRevoked)
+	require.Equal(t, int64(0), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-p"))
+
+	require.NoError(t, db.Callback().Update().Remove(name))
+	revoked, err = store.FamilyRevoked(ctx, "vph-p")
+	require.NoError(t, err)
+	require.True(t, revoked)
+	require.Equal(t, int64(1), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-p"))
+	// The row now carries the revocation on its own: a fresh store over the same database sees it.
+	revoked, err = NewAgent24UISessionStore(db).FamilyRevoked(ctx, "vph-p")
+	require.NoError(t, err)
+	require.True(t, revoked)
+}
