@@ -106,16 +106,19 @@ func agent24UIVerifySession(
 		}
 		return nil, nil, types.TenantAPIKeyScope{}, agent24Unauthorized("credential_invalid")
 	}
-	// U2.3: a session issued before this process started is refused. A revocation that could not be
-	// written lived only in the previous process.
-	if agent24uisession.IssuedBefore(claims, deps.epoch) {
-		return nil, agent24UITicketForAudit(ctx, deps.store, claims.TicketID), types.TenantAPIKeyScope{},
-			agent24Unauthorized("credential_invalid")
-	}
 	secret, perr := agent24uisession.ParseViewProof(header.Get(agent24UIViewProofHeader))
 	if perr != nil || !agent24uisession.VPHEqual(agent24uisession.VPH(secret), claims.Cnf.VPH) {
 		return nil, agent24UITicketForAudit(ctx, deps.store, claims.TicketID), types.TenantAPIKeyScope{},
 			agent24Unauthorized("credential_invalid")
+	}
+	// U2.3: a session issued before this process started is refused. A revocation that could not be
+	// written lived only in the previous process. Checked after the view proof, so only the holder of the
+	// view learns that the server restarted: details.restarted lets the host leave this rebuild out of the
+	// U3.8 count (Agent24#1645, decision 2026-11-08-uib-restart-signal). It is still a view-level rebuild.
+	if agent24uisession.IssuedBefore(claims, deps.epoch) {
+		e := agent24Unauthorized("credential_invalid")
+		e.Extra = map[string]any{"restarted": true}
+		return nil, agent24UITicketForAudit(ctx, deps.store, claims.TicketID), types.TenantAPIKeyScope{}, e
 	}
 	if deps.store == nil {
 		return nil, nil, types.TenantAPIKeyScope{}, agent24Internal()

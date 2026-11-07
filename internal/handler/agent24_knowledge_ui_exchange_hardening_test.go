@@ -284,6 +284,8 @@ func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
 		h.epoch = epoch
 		w, stub := agent24UIExchangeCall(h, before, proof, "203.0.113.97:1")
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		_, _, details := agent24UIError(t, w)
+		require.NotContains(t, details, "restarted", "U2.7: exchange refusals stay indistinguishable")
 		_, view := agent24UIAuditOf(t, stub)
 		require.Equal(t, "ticket_before_start", view.Resource["internal_reason"])
 		require.NotContains(t, view.Resource, "leak")
@@ -301,6 +303,16 @@ func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
 		old := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch.Add(-2*time.Second), 10*time.Minute)
 		w, stub, logs := agent24UIProbeCall(t, h, "Bearer "+old, proof)
 		agent24UIRequireProbeRefusal(t, w, stub, logs, "credential_invalid", true, old, proof)
+		_, _, details := agent24UIError(t, w)
+		require.Equal(t, true, details["restarted"], "Agent24#1645: a pre-start session says the server restarted")
+		// Without the view proof, or with a wrong one, the refusal does not say so.
+		for _, bad := range []string{"", agent24UITestTag(8)} {
+			w, _, _ = agent24UIProbeCall(t, h, "Bearer "+old, bad)
+			require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+			_, reason, details := agent24UIError(t, w)
+			require.Equal(t, "credential_invalid", reason)
+			require.NotContains(t, details, "restarted")
+		}
 		fresh := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch, 10*time.Minute)
 		w, _, _ = agent24UIProbeCall(t, h, "Bearer "+fresh, proof)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
