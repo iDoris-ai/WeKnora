@@ -53,11 +53,21 @@ func NewAgent24KnowledgeUITicketsHandler(
 	}, nil
 }
 
-// agent24UISessionKeyGate reports whether UI session routes should be built (A24-KB-32).
+// agent24UISessionKeyGate reports whether UI session routes should be built (A24-KB-32): integration mode
+// with the key configured.
 // Unset or blank is (false, nil): the constructor returns a nil handler and the route stays off.
 // A value that is set but invalid is an error: the container fails rather than serving the routes
 // without a usable key. Integration startup already refuses that key.
+// UI session routes exist only in integration mode (design §1): standalone does not register them even
+// when the key is set, as no integration gate or credential gate guards them there.
 func agent24UISessionKeyGate() (bool, error) {
+	mode, err := Agent24KnowledgeModeFromEnv()
+	if err != nil {
+		return false, err
+	}
+	if mode != Agent24KnowledgeModeIntegration {
+		return false, nil
+	}
 	_, configured, err := agent24uisession.KeyFromEnv()
 	if err != nil {
 		return false, err

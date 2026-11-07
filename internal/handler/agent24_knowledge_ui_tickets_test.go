@@ -263,6 +263,7 @@ func agent24UICount(t *testing.T, db *gorm.DB, model any) int64 {
 }
 
 func TestAgent24UIHandlerKeyGate(t *testing.T) {
+	t.Setenv(Agent24KnowledgeModeEnv, Agent24KnowledgeModeIntegration)
 	t.Setenv(agent24uisession.KeyEnv, "")
 	t.Setenv(Agent24KnowledgeTagKeyEnv, "")
 	h, err := NewAgent24KnowledgeUITicketsHandler(nil, nil, nil, nil, nil, nil, nil, nil)
@@ -287,6 +288,15 @@ func TestAgent24UIHandlerKeyGate(t *testing.T) {
 	rev, err = NewAgent24KnowledgeUIRevocationsHandler(nil, nil, nil, nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, rev)
+
+	// Standalone never builds them, even with a valid key: no integration or credential gate guards them.
+	t.Setenv(Agent24KnowledgeModeEnv, Agent24KnowledgeModeStandalone)
+	h, err = NewAgent24KnowledgeUITicketsHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, h)
+	rev, err = NewAgent24KnowledgeUIRevocationsHandler(nil, nil, nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, rev)
 }
 
 func TestAgent24UITicketIssue(t *testing.T) {
