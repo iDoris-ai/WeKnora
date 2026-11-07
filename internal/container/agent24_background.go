@@ -16,6 +16,7 @@ package container
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"go.uber.org/dig"
@@ -38,4 +39,15 @@ func invokeBackground(c *dig.Container, name string, fn any) {
 		return
 	}
 	must(c.Invoke(fn))
+}
+
+// startAgentRuntimes starts upstream v0.9.0's delegated-run (collaboration)
+// runtime and automation scheduler. Upstream starts both at the end of the
+// step that wires them; here the wiring stays a foreground Invoke and the
+// start goes through invokeBackground, so integration mode leaves both stopped.
+// The AgentCollaboration cleanup step calls Runtime.Stop, which returns at
+// once for a runtime that never started.
+func startAgentRuntimes(collaboration *service.AgentCollaboration, automations *service.AutomationService) {
+	collaboration.Runtime.Start(context.Background())
+	automations.Start(context.Background())
 }

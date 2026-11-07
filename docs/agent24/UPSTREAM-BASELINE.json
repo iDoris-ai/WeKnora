@@ -27,30 +27,29 @@
   },
   "current_baseline": {
     "kind": "product_baseline",
-    "decided_on": "2026-10-18",
-    "decision": "iDoris-ai/WeKnora#43（KB-C0-03），经同步 PR #44 吸收",
-    "evaluation": "docs/agent24/BASELINE-EVAL-v0.8.3.md",
+    "decided_on": "2026-11-08",
+    "decision": "iDoris-ai/WeKnora#127（David 2026-11-08 定为 M2 第 0 步，Agent24#1627），经同步 PR #137 吸收",
+    "evaluation": "iDoris-ai/WeKnora#127 的同步前评估（2026-10-30）与同步 PR #137 正文；v0.8.3 时期见 docs/agent24/BASELINE-EVAL-v0.8.3.md",
     "release": {
-      "tag": "v0.8.3",
-      "commit": "3e22822c1d2397be730c458c7539d0eb8c113a24"
+      "tag": "v0.9.0",
+      "commit": "f17ee8a8da901bd658a4cb25f40b5fd41adbfdd7"
     },
     "product": {
       "branch": "a24/develop",
-      "base_commit": "3e22822c1d2397be730c458c7539d0eb8c113a24",
+      "base_commit": "f17ee8a8da901bd658a4cb25f40b5fd41adbfdd7",
       "product_patches": [
         {
-          "id": "A24-PATCH-01",
-          "issue": "iDoris-ai/WeKnora#45",
-          "summary": "cherry-pick 上游 main 345855b（Tencent/WeKnora#4437）：patched-anydoc 的 zip 依赖从 8.6.0 升到 9（Cargo.lock 锁 9.0.4），修复 RUSTSEC-2026-0367/0368/0369",
-          "upstream_commit": "345855b59cdb3181f6a7e584595bb395957d7e55",
+          "id": "A24-PATCH-02",
+          "issue": "iDoris-ai/WeKnora#127",
+          "summary": "v0.9.0 关键词检索的生成问题排除条件比较两列，ParadeDB v0.25.11 报 Unsupported query shape，问题生成关闭的文档库关键词检索全部失败（上游 Tencent/WeKnora#4899，修法提在 #4908、未合）：BM25 路径改用 types.GeneratedQuestionRowPredicateBM25（starts_with 前缀判断），向量路径不变",
+          "upstream_commit": null,
           "paths": [
-            "scripts/build-anydoc-lib.sh",
-            "third_party/anydoc-go/Cargo.toml",
-            "third_party/anydoc-go/Cargo.lock",
-            "third_party/anydoc-go/README.md"
+            "internal/types/generated_question_retrieval.go",
+            "internal/application/repository/retriever/postgres/repository.go",
+            "internal/application/repository/retriever/postgres/agent24_keyword_exclusion_test.go"
           ],
-          "remove_when": "吸收包含 345855b 的上游正式版（预计 v0.8.4）时撤掉；同步 PR 上核对这 4 个文件与上游一致后从本数组删除",
-          "added_on": "2026-10-18"
+          "remove_when": "上游正式版修好 Tencent/WeKnora#4899 后撤掉：同步 PR 上核对关键词检索在问题生成关闭的库上不再报错，再从本数组删除",
+          "added_on": "2026-11-08"
         },
         {
           "id": "A24-KB-01",
@@ -691,17 +690,18 @@
           "added_on": "2026-10-24"
         }
       ],
-      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.8.3 逐字节相同；product_patches 截至 2026-11-06 有三十五项：A24-PATCH-01（iDoris-ai/WeKnora#45，4 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，6 个路径）、A24-KB-02（iDoris-ai/WeKnora#37，11 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）、A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）、A24-KB-06（iDoris-ai/WeKnora#38，5 个路径）、A24-KB-07（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-08（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-09（iDoris-ai/WeKnora#38，9 个路径）、A24-KB-10（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-11（iDoris-ai/WeKnora#63，6 个路径）、A24-KB-12（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-13（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-14（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-15（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-17（iDoris-ai/WeKnora#42，11 个路径）、A24-KB-20（iDoris-ai/WeKnora#56，5 个路径）、A24-KB-21（iDoris-ai/WeKnora#42，12 个路径）、A24-KB-16（iDoris-ai/WeKnora#41，9 个路径）、A24-KB-19（iDoris-ai/WeKnora#41，6 个路径）、A24-KB-24（iDoris-ai/WeKnora#41，11 个路径）、A24-KB-18（iDoris-ai/WeKnora#41，17 个路径）、A24-KB-22（iDoris-ai/WeKnora#41，13 个路径）、A24-KB-23（iDoris-ai/WeKnora#41，14 个路径）、A24-KB-25（iDoris-ai/WeKnora#41，11 个路径）、A24-KB-26（iDoris-ai/WeKnora#41，5 个路径）、A24-KB-27（iDoris-ai/WeKnora#42，11 个路径）、A24-KB-28（iDoris-ai/WeKnora#42，20 个路径）、A24-KB-29（iDoris-ai/WeKnora#42，4 个路径）、A24-KB-30（iDoris-ai/WeKnora#42，3 个路径）、A24-OBS-01（iDoris-ai/WeKnora#40，10 个路径）、A24-OBS-02（iDoris-ai/WeKnora#40，19 个路径）、A24-OBS-07（iDoris-ai/WeKnora#40，5 个路径）、A24-OBS-08（iDoris-ai/WeKnora#40，5 个路径）；各项路径可以重叠（后一项改了前一项登记过的文件时两边都列）；除这些路径外，命名空间外仍与 3e22822 逐字节相同"
+      "note": "base_commit 是除已登记补丁外产品代码等同的上游提交，不是 a24/develop 的当前提交；除已登记补丁外，产品代码与 v0.9.0 逐字节相同；product_patches 截至 2026-11-08 有35项：A24-PATCH-02（iDoris-ai/WeKnora#127，3 个路径）、A24-KB-01（iDoris-ai/WeKnora#36，7 个路径）、A24-KB-03（iDoris-ai/WeKnora#38，6 个路径）、A24-KB-02（iDoris-ai/WeKnora#37，11 个路径）、A24-KB-04（iDoris-ai/WeKnora#39，8 个路径）、A24-KB-05（iDoris-ai/WeKnora#39，5 个路径）、A24-KB-06（iDoris-ai/WeKnora#38，5 个路径）、A24-KB-07（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-08（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-09（iDoris-ai/WeKnora#38，9 个路径）、A24-KB-10（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-11（iDoris-ai/WeKnora#63，6 个路径）、A24-KB-12（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-13（iDoris-ai/WeKnora#38，3 个路径）、A24-KB-14（iDoris-ai/WeKnora#38，2 个路径）、A24-KB-15（iDoris-ai/WeKnora#38，19 个路径）、A24-KB-17（iDoris-ai/WeKnora#42，11 个路径）、A24-KB-20（iDoris-ai/WeKnora#56，5 个路径）、A24-KB-21（iDoris-ai/WeKnora#42，12 个路径）、A24-KB-16（iDoris-ai/WeKnora#41，9 个路径）、A24-KB-19（iDoris-ai/WeKnora#41，6 个路径）、A24-KB-24（iDoris-ai/WeKnora#41，11 个路径）、A24-KB-18（iDoris-ai/WeKnora#41，17 个路径）、A24-KB-22（iDoris-ai/WeKnora#41，13 个路径）、A24-KB-23（iDoris-ai/WeKnora#41，14 个路径）、A24-KB-25（iDoris-ai/WeKnora#41，11 个路径）、A24-KB-26（iDoris-ai/WeKnora#41，5 个路径）、A24-KB-27（iDoris-ai/WeKnora#42，11 个路径）、A24-KB-28（iDoris-ai/WeKnora#42，20 个路径）、A24-KB-29（iDoris-ai/WeKnora#42，4 个路径）、A24-KB-30（iDoris-ai/WeKnora#42，3 个路径）、A24-OBS-01（iDoris-ai/WeKnora#40，10 个路径）、A24-OBS-02（iDoris-ai/WeKnora#40，19 个路径）、A24-OBS-07（iDoris-ai/WeKnora#40，5 个路径）、A24-OBS-08（iDoris-ai/WeKnora#40，5 个路径）；各项路径可以重叠（后一项改了前一项登记过的文件时两边都列）；除这些路径外，命名空间外仍与 f17ee8a 逐字节相同"
     },
     "absorbed_upstream_release": {
-      "tag": "v0.8.3",
-      "commit": "3e22822c1d2397be730c458c7539d0eb8c113a24",
-      "as_of": "2026-10-16",
+      "tag": "v0.9.0",
+      "commit": "f17ee8a8da901bd658a4cb25f40b5fd41adbfdd7",
+      "as_of": "2026-10-29",
       "status": "absorbed",
-      "merge_commit": "167d24c24b4d8497cc6b31db02507ae52f0aa116",
-      "sync_pr": "iDoris-ai/WeKnora#44",
-      "absorbed_on": "2026-10-18",
-      "sync_issue": "iDoris-ai/WeKnora#9（工作流会把它改写成届时最新的正式版）"
+      "merge_commit": "36218fd601f3a7785e54407e52136cf10afb4fc6",
+      "merge_commit_note": "同步分支 a24/sync-v0.9.0 上的普通 merge（第二父提交为正式版提交）；冲突逐项解决，见 PATCH-LEDGER 2026-11-08 一节",
+      "sync_pr": "iDoris-ai/WeKnora#137",
+      "absorbed_on": "2026-11-08",
+      "sync_issue": "iDoris-ai/WeKnora#127"
     },
     "upgrade_before": {
       "definition": "产品补丁 = 改动或新增 fork 自有命名空间（docs/agent24/、scripts/agent24/、.github/scripts/agent24-*、.github/workflows/agent24-*）之外路径的任何工作，不论是否与上游改动相交",
@@ -720,7 +720,7 @@
       "gate": "凡 Target repo 为 WeKnora、会改动命名空间之外路径的任务，建卡时写入“基线已升级（#9 已吸收）”依赖；已于 2026-10-16 UTC 写进 Agent24#1001（KB-C1-01、C1-01b-a、C1-01b-b、C1-01c、C1-03、OBS-01、SVC-POLICY-01 等）、#1002（KB-C2-01、C2-02）、#1003（KB-LITE-01a，按规则判断 LITE-01b）正文的进入条件，时点 2 挂 #1001 真实数据验收，时点 3 挂 #1003 出货验收（WeKnora#11；任务级依赖以三个 epic 正文为准，基线数据与时点以本文件为准）；KB-CT-02b 的 WeKnora 侧 Go 测试放在 scripts/agent24/ 下",
       "never": "同步通道（#3）不通时等它修好，不得绕过同步 PR 手工升级；不通超过 7 天时上报 David 与 jason",
       "review_triggers": [
-        "上游发布影响当前基线（v0.8.3）的安全公告时",
+        "上游发布影响当前基线（v0.9.0）的安全公告时",
         "到 reevaluate_by 时"
       ],
       "review_note": "review_triggers 与 reevaluate_by 只触发重新评估，结论可以是继续留守，不属于 triggers（必须先升级的时点）",
@@ -728,27 +728,27 @@
       "owner": "David（stoptheworld-java，即“用户”）"
     },
     "test_stack_constraints": [
-      "在 .env 里设 WEKNORA_VERSION=v0.8.3（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 会随上游前进，不能依赖），每条 docker compose 命令前加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE（shell 变量优先于 .env，不依赖 shell 状态；项目根目录不得有 docker-compose.override.y*ml、compose.override.y*ml，.env 不设 COMPOSE_FILE、COMPOSE_PROFILES），docker compose config --images 须正好是这 5 个引用：wechatopenai/weknora-ui:v0.8.3、wechatopenai/weknora-app:v0.8.3、wechatopenai/weknora-docreader:v0.8.3、paradedb/paradedb:v0.25.11-pg17、redis:7.0-alpine，docker compose config 里 app 的 STORAGE_TYPE 须为 local、app 与 frontend 端口的 host_ip 须为 127.0.0.1（用 grep 过滤 STORAGE_TYPE|host_ip|published|- mode: 时须正好七行、两组 - mode/host_ip: 127.0.0.1/published，端口映射不带 IP 时不输出 host_ip、只写容器端口时不输出 published；只看这几项，完整输出含 .env 里的密钥，不贴进证据），不符就停；再 docker compose pull，5 个默认服务的 RepoDigests 都须含 image_digests 登记的 digest（为空也算不一致），不一致就停、不起栈；比对通过后再 docker compose up -d --no-build，起栈后确认各容器的 image ID 等于比对过的镜像，不一致就停栈、数据卷丢弃重建（误拉更新的版本时 app 一启动就迁移到更高版本、不可回退）；tag 被改指时可 docker pull <仓库>@<登记 digest> 再 docker tag 打回，之后不再对该服务 pull；只有 postgres、redis 可以重新登记",
-      "不用 scripts/start_all.sh，含 --no-pull：默认 up --pull always；--no-pull 走 up --build -d，用当前 checkout 重建并覆盖 v0.8.3 tag（本地构建的镜像 digest 不会等于登记值），还设 START_OLLAMA=true 在宿主机拉起 Ollama",
-      "从 3e22822 本地构建（只在拉不到官方镜像时）：在 3e22822 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.8.3-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.8.3-local；命令格式参照评估文档（那里是 v0.8.2 时期的写法），镜像引用、digest、schema 版本以本节与 image_digests 为准：3e8b0bf 换成 3e22822、v0.8.2 换成 v0.8.3。每条 docker compose 命令前同样加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE，用 docker compose config --images 核对引用（三个 :v0.8.3-local 加 paradedb/paradedb:v0.25.11-pg17、redis:7.0-alpine）、用 docker compose config 核对 STORAGE_TYPE 与端口 host_ip（同第一条：须正好七行，只看这几项），再只 docker compose pull postgres redis（打回过 tag 的服务同样不再 pull），这两个按登记 digest 比对通过后再 docker compose up -d --no-build，起栈后核对容器 image ID；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
+      "在 .env 里设 WEKNORA_VERSION=v0.9.0（.env.example 默认 latest；Docker Hub 上 app、ui、docreader 的 latest 会随上游前进，不能依赖），每条 docker compose 命令前加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE（shell 变量优先于 .env，不依赖 shell 状态；项目根目录不得有 docker-compose.override.y*ml、compose.override.y*ml，.env 不设 COMPOSE_FILE、COMPOSE_PROFILES），docker compose config --images 须正好是这 5 个引用：wechatopenai/weknora-ui:v0.9.0、wechatopenai/weknora-app:v0.9.0、wechatopenai/weknora-docreader:v0.9.0、paradedb/paradedb:v0.25.11-pg17、redis:7.0-alpine，docker compose config 里 app 的 STORAGE_TYPE 须为 local、app 与 frontend 端口的 host_ip 须为 127.0.0.1（用 grep 过滤 STORAGE_TYPE|host_ip|published|- mode: 时须正好七行、两组 - mode/host_ip: 127.0.0.1/published，端口映射不带 IP 时不输出 host_ip、只写容器端口时不输出 published；只看这几项，完整输出含 .env 里的密钥，不贴进证据），不符就停；再 docker compose pull，5 个默认服务的 RepoDigests 都须含 image_digests 登记的 digest（为空也算不一致），不一致就停、不起栈；比对通过后再 docker compose up -d --no-build，起栈后确认各容器的 image ID 等于比对过的镜像，不一致就停栈、数据卷丢弃重建（误拉更新的版本时 app 一启动就迁移到更高版本、不可回退）；tag 被改指时可 docker pull <仓库>@<登记 digest> 再 docker tag 打回，之后不再对该服务 pull；只有 postgres、redis 可以重新登记",
+      "不用 scripts/start_all.sh，含 --no-pull：默认 up --pull always；--no-pull 走 up --build -d，用当前 checkout 重建并覆盖 v0.9.0 tag（本地构建的镜像 digest 不会等于登记值），还设 START_OLLAMA=true 在宿主机拉起 Ollama",
+      "从 f17ee8a 本地构建（只在拉不到官方镜像时）：在 f17ee8a 的干净 git 工作树里 eval \"$(./scripts/get_version.sh env)\"，用 docker build 显式传 VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG、GO_VERSION_ARG（.dockerignore 排除 .git，compose 不传这些参数，不传则自报版本为 unknown），直接 -t 打成 wechatopenai/weknora-{app,ui,docreader}:v0.9.0-local（不用 make docker-build-*，它固定打 :latest），.env 设 WEKNORA_VERSION=v0.9.0-local；命令格式参照评估文档（那里是 v0.8.2 时期的写法），镜像引用、digest、schema 版本以本节与 image_digests 为准：3e8b0bf 换成 f17ee8a、v0.8.2 换成 v0.9.0。每条 docker compose 命令前同样加 env -u WEKNORA_VERSION -u COMPOSE_FILE -u COMPOSE_PROFILES -u COMPOSE_ENV_FILES -u COMPOSE_DISABLE_ENV_FILE，用 docker compose config --images 核对引用（三个 :v0.9.0-local 加 paradedb/paradedb:v0.25.11-pg17、redis:7.0-alpine）、用 docker compose config 核对 STORAGE_TYPE 与端口 host_ip（同第一条：须正好七行，只看这几项），再只 docker compose pull postgres redis（打回过 tag 的服务同样不再 pull），这两个按登记 digest 比对通过后再 docker compose up -d --no-build，起栈后核对容器 image ID；本地构建的三个镜像 digest 不会等于登记值，改记源码 SHA（工作区干净）、image ID、/api/v1/system/info 自报的 data.version 与 data.commit_id（需 Viewer 级凭据；用 API key 时须是 full_access 或带 manage_vector_stores 的 key）、实际构建参数",
       "有已登记产品补丁、需要出正式探测证据时，用探测框架的本地构建模式（scripts/agent24/probe/README.md 第 11 节，iDoris-ai/WeKnora#51）：镜像内容由 HEAD 决定（build-local-app.sh 用 git archive 导出 HEAD 再构建；干净工作区不再是前提；被忽略文件、skip-worktree 和未提交改动都不进镜像）。探测依据（本文件与 scripts/agent24/probe/）须等于 HEAD：工作区或暂存区相对 HEAD 有改动（含只改权限位）、有未跟踪文件（含被忽略的）或带 skip-worktree / assume-unchanged 时，build-local-app.sh 与本地模式的探测都以退出码 3 停下。运行 scripts/agent24/probe/build-local-app.sh，按 docker/Dockerfile.app 构建 app（WITH_ANYDOC=1，VERSION_ARG 为 release.tag 去掉 v 再加 +agent24.<HEAD 的 8 位 sha>，COMMIT_ID_ARG 为 HEAD 全长，BUILD_TIME_ARG 为 UTC ISO8601；不传 GO_VERSION_ARG：get_version.sh 取的是宿主机的 go version，不是镜像里实际编译用的 Go），标签 weknora-app:agent24-<8 位 sha>，label 另有 io.idoris.agent24.patch-ids（命名空间外差异里实际出现的已登记补丁 id，按登记顺序逗号分隔，没有则为空；补丁 id 须互不相同、非空、不含逗号，否则退出码 3）、io.idoris.agent24.with-anydoc=1、io.idoris.agent24.version（等于 VERSION_ARG），写入 STACK_DIR/agent24-local-app.json。脚本只打印 compose 覆盖文件内容，不写覆盖文件、不起栈；在 STACK_DIR 用该覆盖文件把 app 的 image 换成该标签后再 up -d（不要命名为 docker-compose.override.yml 或 compose.override.yml）。frontend、docreader、postgres、redis 仍用 image_digests 登记的官方镜像。跑探测时设 PROBE_APP_IMAGE=local（缺省 official，其他值退出码 2）。app 不比 RepoDigests：容器镜像 ID（docker inspect -f '{{.Image}}'）须等于 json 的 image_id，容器 Config.Image 须等于 json 的 tag，镜像 label org.opencontainers.image.revision 须为当前 HEAD 全长，label io.idoris.agent24.base-release 须为 release.tag，label io.idoris.agent24.patch-ids 须等于上述差异里实际出现的已登记补丁 id（按登记顺序逗号分隔），label io.idoris.agent24.with-anydoc 须为 1，label io.idoris.agent24.version 须为 <release.tag 去掉 v>+agent24.<HEAD 的 8 位 sha>，json 的 revision 须为当前 HEAD，json 的 version、base_release、build_args.WITH_ANYDOC、build_args.VERSION_ARG、build_args.COMMIT_ID_ARG 须与对应 label 和计算值一致；json 的 patch_ids 须是字符串数组、每项不含逗号，且与上述补丁 id 逐项同序（没有则为 []）；build_args 的键须正好是 WITH_ANYDOC、VERSION_ARG、COMMIT_ID_ARG、BUILD_TIME_ARG；built_at_utc 须等于 build_args.BUILD_TIME_ARG。/system/info 的 commit_id 须全长等于当前 HEAD，version 须为 <release.tag 去掉 v>+agent24.<8 位 sha>，build_time 须等于 build_args.BUILD_TIME_ARG，db_version 仍按本节 schema 版本核对",
       "只用默认服务（frontend、app、docreader、postgres、redis），不启用 profile，STORAGE_TYPE=local，起栈后用 docker exec WeKnora-app printenv STORAGE_TYPE 留证，不是 local 就停栈",
-      "误跑过 latest 的数据卷丢弃重建；证据记录 schema_migrations 版本（v0.8.3 为 118）",
+      "误跑过 latest 的数据卷丢弃重建；证据记录 schema_migrations 版本（v0.9.0 为 134；v0.8.3 时期为 118）",
       "APP_PORT=127.0.0.1:8080；frontend 只需绑 127.0.0.1，端口任意（如 FRONTEND_PORT=127.0.0.1:18080；探测只访问 app，不影响结论），证据记录 docker port 输出，app 与 frontend 只能是 127.0.0.1、其余容器没有端口，docker ps -a --filter label=com.docker.compose.project=<项目名>（项目名取 WeKnora-app 容器的 com.docker.compose.project label）列出的正好是 5 个默认容器（不按 WeKnora- 前缀过滤，dex 不带这个前缀），否则停栈",
       "Lite 与标准栈的结果不互相替代"
     ],
     "image_digests": {
       "app": {
-        "digest": "sha256:b5f96b13c2f69779af8c7291264cafbda64c208398b019e3a6223c6f3ea82031",
-        "as_of": "2026-10-18"
+        "digest": "sha256:25b20959b7456f7842ef55ed4feff3694dbd0c6f8af4117c1fb3c5dec6bdf14d",
+        "as_of": "2026-11-08"
       },
       "ui": {
-        "digest": "sha256:94f7992e963b1e2e3b8dc429091f1204fde9c3cd985175b16f40b4142f915fe5",
-        "as_of": "2026-10-18"
+        "digest": "sha256:df26705d866997db07f3da78dabedc4f594b383566a3996810c166a5c6bee393",
+        "as_of": "2026-11-08"
       },
       "docreader": {
-        "digest": "sha256:9af668ac0ac857b9dfe8430d0fe77c0e5ad2636dc2b5285cd5500a13d5a35266",
-        "as_of": "2026-10-18"
+        "digest": "sha256:8c71ec3cc2e291829c3938d2c7dc5f921c1d10551c8774bf844c83bc4aa3cb84",
+        "as_of": "2026-11-08"
       },
       "postgres": {
         "digest": "sha256:78d65750f0f88a56548526201bcab9910f83b90fe929cdbf979890f3f80b0f95",
@@ -759,6 +759,6 @@
         "as_of": "2026-10-18"
       }
     },
-    "image_digests_note": "v0.8.3 默认 5 服务镜像：app wechatopenai/weknora-app:v0.8.3、ui wechatopenai/weknora-ui:v0.8.3、docreader wechatopenai/weknora-docreader:v0.8.3、postgres paradedb/paradedb:v0.25.11-pg17、redis redis:7.0-alpine；digest 是 2026-10-18 在本机 docker compose pull 后从 docker image inspect 的 RepoDigests 读出的多架构 index digest，未另行对 registry API 复核；每项的 as_of 是查得日期；postgres 与 redis 是明确的可变 tag，docker compose pull 会重新解析所有 tag，任一项比对不一致时都可 docker pull <仓库>@<登记 digest> 后 docker tag 回原 tag，之后不再对该服务 pull；只有 postgres、redis 可以在查明 tag 被改指后重新登记，app、ui、docreader 不重新登记"
+    "image_digests_note": "v0.9.0 默认 5 服务镜像：app wechatopenai/weknora-app:v0.9.0、ui wechatopenai/weknora-ui:v0.9.0、docreader wechatopenai/weknora-docreader:v0.9.0、postgres paradedb/paradedb:v0.25.11-pg17、redis redis:7.0-alpine（与 v0.8.3 相同）；app、ui、docreader 的 digest 是 2026-11-08 用 docker buildx imagetools inspect 从 registry 读出的多架构 index digest（未 pull；docker compose pull 后 RepoDigests 里应是同一个值），postgres、redis 仍是 2026-10-18 登记值；postgres 与 redis 是明确的可变 tag，docker compose pull 会重新解析所有 tag，任一项比对不一致时都可 docker pull <仓库>@<登记 digest> 后 docker tag 回原 tag，之后不再对该服务 pull；只有 postgres、redis 可以在查明 tag 被改指后重新登记，app、ui、docreader 不重新登记"
   }
 }
