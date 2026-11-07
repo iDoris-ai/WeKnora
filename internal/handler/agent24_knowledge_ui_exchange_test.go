@@ -37,6 +37,8 @@ type agent24UIKeyStub struct {
 	interfaces.TenantAPIKeyService
 	keys []*types.TenantAPIKey
 	err  error
+	// unfiltered returns every key, as a list that ignored its tenant argument would.
+	unfiltered bool
 }
 
 func (s agent24UIKeyStub) ListAPIKeys(_ context.Context, tenantID uint64) ([]*types.TenantAPIKey, error) {
@@ -45,7 +47,7 @@ func (s agent24UIKeyStub) ListAPIKeys(_ context.Context, tenantID uint64) ([]*ty
 	}
 	var out []*types.TenantAPIKey
 	for _, key := range s.keys {
-		if key != nil && key.TenantIDValue() == tenantID {
+		if key != nil && (s.unfiltered || key.TenantIDValue() == tenantID) {
 			out = append(out, key)
 		}
 	}
@@ -99,6 +101,13 @@ func agent24UIExchangeHandler(
 		issuer: agent24uisession.DefaultIssuer,
 		limit:  newAgent24UIExchangeLimiter(),
 	}
+}
+
+// agent24UIKeyWith is the live kb-b, kb-a key with one change applied.
+func agent24UIKeyWith(change func(*types.TenantAPIKey)) *types.TenantAPIKey {
+	key := agent24UILiveKey([]string{"kb-b", "kb-a"}, false, nil, nil)
+	change(key)
+	return key
 }
 
 func agent24UILiveKeysAB() []*types.TenantAPIKey {
@@ -489,6 +498,19 @@ func TestAgent24UIExchangeRecheck(t *testing.T) {
 			status: http.StatusUnauthorized, reason: "credential_invalid",
 		},
 		{
+			name:   "platform key",
+			key:    agent24UIKeyWith(func(k *types.TenantAPIKey) { k.ScopeType = types.APIKeyScopePlatform }),
+			status: http.StatusUnauthorized, reason: "credential_invalid",
+		},
+		{
+			// The tenant's key list does not hold it, so the recorded key is gone.
+			name: "other tenant key", key: agent24UIKeyWith(func(k *types.TenantAPIKey) {
+				other := uint64(10)
+				k.TenantID = &other
+			}),
+			status: http.StatusUnauthorized, reason: "credential_revoked",
+		},
+		{
 			name: "narrowed", key: agent24UILiveKey([]string{"kb-a"}, false, nil, nil),
 			status: http.StatusOK, scope: []string{"kb-a"}, resolveHit: 1,
 		},
@@ -634,4 +656,18 @@ func TestAgent24UICredentialBypassIsExact(t *testing.T) {
 		newEngine().ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
 		require.Equal(t, tc.want, w.Code, "%s %s: %s", tc.method, tc.path, w.Body.String())
 	}
+}
+
+// A key list that returned another tenant's key with the recorded id is still refused.
+func TestAgent24UIRecheckStoredOtherTenantKey(t *testing.T) {
+	other := uint64(10)
+	key := agent24UIKeyWith(func(k *types.TenantAPIKey) { k.TenantID = &other })
+	deps := agent24UIStoredDeps{
+		tenants: agent24UITenantStub{tenant: &types.Tenant{ID: 9}},
+		keys:    agent24UIKeyStub{keys: []*types.TenantAPIKey{key}, unfiltered: true},
+	}
+	ticket := &types.Agent24UITicket{TenantID: 9, KeyID: 7, CredentialID: "key:7"}
+	_, reason, _, err := agent24UIRecheckStoredKey(context.Background(), deps, ticket, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "credential_invalid", reason)
 }

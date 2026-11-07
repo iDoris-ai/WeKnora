@@ -725,10 +725,10 @@ func resolveAPIPrincipal(
 					errInvalidExternalUserToken, vErr)
 			}
 			return types.Principal{
-				Type: types.PrincipalAPIExternalUser,
-				ID:   strconv.FormatUint(tenantID, 10) + ":" + tok.Subject,
-			}, "", agent24TokenInfo{JTI: tok.JTI, ExpiresAt: tok.ExpiresAt}, fmt.Errorf("%w: %w",
-				errInvalidExternalUserToken, errExternalUserTokenExpired)
+					Type: types.PrincipalAPIExternalUser,
+					ID:   strconv.FormatUint(tenantID, 10) + ":" + tok.Subject,
+				}, "", agent24TokenInfo{JTI: tok.JTI, ExpiresAt: tok.ExpiresAt}, fmt.Errorf("%w: %w",
+					errInvalidExternalUserToken, errExternalUserTokenExpired)
 		}
 		if err != nil || tok.Subject == "" {
 			logger.Warnf(ctx,

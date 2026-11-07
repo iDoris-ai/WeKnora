@@ -226,6 +226,27 @@ func TestAgent24UISessionProbe(t *testing.T) {
 		agent24UIRequireProbeRefusal(t, w, stub, logs, "credential_invalid", false, token, proof)
 	})
 
+	// A JWT whose sub or tenant no longer matches the ticket row it names is not that ticket's session.
+	for _, tc := range []struct {
+		name   string
+		change func(*agent24uisession.Claims)
+	}{
+		{name: "subject mismatch", change: func(c *agent24uisession.Claims) { c.Subject = "api_tenant:principal-8" }},
+		{name: "tenant mismatch", change: func(c *agent24uisession.Claims) { c.TenantID = 10 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, store := agent24UIHandlerDB(t)
+			ticket := agent24UISeedTicket(t, store, agent24UIRawTicket(81), vph, nil)
+			claims := agent24UISessionClaims(t, ticket)
+			tc.change(&claims)
+			token, err := agent24uisession.Issue(
+				agent24UIExchangeKey(), agent24uisession.DefaultIssuer, claims, time.Now(), time.Minute)
+			require.NoError(t, err)
+			w, stub, logs := agent24UIProbeCall(t, hSession(store, live), "Bearer "+token, proof)
+			agent24UIRequireProbeRefusal(t, w, stub, logs, "credential_invalid", true, token, proof)
+		})
+	}
+
 	t.Run("missing authorization", func(t *testing.T) {
 		_, store := agent24UIHandlerDB(t)
 		w, stub, logs := agent24UIProbeCall(t, hSession(store, live), "", proof)
