@@ -59,9 +59,10 @@ var agent24BackgroundSteps = map[string]bool{
 // agent24ForegroundInvokes are the steps container.go may pass to
 // container.Invoke directly, each checked to start no background work that an
 // integration process must not run: cleanup registration, provider and limiter
-// registration, chat pipeline plugins, and the A24-KB-22 revocation purge
-// (integration-only, on the fork's own table). A new direct Invoke fails the
-// test until it is reviewed and added here or moved to invokeBackground.
+// registration, chat pipeline plugins, the A24-KB-22 revocation purge and the
+// A24-KB-31 UI session purge (both integration-only, on the fork's own tables).
+// A new direct Invoke fails the test until it is reviewed and added here or
+// moved to invokeBackground.
 var agent24ForegroundInvokes = map[string]bool{
 	"registerLangfuseCleanup":             true,
 	"registerPoolCleanup":                 true,
@@ -70,7 +71,10 @@ var agent24ForegroundInvokes = map[string]bool{
 	"registerModelConcurrencyLimiter":     true,
 	"registerLiteModelConcurrencyLimiter": true,
 	"ensureAgent24CredentialRevocations":  true,
-	"registerChatLocalImageResolver":      true,
+	// ensureAgent24UISessions is the A24-KB-31 UI session purge, the same kind of
+	// integration-only purge as the A24-KB-22 revocation purge, on the fork's own tables.
+	"ensureAgent24UISessions":        true,
+	"registerChatLocalImageResolver": true,
 	// The BrowserSkill cleanup Promote closure, keyed by its whole text; any
 	// other closure, or a change to its body, is unreviewed.
 	"func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) " +
