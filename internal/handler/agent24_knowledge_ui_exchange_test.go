@@ -96,6 +96,7 @@ func agent24UIExchangeHandler(
 		store: store,
 		stored: agent24UIStoredDeps{
 			tenants: agent24UITenantStub{tenant: tenant}, keys: agent24UIKeyStub{keys: keys}, revocations: revocations,
+			key: agent24UIExchangeKey(),
 		},
 		key:    agent24UIExchangeKey(),
 		issuer: agent24uisession.DefaultIssuer,
@@ -129,6 +130,7 @@ func agent24UISeedTicket(
 		Principal: "api_tenant:principal-7", CredentialID: "key:7", KeyID: 7,
 		BindingTag: agent24UITestTag(1), PartitionTag: agent24UITestTag(2),
 		VPH: vph, Generation: 4, ExpiresAt: time.Now().Add(time.Minute),
+		PrincipalSecretTag: agent24UIPrincipalSecretTag(agent24UIExchangeKey(), &types.Tenant{ID: 9}),
 	}
 	require.NoError(t, ticket.SetScopeKnowledgeBaseIDs([]string{"kb-b", "kb-a"}))
 	if tweak != nil {
@@ -665,6 +667,7 @@ func TestAgent24UIRecheckStoredOtherTenantKey(t *testing.T) {
 	deps := agent24UIStoredDeps{
 		tenants: agent24UITenantStub{tenant: &types.Tenant{ID: 9}},
 		keys:    agent24UIKeyStub{keys: []*types.TenantAPIKey{key}, unfiltered: true},
+		key:     agent24UIExchangeKey(),
 	}
 	ticket := &types.Agent24UITicket{TenantID: 9, KeyID: 7, CredentialID: "key:7"}
 	_, reason, _, err := agent24UIRecheckStoredKey(context.Background(), deps, ticket, time.Now())

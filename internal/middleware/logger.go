@@ -231,7 +231,10 @@ func Logger() gin.HandlerFunc {
 		// Browser traffic contains credentials, page content and screenshots.
 		// Keep access metadata, but never read or buffer these request/response bodies.
 		browserTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
-			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
+			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser") ||
+			// A24-KB-33: UI session bodies carry the one-time ticket and the session JWT, whose field names
+			// the redaction pattern does not cover in every spelling. Never read or buffer them.
+			strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/")
 		// 读取请求体（在Next之前读取，因为Next会消费body）。默认不读、不缓存正文。
 		var requestBody string
 		if logBodies && !browserTraffic &&

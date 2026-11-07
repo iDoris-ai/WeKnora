@@ -31,6 +31,8 @@ type Agent24KnowledgeUITicketsHandler struct {
 	scope   agent24ScopeResolver
 	recheck agent24CredentialRechecker
 	store   interfaces.Agent24UISessionStore
+	// key is the UI session key, for the principal secret tag (A24-KB-33).
+	key []byte
 }
 
 // NewAgent24KnowledgeUITicketsHandler builds the issuance handler.
@@ -47,10 +49,18 @@ func NewAgent24KnowledgeUITicketsHandler(
 	if err != nil || !on {
 		return nil, err
 	}
+	key, configured, err := agent24uisession.KeyFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	if !configured || len(key) == 0 {
+		return nil, errors.New("ui session key is not configured")
+	}
 	return &Agent24KnowledgeUITicketsHandler{
 		scope:   agent24DefaultScopeResolver{kbs: kbService},
 		recheck: newAgent24Rechecker(tenants, keys, revocations, users, members, cfg),
 		store:   store,
+		key:     append([]byte(nil), key...),
 	}, nil
 }
 
@@ -164,8 +174,13 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 	}
 	// A24-KB-33: the mode is read the same way newAgent24Rechecker reads it. No tenant row means "".
 	var principalMode string
-	if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant != nil {
 		principalMode = string(middleware.Agent24PrincipalMode(tenant))
+	}
+	if len(h.key) == 0 {
+		writeAgent24KnowledgeError(c, agent24Internal(), echo)
+		return
 	}
 	ticket := &types.Agent24UITicket{
 		TicketHash:          hash,
@@ -175,6 +190,7 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 		CredentialID:        credID,
 		KeyID:               apiScope.KeyID,
 		PrincipalMode:       principalMode,
+		PrincipalSecretTag:  agent24UIPrincipalSecretTag(h.key, tenant),
 		CredentialExpiresAt: credExp,
 		BindingTag:          binding,
 		PartitionTag:        partition,

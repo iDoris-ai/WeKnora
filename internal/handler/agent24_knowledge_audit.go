@@ -345,6 +345,11 @@ func agent24WriteKnowledgeAudit(
 	}()
 	entry, settle := agent24KnowledgeAuditEntry(c, started, anonymous, refused)
 	if entry == nil {
+		// A24-KB-33: on the exchange and the session probe a suppressed anonymous row must not change how
+		// the response is sent (U2.7): flush as a written row would.
+		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path) {
+			agent24FlushResponse(c)
+		}
 		return
 	}
 	written := false

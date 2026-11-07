@@ -508,3 +508,30 @@ func TestAgent24UISessionGetTicketByID(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, missing)
 }
+
+// A24-KB-33: a read that fails after the spend rolls the spend back. The next presentation is then a
+// first presentation, not a replay that the caller never had the row to judge.
+func TestAgent24UISessionConsumeTicketReadFailureRollsBack(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, store.CreateTicket(ctx, newAgent24UITicket(t, "vph-r", "hash-r", "id-r", now.Add(time.Minute))))
+
+	const name = "agent24_test_fail_ticket_read"
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "agent24_ui_tickets" {
+			_ = tx.AddError(fmt.Errorf("read down"))
+		}
+	}))
+	_, _, err := store.ConsumeTicket(ctx, "hash-r", now)
+	require.Error(t, err)
+	require.NoError(t, db.Callback().Query().Remove(name))
+
+	spent := countWhere(t, db, &types.Agent24UITicket{}, "consumed_at IS NOT NULL AND ticket_hash = ?", "hash-r")
+	require.Equal(t, int64(0), spent)
+	row, first, err := store.ConsumeTicket(ctx, "hash-r", now)
+	require.NoError(t, err)
+	require.True(t, first)
+	require.NotNil(t, row)
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,6 +21,18 @@ type agent24UIStoredDeps struct {
 	tenants     interfaces.TenantService
 	keys        interfaces.TenantAPIKeyService
 	revocations interfaces.Agent24CredentialRevocationStore
+	// key is the UI session key, used for the principal secret tag.
+	key []byte
+}
+
+// agent24UIPrincipalSecretTag fingerprints the tenant's signed-token secret under the UI session key.
+// A tenant without a config, or without a secret, fingerprints the empty secret.
+func agent24UIPrincipalSecretTag(key []byte, tenant *types.Tenant) string {
+	secret := ""
+	if tenant != nil && tenant.APIPrincipalConfig != nil {
+		secret = strings.TrimSpace(tenant.APIPrincipalConfig.HMACSecret)
+	}
+	return agent24uisession.H("kb-principal-secret-v1", key, []byte(secret))
 }
 
 // errAgent24UIStoredUnwired means a service the stored-credential recheck needs is missing.
@@ -84,6 +97,13 @@ func agent24UIRecheckStoredKey(
 		return types.TenantAPIKeyScope{}, "", nil, err
 	}
 	if tenant == nil || string(middleware.Agent24PrincipalMode(tenant)) != t.PrincipalMode {
+		return types.TenantAPIKeyScope{}, "credential_invalid", nil, nil
+	}
+	if len(deps.key) == 0 {
+		return types.TenantAPIKeyScope{}, "", nil, errAgent24UIStoredUnwired
+	}
+	// A rotated signed-token secret makes every token signed with the old one invalid at Auth (U3.4 "C 有效").
+	if !agent24uisession.VPHEqual(agent24UIPrincipalSecretTag(deps.key, tenant), t.PrincipalSecretTag) {
 		return types.TenantAPIKeyScope{}, "credential_invalid", nil, nil
 	}
 	if strings.HasPrefix(t.CredentialID, "jti:") {

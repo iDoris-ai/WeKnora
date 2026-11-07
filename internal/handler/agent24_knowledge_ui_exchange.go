@@ -28,12 +28,14 @@ const (
 	// A24-KB-33: the exchange has its own local token bucket (U2.6). Five per second, burst ten.
 	agent24UIExchangeRate  = 5
 	agent24UIExchangeBurst = 10
-	// A full table drops an idle bucket. When none is idle the request is allowed, as the refused-key
-	// audit limiter does (A24-KB-26): a new bucket would start the same way, and refusing would be a
-	// different rule.
+	// A full table drops an idle bucket. When none is idle, the new address shares one overflow bucket
+	// with the same rate: the limit still holds, and addresses that already have a bucket are unaffected.
 	agent24UIExchangeBuckets = 1024
 
 	agent24UIViewProofHeader = "X-Agent24-View-Proof"
+
+	// agent24UIRevokeTimeout bounds the U2.8 family revocation, which ignores client cancellation.
+	agent24UIRevokeTimeout = 5 * time.Second
 )
 
 // Agent24KnowledgeUIExchangeHandler serves POST /api/v1/agent24/knowledge/ui/exchange.
@@ -72,7 +74,7 @@ func NewAgent24KnowledgeUIExchangeHandler(
 	return &Agent24KnowledgeUIExchangeHandler{
 		scope:  agent24DefaultScopeResolver{kbs: kbService},
 		store:  store,
-		stored: agent24UIStoredDeps{tenants: tenants, keys: keys, revocations: revocations},
+		stored: agent24UIStoredDeps{tenants: tenants, keys: keys, revocations: revocations, key: copied},
 		key:    copied,
 		issuer: agent24uisession.IssuerFromEnv(),
 		limit:  newAgent24UIExchangeLimiter(),
@@ -81,17 +83,19 @@ func NewAgent24KnowledgeUIExchangeHandler(
 
 // agent24UIExchangeLimiter is one token bucket per client IP. now is replaceable in tests.
 type agent24UIExchangeLimiter struct {
-	mu      sync.Mutex
-	burst   int
-	max     int
-	now     func() time.Time
-	buckets map[string]*rate.Limiter
+	mu       sync.Mutex
+	burst    int
+	max      int
+	now      func() time.Time
+	buckets  map[string]*rate.Limiter
+	overflow *rate.Limiter
 }
 
 func newAgent24UIExchangeLimiter() *agent24UIExchangeLimiter {
 	return &agent24UIExchangeLimiter{
 		burst: agent24UIExchangeBurst, max: agent24UIExchangeBuckets,
 		now: time.Now, buckets: map[string]*rate.Limiter{},
+		overflow: rate.NewLimiter(rate.Limit(agent24UIExchangeRate), agent24UIExchangeBurst),
 	}
 }
 
@@ -106,7 +110,10 @@ func (l *agent24UIExchangeLimiter) allow(ip string) bool {
 	bucket, ok := l.buckets[ip]
 	if !ok {
 		if len(l.buckets) >= l.max && !l.removeIdle(now) {
-			return true
+			if l.overflow == nil {
+				return false
+			}
+			return l.overflow.AllowN(now, 1)
 		}
 		bucket = rate.NewLimiter(rate.Limit(agent24UIExchangeRate), l.burst)
 		l.buckets[ip] = bucket
@@ -320,11 +327,19 @@ func (h *Agent24KnowledgeUIExchangeHandler) agent24UILeakFamily(
 	c *gin.Context, ticket *types.Agent24UITicket, now time.Time, internalReason string,
 ) {
 	agent24UINoteTicket(c, ticket, internalReason, true)
-	if h.store != nil && ticket != nil {
-		err := h.store.RevokeFamily(c.Request.Context(), ticket.TenantID, ticket.Principal, ticket.VPH, now)
-		if err != nil {
-			agent24UILogErr(c.Request.Context(), "ui exchange revoke family", err)
-		}
+	if h.store == nil || ticket == nil {
+		writeAgent24KnowledgeError(c, agent24Internal(), agent24KnowledgeEcho{})
+		return
+	}
+	// The revocation is a security write: a client that disconnects must not cancel it. It gets its own
+	// deadline. If it fails the answer is internal, not credential_invalid, so the failure is not mistaken
+	// for a completed leak response; the family stays revocable by the next presentation.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agent24UIRevokeTimeout)
+	defer cancel()
+	if err := h.store.RevokeFamily(ctx, ticket.TenantID, ticket.Principal, ticket.VPH, now); err != nil {
+		agent24UILogErr(ctx, "ui exchange revoke family", err)
+		writeAgent24KnowledgeError(c, agent24Internal(), agent24KnowledgeEcho{})
+		return
 	}
 	writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), agent24KnowledgeEcho{})
 }

@@ -55,7 +55,7 @@ func NewAgent24KnowledgeUISessionHandler(
 		store:  store,
 		key:    copied,
 		issuer: agent24uisession.IssuerFromEnv(),
-		stored: agent24UIStoredDeps{tenants: tenants, keys: keys, revocations: revocations},
+		stored: agent24UIStoredDeps{tenants: tenants, keys: keys, revocations: revocations, key: copied},
 	}}, nil
 }
 

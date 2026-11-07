@@ -96,22 +96,32 @@ func (s *agent24UISessionStore) ConsumeTicket(
 	ctx context.Context, ticketHash string, now time.Time,
 ) (*types.Agent24UITicket, bool, error) {
 	// U2.6: spend the ticket before any expiry or revocation decision. At most one caller updates the row.
-	res := s.db.WithContext(ctx).Exec(
-		"UPDATE agent24_ui_tickets SET consumed_at = ? WHERE ticket_hash = ? AND consumed_at IS NULL",
-		now.UTC(), ticketHash,
-	)
-	if res.Error != nil {
-		return nil, false, res.Error
-	}
+	// A24-KB-33: the update and the read are one transaction. A read that fails rolls the spend back, so a
+	// ticket is never consumed without the caller seeing the row it needs for the U2.8 leak decision.
 	var row types.Agent24UITicket
-	err := s.db.WithContext(ctx).Where("ticket_hash = ?", ticketHash).Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
+	var first, found bool
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(
+			"UPDATE agent24_ui_tickets SET consumed_at = ? WHERE ticket_hash = ? AND consumed_at IS NULL",
+			now.UTC(), ticketHash,
+		)
+		if res.Error != nil {
+			return res.Error
+		}
+		err := tx.Where("ticket_hash = ?", ticketHash).Take(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found, first = true, res.RowsAffected == 1
+		return nil
+	})
+	if err != nil || !found {
 		return nil, false, err
 	}
-	return &row, res.RowsAffected == 1, nil
+	return &row, first, nil
 }
 
 func (s *agent24UISessionStore) RevokeTicket(

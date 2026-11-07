@@ -36,6 +36,7 @@ func agent24UISessionHandler(
 			tenants:     agent24UITenantStub{tenant: tenant},
 			keys:        agent24UIKeyStub{keys: keys},
 			revocations: revocations,
+			key:         agent24UIExchangeKey(),
 		},
 	}}
 }
