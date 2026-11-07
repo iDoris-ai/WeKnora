@@ -480,3 +480,31 @@ func TestAgent24UISessionPurgeExpired(t *testing.T) {
 	require.Equal(t, "vph-keep", families[0].VPH)
 	require.Equal(t, "vph-live", families[1].VPH)
 }
+
+// A24-KB-33: GetTicketByID returns the row, including the key id and principal mode, or (nil, nil).
+func TestAgent24UISessionGetTicketByID(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-get", "hash-get", "id-get", now.Add(time.Minute))
+	ticket.KeyID = 42
+	ticket.PrincipalMode = "signed_token"
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+
+	got, err := store.GetTicketByID(ctx, "id-get")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(42), got.KeyID)
+	require.Equal(t, "signed_token", got.PrincipalMode)
+	require.Equal(t, "hash-get", got.TicketHash)
+
+	var stored types.Agent24UITicket
+	require.NoError(t, db.Where("ticket_id = ?", "id-get").Take(&stored).Error)
+	require.Equal(t, uint64(42), stored.KeyID)
+	require.Equal(t, "signed_token", stored.PrincipalMode)
+
+	missing, err := store.GetTicketByID(ctx, "missing")
+	require.NoError(t, err)
+	require.Nil(t, missing)
+}

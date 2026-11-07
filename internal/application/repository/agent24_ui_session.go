@@ -134,6 +134,21 @@ func (s *agent24UISessionStore) RevokeFamily(
 	return res.Error
 }
 
+// A24-KB-33: the session probe needs the row. A missing ticket is (nil, nil).
+func (s *agent24UISessionStore) GetTicketByID(
+	ctx context.Context, ticketID string,
+) (*types.Agent24UITicket, error) {
+	var row types.Agent24UITicket
+	err := s.db.WithContext(ctx).Where("ticket_id = ?", ticketID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func (s *agent24UISessionStore) TicketRevoked(ctx context.Context, ticketID string) (bool, error) {
 	var row types.Agent24UITicket
 	err := s.db.WithContext(ctx).Where("ticket_id = ?", ticketID).Take(&row).Error

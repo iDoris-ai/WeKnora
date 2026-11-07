@@ -1,9 +1,9 @@
 // Agent24 fork product patch A24-KB-16 (CONTRACT-READONLY-v1 r10 R10.1–R10.4, WeKnora#41).
 //
-// One audit row per POST /api/v1/agent24/knowledge/{ready,search,read} and the UI ticket and revocation
-// endpoints (A24-KB-32). The middleware sits outside Recovery and Auth, so the row sees the status and size
-// that were actually written, including a rejection the auth
-// envelope rewrote and Recovery's 500.
+// One audit row per POST /api/v1/agent24/knowledge/{ready,search,read}, the UI ticket and revocation
+// endpoints (A24-KB-32), and the UI exchange (POST) and session probe (GET) (A24-KB-33). The middleware
+// sits outside Recovery and Auth, so the row sees the status and size that were actually written, including
+// a rejection the auth envelope rewrote and Recovery's 500.
 // Extra fields live in Details. ActorUserID stays empty (R10.4). The query, document text, snippets,
 // content_tag and raw credentials are not recorded (R10.3).
 
@@ -35,6 +35,9 @@ const (
 	// A24-KB-32
 	agent24AuditActionUITicket types.AuditAction = "knowledge.ui.ticket"
 	agent24AuditActionUIRevoke types.AuditAction = "knowledge.ui.revoke"
+	// A24-KB-33
+	agent24AuditActionUIExchange types.AuditAction = "knowledge.ui.exchange"
+	agent24AuditActionUISession  types.AuditAction = "knowledge.ui.session"
 
 	agent24AuditScopeType = "agent24_knowledge"
 
@@ -48,6 +51,9 @@ const (
 	// A24-KB-32
 	agent24AuditPathUITickets     = "/api/v1/agent24/knowledge/ui/tickets"
 	agent24AuditPathUIRevocations = "/api/v1/agent24/knowledge/ui/revocations"
+	// A24-KB-33
+	agent24AuditPathUIExchange = "/api/v1/agent24/knowledge/ui/exchange"
+	agent24AuditPathUISession  = "/api/v1/agent24/knowledge/ui/session"
 
 	// agent24AuditWriteTimeout bounds the row write. The row is written after the response is flushed, on a
 	// context that ignores the client leaving, so a stalled store would otherwise hold the handler forever.
@@ -80,6 +86,11 @@ type agent24AuditFacts struct {
 	Resource       any
 	Revision       any
 	ResultCount    int
+	// A24-KB-33: exchange and the session probe have no Auth principal. When set, these win, and the row
+	// is not treated as anonymous.
+	Principal    *types.Principal
+	CredentialID string
+	TenantID     uint64
 }
 
 type agent24AuditPrincipal struct {
@@ -360,13 +371,19 @@ func agent24FlushResponse(c *gin.Context) {
 }
 
 func agent24KnowledgeAuditPath(c *gin.Context) bool {
-	if c.Request.Method != http.MethodPost {
-		return false
-	}
-	switch c.Request.URL.Path {
-	case agent24AuditPathReady, agent24AuditPathSearch, agent24AuditPathRead,
-		agent24AuditPathUITickets, agent24AuditPathUIRevocations: // A24-KB-32
-		return true
+	switch c.Request.Method {
+	case http.MethodPost:
+		switch c.Request.URL.Path {
+		case agent24AuditPathReady, agent24AuditPathSearch, agent24AuditPathRead,
+			agent24AuditPathUITickets, agent24AuditPathUIRevocations, // A24-KB-32
+			agent24AuditPathUIExchange: // A24-KB-33
+			return true
+		default:
+			return false
+		}
+	case http.MethodGet:
+		// A24-KB-33: the session probe is the only audited GET.
+		return c.Request.URL.Path == agent24AuditPathUISession
 	default:
 		return false
 	}
@@ -382,6 +399,10 @@ func agent24AuditAction(path string) types.AuditAction {
 		return agent24AuditActionUITicket
 	case agent24AuditPathUIRevocations: // A24-KB-32
 		return agent24AuditActionUIRevoke
+	case agent24AuditPathUIExchange: // A24-KB-33
+		return agent24AuditActionUIExchange
+	case agent24AuditPathUISession: // A24-KB-33
+		return agent24AuditActionUISession
 	default:
 		return agent24AuditActionReady
 	}
@@ -438,6 +459,11 @@ func agent24GinPrincipal(c *gin.Context) (types.Principal, bool) {
 	return p, ok
 }
 
+// agent24AuditIdentified reports a row whose handler supplied a ticket identity (A24-KB-33).
+func agent24AuditIdentified(facts *agent24AuditFacts) bool {
+	return facts != nil && (facts.Principal != nil || facts.CredentialID != "" || facts.TenantID != 0)
+}
+
 // agent24AuditAnonymous: R10.2 records principal, credential_id and tenant_id as null for credential_missing
 // and credential_invalid, even when Auth had already bound them (the integration credential gate rejects
 // platform keys and direct-mode tenant keys after Auth).
@@ -478,7 +504,8 @@ func agent24KnowledgeAuditEntry(
 	if path == "" {
 		path = c.Request.URL.Path
 	}
-	anonymous := agent24AuditAnonymous(outcome, reason)
+	// A24-KB-33: a credential_invalid that the handler tied to a ticket is not an anonymous row.
+	anonymous := agent24AuditAnonymous(outcome, reason) && !agent24AuditIdentified(facts)
 	// A panic after a bucket admitted the row (building or encoding the details) never hands settle to the
 	// caller; settle here instead, so the count goes back and no pending count is left behind.
 	defer func() {
@@ -518,7 +545,9 @@ func agent24KnowledgeAuditEntry(
 	}
 	var tenant uint64
 	if !anonymous {
-		if r, ok := agent24CredentialRejectionOf(c); ok {
+		if agent24AuditIdentified(facts) {
+			tenant = facts.TenantID
+		} else if r, ok := agent24CredentialRejectionOf(c); ok {
 			tenant = r.TenantID
 		} else {
 			tenant = agent24AuditTenantColumn(c)
@@ -579,7 +608,19 @@ func agent24AuditDetail(
 		},
 	}
 	if !anonymous {
-		if r, ok := agent24CredentialRejectionOf(c); ok {
+		if agent24AuditIdentified(facts) {
+			if facts.Principal != nil {
+				d.Principal = &agent24AuditPrincipal{Type: facts.Principal.Type, ID: facts.Principal.ID}
+			}
+			if facts.CredentialID != "" {
+				credentialID := facts.CredentialID
+				d.CredentialID = &credentialID
+			}
+			if facts.TenantID != 0 {
+				tenantID := facts.TenantID
+				d.TenantID = &tenantID
+			}
+		} else if r, ok := agent24CredentialRejectionOf(c); ok {
 			if r.Principal != (types.Principal{}) {
 				d.Principal = &agent24AuditPrincipal{Type: r.Principal.Type, ID: r.Principal.ID}
 			}

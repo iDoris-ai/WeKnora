@@ -46,6 +46,9 @@ type Agent24UISessionStore interface {
 	// TicketRevoked reports whether the ticket is revoked. revoked_at set is true. A missing row is true
 	// too: a JWT whose ticket cannot be found is refused (fail closed).
 	TicketRevoked(ctx context.Context, ticketID string) (bool, error)
+	// GetTicketByID returns the ticket row for ticketID (A24-KB-33). A missing row is (nil, nil).
+	// TicketRevoked stays fail-closed and does not return the row.
+	GetTicketByID(ctx context.Context, ticketID string) (*types.Agent24UITicket, error)
 	// FamilyRevoked reports whether the view family is revoked. revoked_at set is true. A missing row is
 	// true too (fail closed).
 	FamilyRevoked(ctx context.Context, vph string) (bool, error)

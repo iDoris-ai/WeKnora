@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -117,6 +118,11 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 		writeAgent24KnowledgeError(c, agent24Forbidden("empty_scope"), echo)
 		return
 	}
+	// A24-KB-33: exchange rechecks C by the key id recorded here. 0 is not a key.
+	if apiScope.KeyID == 0 {
+		writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), echo)
+		return
+	}
 	if h.scope == nil {
 		writeAgent24KnowledgeError(c, agent24Internal(), echo)
 		return
@@ -156,12 +162,19 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 		writeAgent24KnowledgeError(c, agent24Internal(), echo)
 		return
 	}
+	// A24-KB-33: the mode is read the same way newAgent24Rechecker reads it. No tenant row means "".
+	var principalMode string
+	if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
+		principalMode = string(middleware.Agent24PrincipalMode(tenant))
+	}
 	ticket := &types.Agent24UITicket{
 		TicketHash:          hash,
 		TicketID:            ticketID,
 		TenantID:            tenantID,
 		Principal:           principal.StorageID(),
 		CredentialID:        credID,
+		KeyID:               apiScope.KeyID,
+		PrincipalMode:       principalMode,
 		CredentialExpiresAt: credExp,
 		BindingTag:          binding,
 		PartitionTag:        partition,

@@ -63,6 +63,12 @@ var noAuthAPI = map[string][]string{
 	// before GET to validate Content-Type / Content-Length when rendering
 	// image previews — both verbs must be allowed for image links to work.
 	"/api/v1/files/presigned": {"GET", "HEAD"},
+	// A24-KB-33: the exchange and the session probe are authenticated by the one-time ticket or the
+	// session JWT plus the view proof. Auth must not see them: it would treat the session JWT as a
+	// user token and reject it, and a request with no credential as credential_missing.
+	// Exact method only. GET exchange and POST session stay authenticated, and unregistered.
+	"/api/v1/agent24/knowledge/ui/exchange": {"POST"},
+	"/api/v1/agent24/knowledge/ui/session":  {"GET"},
 }
 
 // 检查请求是否在无需认证的API列表中

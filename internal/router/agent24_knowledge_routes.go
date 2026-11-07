@@ -11,10 +11,11 @@ import (
 )
 
 // RegisterAgent24KnowledgeRoutes registers the Agent24 knowledge integration
-// endpoints (fork patches A24-KB-02, A24-KB-10, A24-KB-15, A24-KB-32); a nil handler skips its route.
+// endpoints (fork patches A24-KB-02, A24-KB-10, A24-KB-15, A24-KB-32, A24-KB-33); a nil handler skips its route.
 func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24KnowledgeReadyHandler,
 	s *handler.Agent24KnowledgeSearchHandler, rd *handler.Agent24KnowledgeReadHandler,
 	tickets *handler.Agent24KnowledgeUITicketsHandler, revocations *handler.Agent24KnowledgeUIRevocationsHandler,
+	exchange *handler.Agent24KnowledgeUIExchangeHandler, session *handler.Agent24KnowledgeUISessionHandler,
 	g *rbacGuards,
 ) {
 	if h != nil {
@@ -35,6 +36,14 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 	if revocations != nil {
 		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/ui/revocations",
 			apiKeyRetrieve(apiKeyAny()), g.Viewer(), revocations.Revoke)
+	}
+	// A24-KB-33: no API key and no role. The ticket or the session JWT is the credential.
+	// Registered only when the handler is non-nil, which is when the UI session key is configured.
+	if exchange != nil {
+		r.POST("/agent24/knowledge/ui/exchange", exchange.Exchange)
+	}
+	if session != nil {
+		r.GET("/agent24/knowledge/ui/session", session.Probe)
 	}
 }
 
