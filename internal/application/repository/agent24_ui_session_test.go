@@ -697,3 +697,22 @@ func TestAgent24UISessionLeakRevokeConfirmsRow(t *testing.T) {
 	require.NoError(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-c2", now))
 	require.Equal(t, int64(1), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-c2"))
 }
+
+// A24-KB-33: at most one background retry per family is in flight.
+func TestAgent24UISessionPendingRetrySingleFlight(t *testing.T) {
+	store := NewAgent24UISessionStore(agent24UISessionDB(t)).(*agent24UISessionStore)
+	_, ok := store.startPendingRetry("vph-s")
+	require.False(t, ok, "nothing pending")
+	store.addPendingRevoke("vph-s", agent24UIPendingRevoke{tenantID: 7, principal: "principal-a"})
+	_, ok = store.startPendingRetry("vph-s")
+	require.True(t, ok)
+	_, ok = store.startPendingRetry("vph-s")
+	require.False(t, ok, "a second retry started while one is in flight")
+	store.endPendingRetry("vph-s")
+	_, ok = store.startPendingRetry("vph-s")
+	require.True(t, ok)
+	// A later failure does not replace the first owner.
+	store.addPendingRevoke("vph-s", agent24UIPendingRevoke{tenantID: 99, principal: "principal-b"})
+	p, _ := store.pendingRevoke("vph-s")
+	require.Equal(t, uint64(7), p.tenantID)
+}
