@@ -49,7 +49,7 @@ type Agent24UISessionStore interface {
 	// (FamilyRevoked, CreateTicket) while FamilyRevoked retries the write in the background, so a failed
 	// leak revocation does not leave a leaked session usable once the database recovers. RevokeFamily
 	// never adds or clears that pending state. The pending state does not survive a restart; tickets and
-	// session JWTs from before the restart are refused instead (agent24uisession.Epoch, U2.3).
+	// session JWTs from before the restart are refused instead (agent24uisession.BootID, U2.3).
 	RevokeLeakedFamily(ctx context.Context, tenantID uint64, principal, vph string, now time.Time) error
 	// TicketRevoked reports whether the ticket is revoked. revoked_at set is true. A missing row is true
 	// too: a JWT whose ticket cannot be found is refused (fail closed).

@@ -22,8 +22,8 @@ type agent24UISessionDeps struct {
 	key    []byte
 	issuer string
 	stored agent24UIStoredDeps
-	// epoch refuses session JWTs issued before this process started (U2.3, A24-KB-33).
-	epoch time.Time
+	// boot refuses session JWTs issued by another process (U2.3, A24-KB-33).
+	boot string
 }
 
 // Agent24KnowledgeUISessionHandler serves GET /api/v1/agent24/knowledge/ui/session.
@@ -58,7 +58,7 @@ func NewAgent24KnowledgeUISessionHandler(
 		key:    copied,
 		issuer: agent24uisession.IssuerFromEnv(),
 		stored: agent24UIStoredDeps{tenants: tenants, keys: keys, revocations: revocations, key: copied},
-		epoch:  agent24uisession.Epoch(),
+		boot:   agent24uisession.BootID(),
 	}}, nil
 }
 
@@ -111,11 +111,11 @@ func agent24UIVerifySession(
 		return nil, agent24UITicketForAudit(ctx, deps.store, claims.TicketID), types.TenantAPIKeyScope{},
 			agent24Unauthorized("credential_invalid")
 	}
-	// U2.3: a session issued before this process started is refused. A revocation that could not be
+	// U2.3: a session issued by another process (before a restart) is refused. A revocation that could not be
 	// written lived only in the previous process. Checked after the view proof, so only the holder of the
 	// view learns that the server restarted: details.restarted lets the host leave this rebuild out of the
 	// U3.8 count (Agent24#1645, decision 2026-11-08-uib-restart-signal). It is still a view-level rebuild.
-	if agent24uisession.IssuedBefore(claims, deps.epoch) {
+	if !agent24uisession.IssuedByBoot(claims, deps.boot) {
 		e := agent24Unauthorized("credential_invalid")
 		e.Extra = map[string]any{"restarted": true}
 		return nil, agent24UITicketForAudit(ctx, deps.store, claims.TicketID), types.TenantAPIKeyScope{}, e

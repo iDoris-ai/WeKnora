@@ -32,6 +32,7 @@ func agent24UISessionHandler(
 		store:  store,
 		key:    agent24UIExchangeKey(),
 		issuer: agent24uisession.DefaultIssuer,
+		boot:   agent24uisession.BootID(),
 		stored: agent24UIStoredDeps{
 			tenants:     agent24UITenantStub{tenant: tenant},
 			keys:        agent24UIKeyStub{keys: keys},

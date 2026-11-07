@@ -46,8 +46,8 @@ type Agent24KnowledgeUIExchangeHandler struct {
 	key    []byte
 	issuer string
 	limit  *agent24UIExchangeLimiter
-	// epoch refuses tickets created before this process started (U2.3, A24-KB-33).
-	epoch time.Time
+	// boot refuses tickets created by another process (U2.3, A24-KB-33).
+	boot string
 }
 
 // NewAgent24KnowledgeUIExchangeHandler builds the exchange handler.
@@ -80,7 +80,7 @@ func NewAgent24KnowledgeUIExchangeHandler(
 		key:    copied,
 		issuer: agent24uisession.IssuerFromEnv(),
 		limit:  newAgent24UIExchangeLimiter(),
-		epoch:  agent24uisession.Epoch(),
+		boot:   agent24uisession.BootID(),
 	}, nil
 }
 
@@ -193,8 +193,8 @@ func (h *Agent24KnowledgeUIExchangeHandler) Exchange(c *gin.Context) {
 		agent24UIRefuseTicket(c, ticket, "ticket_expired", false)
 		return
 	}
-	// U2.3: a ticket from before this process started is refused like an expired one.
-	if ticket.CreatedAt.Before(h.epoch) {
+	// U2.3: a ticket from another process (before a restart) is refused like an expired one.
+	if h.boot == "" || ticket.BootID != h.boot {
 		agent24UIRefuseTicket(c, ticket, "ticket_before_start", false)
 		return
 	}

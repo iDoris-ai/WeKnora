@@ -101,6 +101,7 @@ func agent24UIExchangeHandler(
 		key:    agent24UIExchangeKey(),
 		issuer: agent24uisession.DefaultIssuer,
 		limit:  newAgent24UIExchangeLimiter(),
+		boot:   agent24uisession.BootID(),
 	}
 }
 
@@ -131,6 +132,7 @@ func agent24UISeedTicket(
 		BindingTag: agent24UITestTag(1), PartitionTag: agent24UITestTag(2),
 		VPH: vph, Generation: 4, ExpiresAt: time.Now().Add(time.Minute),
 		PrincipalSecretTag: agent24UIPrincipalSecretTag(agent24UIExchangeKey(), &types.Tenant{ID: 9}),
+		BootID:             agent24uisession.BootID(),
 	}
 	require.NoError(t, ticket.SetScopeKnowledgeBaseIDs([]string{"kb-b", "kb-a"}))
 	if tweak != nil {

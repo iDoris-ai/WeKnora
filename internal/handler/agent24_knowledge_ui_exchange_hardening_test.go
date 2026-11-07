@@ -246,21 +246,22 @@ func TestAgent24UILeakRevocationFailureStillRefusesSession(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
-// U2.3 (David 2026-11-08, option B): tickets created and session JWTs issued before this process started
-// are refused, so a leak revocation that only lived in the previous process cannot be outlived.
-func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
-	t.Run("constructors take the process epoch", func(t *testing.T) {
+// U2.3 (David 2026-11-08, option B): tickets and session JWTs from another process (before a restart)
+// are refused, so a leak revocation that only lived in the previous process cannot be outlived. The boot id
+// is random, so a restart in the same second or a clock step back is caught as well.
+func TestAgent24UIBootRefusesOtherProcess(t *testing.T) {
+	t.Run("constructors take the boot id", func(t *testing.T) {
 		t.Setenv(Agent24KnowledgeModeEnv, Agent24KnowledgeModeIntegration)
 		t.Setenv(Agent24KnowledgeTagKeyEnv, "")
 		t.Setenv(agent24uisession.KeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)))
 		ex, err := NewAgent24KnowledgeUIExchangeHandler(nil, nil, nil, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, ex)
-		require.Equal(t, agent24uisession.Epoch(), ex.epoch)
+		require.Equal(t, agent24uisession.BootID(), ex.boot)
 		pr, err := NewAgent24KnowledgeUISessionHandler(nil, nil, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, pr)
-		require.Equal(t, agent24uisession.Epoch(), pr.deps.epoch)
+		require.Equal(t, agent24uisession.BootID(), pr.deps.boot)
 		tk, err := NewAgent24KnowledgeUITicketsHandler(nil, nil, nil, nil, nil, nil, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, tk)
@@ -268,20 +269,21 @@ func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
 	})
 
 	proof, vph := agent24UIViewSecret()
-	epoch := time.Now().Add(-time.Minute).Truncate(time.Second)
 
 	t.Run("exchange", func(t *testing.T) {
 		_, store := agent24UIHandlerDB(t)
 		before := agent24UIRawTicket(97)
 		agent24UISeedTicket(t, store, before, vph, func(ticket *types.Agent24UITicket) {
-			ticket.CreatedAt = epoch.Add(-time.Second)
+			ticket.BootID = "previous-process-boot"
+		})
+		// Created in the same second as this process started, by the previous one: still refused.
+		same := agent24UIRawTicket(101)
+		agent24UISeedTicket(t, store, same, vph, func(ticket *types.Agent24UITicket) {
+			ticket.BootID = ""
 		})
 		after := agent24UIRawTicket(98)
-		agent24UISeedTicket(t, store, after, vph, func(ticket *types.Agent24UITicket) {
-			ticket.CreatedAt = epoch
-		})
+		agent24UISeedTicket(t, store, after, vph, nil)
 		h := agent24UIExchangeHandler(store, agent24UILiveKeysAB(), nil, nil, nil)
-		h.epoch = epoch
 		w, stub := agent24UIExchangeCall(h, before, proof, "203.0.113.97:1")
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		_, _, details := agent24UIError(t, w)
@@ -291,6 +293,16 @@ func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
 		require.NotContains(t, view.Resource, "leak")
 		unknown, _ := agent24UIExchangeCall(h, agent24UIRawTicket(99), proof, "203.0.113.97:2")
 		require.Equal(t, unknown.Body.String(), w.Body.String(), "U2.7: same body as the other ticket refusals")
+		w, _ = agent24UIExchangeCall(h, same, proof, "203.0.113.97:4")
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		// A handler without a boot id refuses every ticket, an empty recorded one included.
+		_, store2 := agent24UIHandlerDB(t)
+		blank := agent24UIRawTicket(102)
+		agent24UISeedTicket(t, store2, blank, vph, func(ticket *types.Agent24UITicket) { ticket.BootID = "" })
+		unbooted := agent24UIExchangeHandler(store2, agent24UILiveKeysAB(), nil, nil, nil)
+		unbooted.boot = ""
+		w, _ = agent24UIExchangeCall(unbooted, blank, proof, "203.0.113.97:5")
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		w, _ = agent24UIExchangeCall(h, after, proof, "203.0.113.97:3")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	})
@@ -298,31 +310,33 @@ func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
 	t.Run("probe", func(t *testing.T) {
 		_, store := agent24UIHandlerDB(t)
 		ticket := agent24UISeedTicket(t, store, agent24UIRawTicket(100), vph, nil)
-		h := agent24UISessionHandler(store, agent24UILiveKeysAB(), nil, nil)
-		h.deps.epoch = epoch
-		old := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch.Add(-2*time.Second), 10*time.Minute)
-		w, stub, logs := agent24UIProbeCall(t, h, "Bearer "+old, proof)
+		// The handler stands for a restarted process; this process issued the JWTs, even "just now".
+		restarted := agent24UISessionHandler(store, agent24UILiveKeysAB(), nil, nil)
+		restarted.deps.boot = "next-process-boot"
+		old := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), time.Now(), 10*time.Minute)
+		w, stub, logs := agent24UIProbeCall(t, restarted, "Bearer "+old, proof)
 		agent24UIRequireProbeRefusal(t, w, stub, logs, "credential_invalid", true, old, proof)
 		_, _, details := agent24UIError(t, w)
-		require.Equal(t, true, details["restarted"], "Agent24#1645: a pre-start session says the server restarted")
+		require.Equal(t, true, details["restarted"], "Agent24#1645: a session from before the restart says so")
 		// Without the view proof, or with a wrong one, the refusal does not say so.
 		for _, bad := range []string{"", agent24UITestTag(8)} {
-			w, _, _ = agent24UIProbeCall(t, h, "Bearer "+old, bad)
+			w, _, _ = agent24UIProbeCall(t, restarted, "Bearer "+old, bad)
 			require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 			_, reason, details := agent24UIError(t, w)
 			require.Equal(t, "credential_invalid", reason)
 			require.NotContains(t, details, "restarted")
 		}
-		// Order (U3.4, #1646): expiry is decided inside Verify, before the view proof and the epoch, so a
-		// JWT that is both expired and from before the start is credential_expired without restarted.
-		expired := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch.Add(-20*time.Minute), time.Minute)
-		w, _, _ = agent24UIProbeCall(t, h, "Bearer "+expired, proof)
+		// Order (U3.4, #1646): expiry is decided inside Verify, before the view proof and the boot check, so
+		// a JWT that is both expired and from before the restart is credential_expired without restarted.
+		expired := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), time.Now().Add(-20*time.Minute), time.Minute)
+		w, _, _ = agent24UIProbeCall(t, restarted, "Bearer "+expired, proof)
 		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		_, reason, details := agent24UIError(t, w)
 		require.Equal(t, "credential_expired", reason)
 		require.NotContains(t, details, "restarted")
-		fresh := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch, 10*time.Minute)
-		w, _, _ = agent24UIProbeCall(t, h, "Bearer "+fresh, proof)
+		// The same JWT on the process that issued it is fine.
+		same := agent24UISessionHandler(store, agent24UILiveKeysAB(), nil, nil)
+		w, _, _ = agent24UIProbeCall(t, same, "Bearer "+old, proof)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	})
 }

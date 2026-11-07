@@ -97,7 +97,7 @@ func Issue(key []byte, issuer string, c Claims, now time.Time, lifetime time.Dur
 	c.IssuedAt = jwt.NewNumericDate(now)
 	c.NotBefore = jwt.NewNumericDate(now)
 	c.ExpiresAt = jwt.NewNumericDate(now.Add(lifetime))
-	c.ID = uuid.NewString()
+	c.ID = bootID + "." + uuid.NewString() // A24-KB-33: the boot id lets a restart refuse it (U2.3)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, c)
 	signed, err := token.SignedString(key)
 	if err != nil {

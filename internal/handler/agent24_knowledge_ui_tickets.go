@@ -191,6 +191,7 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 		KeyID:               apiScope.KeyID,
 		PrincipalMode:       principalMode,
 		PrincipalSecretTag:  agent24UIPrincipalSecretTag(h.key, tenant),
+		BootID:              agent24uisession.BootID(),
 		CredentialExpiresAt: credExp,
 		BindingTag:          binding,
 		PartitionTag:        partition,
