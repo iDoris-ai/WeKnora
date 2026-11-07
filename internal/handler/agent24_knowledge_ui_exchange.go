@@ -336,7 +336,7 @@ func (h *Agent24KnowledgeUIExchangeHandler) agent24UILeakFamily(
 	// for a completed leak response; the family stays revocable by the next presentation.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), agent24UIRevokeTimeout)
 	defer cancel()
-	if err := h.store.RevokeFamily(ctx, ticket.TenantID, ticket.Principal, ticket.VPH, now); err != nil {
+	if err := h.store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, ticket.VPH, now); err != nil {
 		agent24UILogErr(ctx, "ui exchange revoke family", err)
 		writeAgent24KnowledgeError(c, agent24Internal(), agent24KnowledgeEcho{})
 		return

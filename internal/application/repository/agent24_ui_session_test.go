@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -536,11 +537,50 @@ func TestAgent24UISessionConsumeTicketReadFailureRollsBack(t *testing.T) {
 	require.NotNil(t, row)
 }
 
-// A24-KB-33: a family revocation whose write fails is still in force (U2.8): FamilyRevoked is true and
-// CreateTicket refuses the family, and the next FamilyRevoked after the database recovers writes the row.
 const agent24RevokedVPH = "revoked_at IS NOT NULL AND vph = ?"
 
-func TestAgent24UISessionRevokeFamilyWriteFailureStaysRevoked(t *testing.T) {
+// agent24FamilyWriteSwitch registers one update callback on db for the families table. It never changes
+// afterwards, so background retries cannot race a registration: failing makes the write fail, and a
+// non-nil hold blocks the write until it is closed. writes counts the writes that reached it.
+type agent24FamilyWriteSwitch struct {
+	failing atomic.Bool
+	writes  atomic.Int32
+	mu      sync.Mutex
+	hold    chan struct{}
+}
+
+func newAgent24FamilyWriteSwitch(t *testing.T, db *gorm.DB) *agent24FamilyWriteSwitch {
+	t.Helper()
+	sw := &agent24FamilyWriteSwitch{}
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("agent24_test_family_write",
+		func(tx *gorm.DB) {
+			if tx.Statement.Table != "agent24_ui_families" {
+				return
+			}
+			sw.writes.Add(1)
+			sw.mu.Lock()
+			hold := sw.hold
+			sw.mu.Unlock()
+			if hold != nil {
+				<-hold
+			}
+			if sw.failing.Load() {
+				_ = tx.AddError(fmt.Errorf("write down"))
+			}
+		}))
+	return sw
+}
+
+func (sw *agent24FamilyWriteSwitch) holdWrites() chan struct{} {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	sw.hold = make(chan struct{})
+	return sw.hold
+}
+
+// A24-KB-33: a leak revocation whose write fails is still in force (U2.8): FamilyRevoked is true and
+// CreateTicket refuses the family, and once the database recovers a background retry writes the row.
+func TestAgent24UISessionLeakRevokeWriteFailureStaysRevoked(t *testing.T) {
 	db := agent24UISessionDB(t)
 	store := NewAgent24UISessionStore(db)
 	ctx := context.Background()
@@ -551,13 +591,9 @@ func TestAgent24UISessionRevokeFamilyWriteFailureStaysRevoked(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, revoked)
 
-	const name = "agent24_test_fail_family_update"
-	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
-		if tx.Statement.Table == "agent24_ui_families" {
-			_ = tx.AddError(fmt.Errorf("write down"))
-		}
-	}))
-	require.Error(t, store.RevokeFamily(ctx, ticket.TenantID, ticket.Principal, "vph-p", now))
+	sw := newAgent24FamilyWriteSwitch(t, db)
+	sw.failing.Store(true)
+	require.Error(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-p", now))
 	revoked, err = store.FamilyRevoked(ctx, "vph-p")
 	require.NoError(t, err)
 	require.True(t, revoked, "a failed revocation must still hold")
@@ -565,13 +601,77 @@ func TestAgent24UISessionRevokeFamilyWriteFailureStaysRevoked(t *testing.T) {
 	require.ErrorIs(t, store.CreateTicket(ctx, next), interfaces.ErrAgent24UIFamilyRevoked)
 	require.Equal(t, int64(0), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-p"))
 
-	require.NoError(t, db.Callback().Update().Remove(name))
-	revoked, err = store.FamilyRevoked(ctx, "vph-p")
-	require.NoError(t, err)
-	require.True(t, revoked)
-	require.Equal(t, int64(1), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-p"))
+	sw.failing.Store(false)
+	require.Eventually(t, func() bool {
+		revoked, err := store.FamilyRevoked(ctx, "vph-p")
+		return err == nil && revoked &&
+			countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-p") == 1
+	}, 5*time.Second, 10*time.Millisecond)
 	// The row now carries the revocation on its own: a fresh store over the same database sees it.
 	revoked, err = NewAgent24UISessionStore(db).FamilyRevoked(ctx, "vph-p")
 	require.NoError(t, err)
 	require.True(t, revoked)
+}
+
+// A24-KB-33: the host revocation path (RevokeFamily) by another owner neither clears nor replaces a
+// pending leak revocation, and has no effect on the family (U3.7).
+func TestAgent24UISessionOtherOwnerDoesNotTouchPendingRevoke(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-o", "hash-o", "id-o", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+
+	sw := newAgent24FamilyWriteSwitch(t, db)
+	sw.failing.Store(true)
+	require.Error(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-o", now))
+	// Another owner's revocation fails while the database is down, then succeeds as a no-op after it
+	// recovers. Neither may change the pending entry.
+	require.Error(t, store.RevokeFamily(ctx, 99, "principal-b", "vph-o", now))
+	sw.failing.Store(false)
+	require.NoError(t, store.RevokeFamily(ctx, 99, "principal-b", "vph-o", now))
+	require.Equal(t, int64(0), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-o"))
+
+	revoked, err := store.FamilyRevoked(ctx, "vph-o")
+	require.NoError(t, err)
+	require.True(t, revoked, "another owner's revocation cleared the pending leak revocation")
+	require.Eventually(t, func() bool {
+		var row types.Agent24UIFamily
+		if db.Where("vph = ?", "vph-o").Take(&row).Error != nil || row.RevokedAt == nil {
+			return false
+		}
+		return row.TenantID == ticket.TenantID && row.Principal == ticket.Principal
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// A24-KB-33: FamilyRevoked does not wait on the retry write, and one family has at most one retry in flight.
+func TestAgent24UISessionPendingRetryDoesNotBlock(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-b", "hash-b", "id-b", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+	sw := newAgent24FamilyWriteSwitch(t, db)
+	sw.failing.Store(true)
+	require.Error(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-b", now))
+	sw.failing.Store(false)
+	sw.writes.Store(0)
+	release := sw.holdWrites()
+
+	for i := 0; i < 5; i++ {
+		start := time.Now()
+		revoked, err := store.FamilyRevoked(ctx, "vph-b")
+		require.NoError(t, err)
+		require.True(t, revoked)
+		require.Less(t, time.Since(start), time.Second, "FamilyRevoked waited on the retry write")
+	}
+	require.Eventually(t, func() bool { return sw.writes.Load() == 1 }, 2*time.Second, 5*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, int32(1), sw.writes.Load(), "more than one retry in flight")
+	close(release)
+	require.Eventually(t, func() bool {
+		return countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-b") == 1
+	}, 5*time.Second, 10*time.Millisecond)
 }

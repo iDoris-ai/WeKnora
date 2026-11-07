@@ -70,7 +70,7 @@ func TestAgent24UISecretRotated(t *testing.T) {
 }
 
 // agent24UIRevokeSpy wraps the real store. It cancels the request after the ticket is consumed and
-// records whether RevokeFamily still had a live context; fail makes RevokeFamily return an error.
+// records whether RevokeLeakedFamily still had a live context; fail makes it return an error.
 type agent24UIRevokeSpy struct {
 	interfaces.Agent24UISessionStore
 	cancel   context.CancelFunc
@@ -90,7 +90,7 @@ func (s *agent24UIRevokeSpy) ConsumeTicket(
 	return ticket, first, err
 }
 
-func (s *agent24UIRevokeSpy) RevokeFamily(
+func (s *agent24UIRevokeSpy) RevokeLeakedFamily(
 	ctx context.Context, tenantID uint64, principal, vph string, now time.Time,
 ) error {
 	s.called = true
@@ -98,7 +98,7 @@ func (s *agent24UIRevokeSpy) RevokeFamily(
 	if s.fail {
 		return errors.New("store down")
 	}
-	err := s.Agent24UISessionStore.RevokeFamily(ctx, tenantID, principal, vph, now)
+	err := s.Agent24UISessionStore.RevokeLeakedFamily(ctx, tenantID, principal, vph, now)
 	s.revokeOK = err == nil
 	return err
 }
@@ -238,5 +238,8 @@ func TestAgent24UILeakRevocationFailureStillRefusesSession(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	_, reason, _ := agent24UIError(t, w)
 	require.Equal(t, "credential_invalid", reason)
-	require.NotNil(t, agent24UIFamilyRow(t, db, vph).RevokedAt)
+	require.Eventually(t, func() bool {
+		var row types.Agent24UIFamily
+		return db.Where("vph = ?", vph).Take(&row).Error == nil && row.RevokedAt != nil
+	}, 5*time.Second, 10*time.Millisecond)
 }
