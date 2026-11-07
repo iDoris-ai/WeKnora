@@ -1019,13 +1019,15 @@ func TestAgent24UISessionJWTRejected(t *testing.T) {
 		TenantAPIKeyService: agent24FakeKeySvc{key: &types.TenantAPIKey{
 			ID: 1, ScopeType: types.APIKeyScopePlatform,
 		}},
-		TenantService:                    agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}},
-		UserService:                      agent24RejectTokenUserSvc{},
-		Agent24KnowledgeSearchHandler:    &handler.Agent24KnowledgeSearchHandler{},
-		Agent24KnowledgeUITicketsHandler: &handler.Agent24KnowledgeUITicketsHandler{},
+		TenantService:                        agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}},
+		UserService:                          agent24RejectTokenUserSvc{},
+		Agent24KnowledgeSearchHandler:        &handler.Agent24KnowledgeSearchHandler{},
+		Agent24KnowledgeUITicketsHandler:     &handler.Agent24KnowledgeUITicketsHandler{},
+		Agent24KnowledgeUIRevocationsHandler: &handler.Agent24KnowledgeUIRevocationsHandler{},
 	})
 	for _, path := range []string{
 		"/api/v1/agent24/knowledge/ui/tickets",
+		"/api/v1/agent24/knowledge/ui/revocations",
 		"/api/v1/agent24/knowledge/search",
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
@@ -1035,5 +1037,9 @@ func TestAgent24UISessionJWTRejected(t *testing.T) {
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusUnauthorized, w.Code, "%s: %s", path, w.Body.String())
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
+		// Auth refuses before the handler runs; the UI prefix still gets no-store (U2.5).
+		if strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/") {
+			require.Equal(t, "no-store", w.Header().Get("Cache-Control"), path)
+		}
 	}
 }

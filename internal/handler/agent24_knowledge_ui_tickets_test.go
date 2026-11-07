@@ -639,3 +639,67 @@ func TestAgent24UITicketAudit(t *testing.T) {
 	require.NotContains(t, logs.String(), resp.Ticket)
 	require.Empty(t, agent24UIUnexpectedTokens(blob, binding, idHash))
 }
+
+// agent24UIShortenRecheck stands in for a recheck that finds the credential's expiry shortened after Auth.
+type agent24UIShortenRecheck struct{ exp time.Time }
+
+func (r agent24UIShortenRecheck) Recheck(ctx context.Context, _ http.Header) (context.Context, string, error) {
+	return types.WithAgent24CredentialExpiry(ctx, r.exp), "", nil
+}
+
+// The near-expiry check uses the expiry the recheck returns, not the one Auth saw.
+func TestAgent24UITicketNearExpiryAfterRecheck(t *testing.T) {
+	_, store := agent24UIHandlerDB(t)
+	id := agent24UIHappyIdentity(nil) // Auth saw a credential that does not expire
+	h := agent24UITicketsFor(store, agent24UIResolver(agent24UIKBs(id.tenant, "kb-a", "kb-b")...),
+		agent24UIShortenRecheck{exp: time.Now().Add(30 * time.Second)})
+	body := agent24UITicketJSON(agent24UITestTag(1), agent24UITestTag(2), agent24UITestTag(3), "1")
+	w := agent24UIServe(id.context(), h.Issue, agent24AuditPathUITickets, body)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	_, reason, _ := agent24UIError(t, w)
+	require.Equal(t, "credential_near_expiry", reason)
+}
+
+// U2.13: refusals after the request parses still carry the binding, and the ticket id hash once an id
+// exists. Neither the raw ticket nor any tag other than the binding is recorded.
+func TestAgent24UITicketRefusalAudit(t *testing.T) {
+	binding, partition, vph := agent24UITestTag(1), agent24UITestTag(2), agent24UITestTag(3)
+	body := agent24UITicketJSON(binding, partition, vph, "1")
+	resource := func(t *testing.T, stub *agent24AuditStub) map[string]any {
+		t.Helper()
+		require.Len(t, stub.entries, 1)
+		var details struct {
+			Outcome  string         `json:"outcome"`
+			Resource map[string]any `json:"resource"`
+		}
+		require.NoError(t, json.Unmarshal(stub.entries[0].Details, &details))
+		require.NotEqual(t, "ok", details.Outcome)
+		return details.Resource
+	}
+
+	soon := time.Now().Add(30 * time.Second)
+	near := agent24UIHappyIdentity(&soon)
+	_, store := agent24UIHandlerDB(t)
+	h := agent24UITicketsFor(store, agent24UIResolver(agent24UIKBs(near.tenant, "kb-a", "kb-b")...), nil)
+	stub := &agent24AuditStub{}
+	w := agent24UIAuditServe(t, stub, near, agent24AuditPathUITickets, body, h.Issue)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	res := resource(t, stub)
+	require.Equal(t, binding, res["binding_tag"])
+	require.NotContains(t, res, "ticket_id_hash")
+
+	id := agent24UIHappyIdentity(nil)
+	failing := agent24UITicketsFor(agent24UIFailStore{err: errors.New("store down")},
+		agent24UIResolver(agent24UIKBs(id.tenant, "kb-a", "kb-b")...), nil)
+	stub = &agent24AuditStub{}
+	w = agent24UIAuditServe(t, stub, id, agent24AuditPathUITickets, body, failing.Issue)
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	res = resource(t, stub)
+	require.Equal(t, binding, res["binding_tag"])
+	hash, ok := res["ticket_id_hash"].(string)
+	require.True(t, ok)
+	require.Len(t, hash, 43)
+	blob := string(stub.entries[0].Details)
+	require.NotContains(t, blob, partition)
+	require.NotContains(t, blob, vph)
+}

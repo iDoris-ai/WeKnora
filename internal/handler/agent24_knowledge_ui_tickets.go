@@ -86,6 +86,10 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
 	}
+	// U2.13: once the request parses, every outcome, refusals included, records the binding; the ticket id
+	// hash is added as soon as an id exists.
+	resource := map[string]any{"binding_tag": binding}
+	agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Resource = resource })
 	ctx, ok := agent24UIRecheck(c, h.recheck, echo)
 	if !ok {
 		return
@@ -137,6 +141,7 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 		writeAgent24KnowledgeError(c, agent24Internal(), echo)
 		return
 	}
+	resource["ticket_id_hash"] = agent24uisession.H("kb-ticket-id-v1", []byte(ticketID))
 	if h.store == nil {
 		writeAgent24KnowledgeError(c, agent24Internal(), echo)
 		return
@@ -173,10 +178,6 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 		f.Outcome = agent24AuditOK
 		f.Echo = echo
 		f.EffectiveScope = scope
-		f.Resource = map[string]any{
-			"ticket_id_hash": agent24uisession.H("kb-ticket-id-v1", []byte(ticketID)),
-			"binding_tag":    binding,
-		}
 	})
 	c.JSON(http.StatusOK, agent24UITicketResponse{
 		Ticket:    raw,

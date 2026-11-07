@@ -228,6 +228,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// Agent24 A24-KB-11: in integration mode Auth's rejections on the knowledge endpoints get the contract
 	// envelope.
 	installAgent24IntegrationAuthEnvelope(r)
+	// Agent24 A24-KB-32: UI session endpoints are never cached, including Auth's refusals (U2.5).
+	r.Use(handler.Agent24KnowledgeUINoStore())
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 	// Agent24 A24-KB-05: integration mode rejects platform API keys and direct principals.

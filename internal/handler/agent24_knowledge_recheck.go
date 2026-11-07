@@ -90,7 +90,14 @@ func (r agent24DefaultRechecker) Recheck(ctx context.Context, header http.Header
 	if !fresh.FullAccess && !fresh.HasCapability(types.APIKeyCapabilityRetrieve) {
 		return ctx, "credential_invalid", nil
 	}
-	return types.WithTenantAPIKeyScope(ctx, fresh), "", nil
+	ctx = types.WithTenantAPIKeyScope(ctx, fresh)
+	// A24-KB-32: the expiry as it is now replaces the one Auth saw, so an expiry shortened in between is
+	// what UI ticket issuance checks. When the credential no longer has one, the earlier value Auth wrote is
+	// kept: that is the conservative side.
+	if res.ExpiresAt != nil {
+		ctx = types.WithAgent24CredentialExpiry(ctx, *res.ExpiresAt)
+	}
+	return ctx, "", nil
 }
 
 func (r agent24DefaultRechecker) recheckBearer(
