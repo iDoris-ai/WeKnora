@@ -675,3 +675,25 @@ func TestAgent24UISessionPendingRetryDoesNotBlock(t *testing.T) {
 		return countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-b") == 1
 	}, 5*time.Second, 10*time.Millisecond)
 }
+
+// A24-KB-33: RevokeLeakedFamily succeeds only once the row is confirmed revoked. A write that matched no
+// row of an existing family (the owner does not match) is an error, and the family stays pending.
+func TestAgent24UISessionLeakRevokeConfirmsRow(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-c2", "hash-c2", "id-c2", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+
+	require.Error(t, store.RevokeLeakedFamily(ctx, 99, "principal-b", "vph-c2", now))
+	require.Equal(t, int64(0), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-c2"))
+	revoked, err := store.FamilyRevoked(ctx, "vph-c2")
+	require.NoError(t, err)
+	require.True(t, revoked)
+
+	// A family that no longer exists is done: FamilyRevoked treats a missing row as revoked.
+	require.NoError(t, store.RevokeLeakedFamily(ctx, 7, "principal-a", "vph-missing", now))
+	require.NoError(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-c2", now))
+	require.Equal(t, int64(1), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-c2"))
+}

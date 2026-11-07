@@ -22,6 +22,8 @@ type agent24UISessionDeps struct {
 	key    []byte
 	issuer string
 	stored agent24UIStoredDeps
+	// epoch refuses session JWTs issued before this process started (U2.3, A24-KB-33).
+	epoch time.Time
 }
 
 // Agent24KnowledgeUISessionHandler serves GET /api/v1/agent24/knowledge/ui/session.
@@ -56,6 +58,7 @@ func NewAgent24KnowledgeUISessionHandler(
 		key:    copied,
 		issuer: agent24uisession.IssuerFromEnv(),
 		stored: agent24UIStoredDeps{tenants: tenants, keys: keys, revocations: revocations, key: copied},
+		epoch:  agent24uisession.Epoch(),
 	}}, nil
 }
 
@@ -102,6 +105,12 @@ func agent24UIVerifySession(
 			return nil, nil, types.TenantAPIKeyScope{}, agent24Unauthorized("credential_expired")
 		}
 		return nil, nil, types.TenantAPIKeyScope{}, agent24Unauthorized("credential_invalid")
+	}
+	// U2.3: a session issued before this process started is refused. A revocation that could not be
+	// written lived only in the previous process.
+	if agent24uisession.IssuedBefore(claims, deps.epoch) {
+		return nil, agent24UITicketForAudit(ctx, deps.store, claims.TicketID), types.TenantAPIKeyScope{},
+			agent24Unauthorized("credential_invalid")
 	}
 	secret, perr := agent24uisession.ParseViewProof(header.Get(agent24UIViewProofHeader))
 	if perr != nil || !agent24uisession.VPHEqual(agent24uisession.VPH(secret), claims.Cnf.VPH) {

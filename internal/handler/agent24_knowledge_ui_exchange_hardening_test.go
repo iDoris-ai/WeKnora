@@ -3,7 +3,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -242,4 +244,65 @@ func TestAgent24UILeakRevocationFailureStillRefusesSession(t *testing.T) {
 		var row types.Agent24UIFamily
 		return db.Where("vph = ?", vph).Take(&row).Error == nil && row.RevokedAt != nil
 	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// U2.3 (David 2026-11-08, option B): tickets created and session JWTs issued before this process started
+// are refused, so a leak revocation that only lived in the previous process cannot be outlived.
+func TestAgent24UIEpochRefusesPreStart(t *testing.T) {
+	t.Run("constructors take the process epoch", func(t *testing.T) {
+		t.Setenv(Agent24KnowledgeModeEnv, Agent24KnowledgeModeIntegration)
+		t.Setenv(Agent24KnowledgeTagKeyEnv, "")
+		t.Setenv(agent24uisession.KeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)))
+		ex, err := NewAgent24KnowledgeUIExchangeHandler(nil, nil, nil, nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, ex)
+		require.Equal(t, agent24uisession.Epoch(), ex.epoch)
+		pr, err := NewAgent24KnowledgeUISessionHandler(nil, nil, nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, pr)
+		require.Equal(t, agent24uisession.Epoch(), pr.deps.epoch)
+		tk, err := NewAgent24KnowledgeUITicketsHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, tk)
+		require.Len(t, tk.key, 32)
+	})
+
+	proof, vph := agent24UIViewSecret()
+	epoch := time.Now().Add(-time.Minute).Truncate(time.Second)
+
+	t.Run("exchange", func(t *testing.T) {
+		_, store := agent24UIHandlerDB(t)
+		before := agent24UIRawTicket(97)
+		agent24UISeedTicket(t, store, before, vph, func(ticket *types.Agent24UITicket) {
+			ticket.CreatedAt = epoch.Add(-time.Second)
+		})
+		after := agent24UIRawTicket(98)
+		agent24UISeedTicket(t, store, after, vph, func(ticket *types.Agent24UITicket) {
+			ticket.CreatedAt = epoch
+		})
+		h := agent24UIExchangeHandler(store, agent24UILiveKeysAB(), nil, nil, nil)
+		h.epoch = epoch
+		w, stub := agent24UIExchangeCall(h, before, proof, "203.0.113.97:1")
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		_, view := agent24UIAuditOf(t, stub)
+		require.Equal(t, "ticket_before_start", view.Resource["internal_reason"])
+		require.NotContains(t, view.Resource, "leak")
+		unknown, _ := agent24UIExchangeCall(h, agent24UIRawTicket(99), proof, "203.0.113.97:2")
+		require.Equal(t, unknown.Body.String(), w.Body.String(), "U2.7: same body as the other ticket refusals")
+		w, _ = agent24UIExchangeCall(h, after, proof, "203.0.113.97:3")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+
+	t.Run("probe", func(t *testing.T) {
+		_, store := agent24UIHandlerDB(t)
+		ticket := agent24UISeedTicket(t, store, agent24UIRawTicket(100), vph, nil)
+		h := agent24UISessionHandler(store, agent24UILiveKeysAB(), nil, nil)
+		h.deps.epoch = epoch
+		old := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch.Add(-2*time.Second), 10*time.Minute)
+		w, stub, logs := agent24UIProbeCall(t, h, "Bearer "+old, proof)
+		agent24UIRequireProbeRefusal(t, w, stub, logs, "credential_invalid", true, old, proof)
+		fresh := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), epoch, 10*time.Minute)
+		w, _, _ = agent24UIProbeCall(t, h, "Bearer "+fresh, proof)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
 }
