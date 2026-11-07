@@ -75,9 +75,13 @@ func (s *agent24UISessionStore) CreateTicket(ctx context.Context, t *types.Agent
 			case family.RevokedAt != nil:
 				return interfaces.ErrAgent24UIFamilyRevoked
 			case extended.After(family.ExpiresAt):
+				// expires_at only moves later. The guard is in the WHERE so the database decides it on the
+				// current row: a concurrent issuance that read the same old value and wrote a later expiry first
+				// is not overwritten with this earlier one (which would let PurgeExpired drop a revoked family
+				// while one of its session JWTs is still valid).
 				err := tx.Model(&types.Agent24UIFamily{}).
-					Where("vph = ? AND tenant_id = ? AND principal = ? AND revoked_at IS NULL",
-						row.VPH, row.TenantID, row.Principal).
+					Where("vph = ? AND tenant_id = ? AND principal = ? AND revoked_at IS NULL AND expires_at < ?",
+						row.VPH, row.TenantID, row.Principal, extended).
 					Update("expires_at", extended).Error
 				if err != nil {
 					return err

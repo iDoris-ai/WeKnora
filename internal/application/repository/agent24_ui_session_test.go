@@ -321,6 +321,37 @@ func TestAgent24UISessionCreateTicketFamilyRace(t *testing.T) {
 	require.ErrorIs(t, store.CreateTicket(ctx, other), interfaces.ErrAgent24UIFamilyOwner)
 }
 
+// A concurrent issuance can write a later family expiry between this issuance's read and its update. The
+// update must not move expires_at back: the hook stands in for that other transaction.
+func TestAgent24UISessionFamilyExpiryNeverShrinks(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, store.CreateTicket(ctx, newAgent24UITicket(t, "vph-x", "hash-1", "id-1", now.Add(time.Minute))))
+
+	later := now.Add(2 * time.Hour)
+	fired := false
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:agent24_ui_family_race",
+		func(tx *gorm.DB) {
+			if fired || tx.Statement.Table != "agent24_ui_families" {
+				return
+			}
+			fired = true
+			require.NoError(t, tx.Session(&gorm.Session{NewDB: true}).
+				Exec("UPDATE agent24_ui_families SET expires_at = ? WHERE vph = ?", later, "vph-x").Error)
+		}))
+	t.Cleanup(func() { _ = db.Callback().Update().Remove("test:agent24_ui_family_race") })
+
+	// This ticket extends the family to now+2m+15m, earlier than the value the hook writes.
+	second := newAgent24UITicket(t, "vph-x", "hash-2", "id-2", now.Add(2*time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, second))
+	require.True(t, fired, "the family update ran")
+	var family types.Agent24UIFamily
+	require.NoError(t, db.Where("vph = ?", "vph-x").Take(&family).Error)
+	require.True(t, family.ExpiresAt.Equal(later), "expires_at moved back to %s", family.ExpiresAt)
+}
+
 func TestAgent24UISessionRevoke(t *testing.T) {
 	db := agent24UISessionDB(t)
 	store := NewAgent24UISessionStore(db)

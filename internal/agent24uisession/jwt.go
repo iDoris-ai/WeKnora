@@ -55,7 +55,8 @@ type Claims struct {
 	BindingTag         string       `json:"binding_tag"`
 	PartitionTag       string       `json:"partition_tag"`
 	Cnf                Confirmation `json:"cnf"`
-	Gen                int64        `json:"gen"`
+	// Gen is recorded, never checked (U3.9). It is a pointer so a missing claim is told apart from 0.
+	Gen *int64 `json:"gen"`
 }
 
 // Lifetime is the session lifetime at now. It starts at DefaultLifetime, shortens so exp is not after the
@@ -74,7 +75,7 @@ func Lifetime(now time.Time, credentialExpiresAt *time.Time) time.Duration {
 
 // Issue signs a session JWT with HS256. It sets iss, aud (exactly Audience), iat, nbf, exp and jti itself.
 // The header has no kid. lifetime must be positive and at most MaxLifetime. Subject, TenantID, TicketID,
-// ParentCredentialID, Cnf.VPH, Scope and Ops are required.
+// ParentCredentialID, BindingTag, PartitionTag, Gen, Cnf.VPH, Scope and Ops are required (U3.2).
 func Issue(key []byte, issuer string, c Claims, now time.Time, lifetime time.Duration) (string, error) {
 	if len(key) < minKeyBytes || issuer == "" {
 		return "", errors.New("session key or issuer is not configured")
@@ -135,6 +136,7 @@ func Verify(key []byte, issuer, token string, now time.Time) (*Claims, error) {
 
 func sessionClaimsIncomplete(c Claims) bool {
 	return c.Subject == "" || c.TenantID == 0 || c.TicketID == "" || c.ParentCredentialID == "" ||
+		c.BindingTag == "" || c.PartitionTag == "" || c.Gen == nil ||
 		c.Cnf.VPH == "" || len(c.Scope.KnowledgeBaseIDs) == 0 || len(c.Ops) == 0
 }
 

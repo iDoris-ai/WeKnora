@@ -18,6 +18,8 @@ import (
 
 const testIssuer = "weknora-agent24"
 
+func genPtr(v int64) *int64 { return &v }
+
 func testKey() []byte { return []byte("0123456789abcdef0123456789abcdef") }
 
 func fullClaims() Claims {
@@ -31,7 +33,7 @@ func fullClaims() Claims {
 		BindingTag:         "bind",
 		PartitionTag:       "part",
 		Cnf:                Confirmation{VPH: "vph-1"},
-		Gen:                4,
+		Gen:                genPtr(4),
 	}
 }
 
@@ -175,7 +177,8 @@ func TestIssueVerifyRoundTrip(t *testing.T) {
 	require.Equal(t, in.BindingTag, got.BindingTag)
 	require.Equal(t, in.PartitionTag, got.PartitionTag)
 	require.Equal(t, in.Cnf, got.Cnf)
-	require.Equal(t, in.Gen, got.Gen)
+	require.NotNil(t, got.Gen)
+	require.Equal(t, *in.Gen, *got.Gen)
 }
 
 func TestVerifyRejects(t *testing.T) {
@@ -223,6 +226,17 @@ func TestVerifyRejects(t *testing.T) {
 	nbfOnly.NotBefore = jwt.NewNumericDate(now.Add(31 * time.Second))
 	missingJTI := claimsMap(t, valid)
 	delete(missingJTI, "jti")
+	missingBinding := claimsMap(t, valid)
+	delete(missingBinding, "binding_tag")
+	missingPartition := claimsMap(t, valid)
+	delete(missingPartition, "partition_tag")
+	missingGen := claimsMap(t, valid)
+	delete(missingGen, "gen")
+	nullGen := claimsMap(t, valid)
+	nullGen["gen"] = nil
+	// Expired and missing a required claim is invalid, not expired.
+	expiredNoBinding := claimsMap(t, issuedClaims(now.Add(-time.Hour), DefaultLifetime))
+	delete(expiredNoBinding, "binding_tag")
 
 	cases := []struct {
 		name  string
@@ -247,6 +261,11 @@ func TestVerifyRejects(t *testing.T) {
 		{"nbf only too far", signMethod(t, key, jwt.SigningMethodHS256, nbfOnly)},
 		{"missing nbf", signMap(t, key, missingNBF)},
 		{"missing jti", signMap(t, key, missingJTI)},
+		{"missing binding_tag", signMap(t, key, missingBinding)},
+		{"missing partition_tag", signMap(t, key, missingPartition)},
+		{"missing gen", signMap(t, key, missingGen)},
+		{"null gen", signMap(t, key, nullGen)},
+		{"expired and missing binding_tag", signMap(t, key, expiredNoBinding)},
 		{"missing ticket_id", signMap(t, key, missingTicket)},
 		{"missing cnf.vph", signMap(t, key, missingVPH)},
 		{"empty scope", signMap(t, key, emptyScope)},
@@ -278,6 +297,25 @@ func TestVerifyRejects(t *testing.T) {
 	_, err = Issue(key[:31], testIssuer, fullClaims(), now, DefaultLifetime)
 	require.Error(t, err)
 
+	// gen 0 is a legal value, not a missing claim.
+	zeroGen := fullClaims()
+	zeroGen.Gen = genPtr(0)
+	zeroTok, err := Issue(key, testIssuer, zeroGen, now, DefaultLifetime)
+	require.NoError(t, err)
+	got, err := Verify(key, testIssuer, zeroTok, now)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), *got.Gen)
+	for _, mutate := range []func(*Claims){
+		func(c *Claims) { c.BindingTag = "" },
+		func(c *Claims) { c.PartitionTag = "" },
+		func(c *Claims) { c.Gen = nil },
+	} {
+		c := fullClaims()
+		mutate(&c)
+		_, err = Issue(key, testIssuer, c, now, DefaultLifetime)
+		require.Error(t, err)
+	}
+
 	// exp-iat of exactly MaxLifetime is still allowed.
 	exact := issuedClaims(now, MaxLifetime)
 	_, err = Verify(key, testIssuer, signMethod(t, key, jwt.SigningMethodHS256, exact), now)
@@ -307,13 +345,14 @@ func TestVerifyExpiry(t *testing.T) {
 	_, err = Verify(key, testIssuer, soon, now)
 	require.NoError(t, err)
 
-	bad := []byte(expired)
-	if bad[len(bad)-1] == 'A' {
-		bad[len(bad)-1] = 'B'
-	} else {
-		bad[len(bad)-1] = 'A'
-	}
-	_, err = Verify(key, testIssuer, string(bad), now)
+	// Flip a real signature byte. Changing the last base64url character can touch only the unused tail
+	// bits and leave the decoded signature unchanged.
+	dot := strings.LastIndexByte(expired, '.')
+	sig, err := base64.RawURLEncoding.DecodeString(expired[dot+1:])
+	require.NoError(t, err)
+	sig[0] ^= 0x01
+	bad := expired[:dot+1] + base64.RawURLEncoding.EncodeToString(sig)
+	_, err = Verify(key, testIssuer, bad, now)
 	require.ErrorIs(t, err, ErrInvalid)
 	require.NotErrorIs(t, err, ErrExpired)
 }
