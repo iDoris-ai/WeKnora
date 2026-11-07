@@ -102,6 +102,9 @@ type RouterParams struct {
 
 	Agent24KnowledgeSearchHandler *handler.Agent24KnowledgeSearchHandler // A24-KB-10
 	Agent24KnowledgeReadHandler   *handler.Agent24KnowledgeReadHandler   // A24-KB-15
+	// A24-KB-32: nil when the UI session key is unset, so the routes stay unregistered.
+	Agent24KnowledgeUITicketsHandler     *handler.Agent24KnowledgeUITicketsHandler
+	Agent24KnowledgeUIRevocationsHandler *handler.Agent24KnowledgeUIRevocationsHandler
 
 	Agent24CredentialRevocations interfaces.Agent24CredentialRevocationStore // A24-KB-22
 }
@@ -353,7 +356,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterAutomationRoutes(v1, params.AutomationHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 		RegisterAgent24KnowledgeRoutes(v1, params.Agent24KnowledgeReadyHandler, params.Agent24KnowledgeSearchHandler,
-			params.Agent24KnowledgeReadHandler, rbacGuards)
+			params.Agent24KnowledgeReadHandler, params.Agent24KnowledgeUITicketsHandler,
+			params.Agent24KnowledgeUIRevocationsHandler, rbacGuards) // A24-KB-32
 		RegisterAgent24KnowledgeAuditRoutes(v1, params.AuditLogHandler, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route

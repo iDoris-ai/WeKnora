@@ -103,7 +103,9 @@ func Agent24RecheckAPIKey(
 	if Agent24PrincipalMode(tenant) != entry.Mode {
 		return invalid, nil
 	}
-	principal, _, jti, err := resolveAPIPrincipal(ctx, tenant, header)
+	// A24-KB-32: the third result carries jti and exp. This check compares only the jti.
+	principal, _, tokenInfo, err := resolveAPIPrincipal(ctx, tenant, header)
+	jti := tokenInfo.JTI
 	same := principal.Normalize() == entry.Principal.Normalize() && jti == entry.JTI
 	if errors.Is(err, errExternalUserTokenExpired) {
 		if !same {

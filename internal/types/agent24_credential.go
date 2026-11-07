@@ -2,11 +2,18 @@
 
 package types
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // agent24TokenJTIContextKey carries the jti of a signed_token whose signature verified.
 // Unexported: only WithAgent24TokenJTI and Agent24TokenJTIFromContext read it.
 const agent24TokenJTIContextKey ContextKey = "Agent24TokenJTI"
+
+// agent24CredentialExpiryContextKey carries the parent credential's expiry (A24-KB-32).
+// Unexported: only WithAgent24CredentialExpiry and Agent24CredentialExpiryFromContext read it.
+const agent24CredentialExpiryContextKey ContextKey = "Agent24CredentialExpiry"
 
 func init() {
 	// Request-scoped, like EmbedChannelContextKey: audit and the access log read it on the request
@@ -14,6 +21,8 @@ func init() {
 	// The clone table lives in context_clone.go, which this slice does not edit, so the decision is
 	// recorded here. false is what that table uses for a value that describes one request.
 	contextCloneAcrossDetach[agent24TokenJTIContextKey] = false
+	// A24-KB-32: the credential expiry describes this request only and must not survive a detach.
+	contextCloneAcrossDetach[agent24CredentialExpiryContextKey] = false
 }
 
 // WithAgent24TokenJTI binds a signed_token jti to ctx.
@@ -31,6 +40,24 @@ func Agent24TokenJTIFromContext(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	return jti, true
+}
+
+// WithAgent24CredentialExpiry binds the parent credential's expiry to ctx (A24-KB-32).
+func WithAgent24CredentialExpiry(ctx context.Context, t time.Time) context.Context {
+	return context.WithValue(ctx, agent24CredentialExpiryContextKey, t)
+}
+
+// Agent24CredentialExpiryFromContext returns the bound expiry.
+// A zero time is not an expiry: ok is false, the same as an unset value.
+func Agent24CredentialExpiryFromContext(ctx context.Context) (time.Time, bool) {
+	if ctx == nil {
+		return time.Time{}, false
+	}
+	t, ok := ctx.Value(agent24CredentialExpiryContextKey).(time.Time)
+	if !ok || t.IsZero() {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // Agent24CredentialRejection is what middleware.Auth notes, in the gin context, when it refuses a credential

@@ -257,12 +257,12 @@ func TestResolveAPIPrincipalSignedTokenJTI(t *testing.T) {
 			}
 			header := http.Header{}
 			header.Set("X-External-User-Token", signedExternalUserToken(t, secret, claims))
-			p, _, jti, err := resolveAPIPrincipal(context.Background(), tenant, header)
+			p, _, tokenInfo, err := resolveAPIPrincipal(context.Background(), tenant, header) // A24-KB-32
 			if err != nil {
 				t.Fatalf("resolveAPIPrincipal error = %v", err)
 			}
-			if jti != tc.want {
-				t.Fatalf("jti = %q, want %q", jti, tc.want)
+			if tokenInfo.JTI != tc.want {
+				t.Fatalf("jti = %q, want %q", tokenInfo.JTI, tc.want)
 			}
 			if p.Type != types.PrincipalAPIExternalUser || p.ID != "7:external-u1" {
 				t.Fatalf("principal = %#v", p)
@@ -282,7 +282,7 @@ func TestResolveAPIPrincipalSignedTokenExpiredKeepsPrincipalAndJTI(t *testing.T)
 		"jti":       "expired-jti",
 	}))
 
-	p, _, jti, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	p, _, tokenInfo, err := resolveAPIPrincipal(context.Background(), &types.Tenant{ // A24-KB-32
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:       types.APIPrincipalModeSignedToken,
@@ -292,8 +292,8 @@ func TestResolveAPIPrincipalSignedTokenExpiredKeepsPrincipalAndJTI(t *testing.T)
 	if !errors.Is(err, errExternalUserTokenExpired) || !errors.Is(err, errInvalidExternalUserToken) {
 		t.Fatalf("resolveAPIPrincipal error = %v, want expired and invalid token", err)
 	}
-	if jti != "expired-jti" {
-		t.Fatalf("jti = %q, want expired-jti", jti)
+	if tokenInfo.JTI != "expired-jti" {
+		t.Fatalf("jti = %q, want expired-jti", tokenInfo.JTI)
 	}
 	if p.Type != types.PrincipalAPIExternalUser || p.ID != "7:external-u1" {
 		t.Fatalf("principal = %#v", p)

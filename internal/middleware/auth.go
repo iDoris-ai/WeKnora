@@ -573,7 +573,7 @@ func attachAPIKeyAuthContext(
 	var user *types.User
 	var principal types.Principal
 	var authSource string
-	var jti string
+	var tokenInfo agent24TokenInfo // A24-KB-32
 	if key != nil && key.IsPlatform() {
 		// A platform key keeps one stable machine identity while selecting the
 		// target workspace through X-Tenant-ID. Tenant API-principal modes and
@@ -596,22 +596,22 @@ func attachAPIKeyAuthContext(
 		}
 
 		var principalErr error
-		principal, authSource, jti, principalErr = resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
+		principal, authSource, tokenInfo, principalErr = resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
 		if principalErr != nil {
 			if errors.Is(principalErr, errExternalUserTokenExpired) {
 				credentialID := ""
 				if key != nil {
 					credentialID = fmt.Sprintf("key:%d", key.ID)
 				}
-				if jti != "" {
-					credentialID = "jti:" + jti
+				if tokenInfo.JTI != "" {
+					credentialID = "jti:" + tokenInfo.JTI
 				}
 				noteAgent24CredentialRejection(c, types.Agent24CredentialRejection{
 					Reason:       "credential_expired",
 					Principal:    principal,
 					CredentialID: credentialID,
 					TenantID:     tenantID,
-					JTI:          jti,
+					JTI:          tokenInfo.JTI,
 				})
 			}
 			c.JSON(http.StatusUnauthorized, gin.H{"error": apiPrincipalAuthErrorMessage(principalErr)})
@@ -647,42 +647,64 @@ func attachAPIKeyAuthContext(
 		}
 	}
 	applyAuthSession(c, session)
-	if jti != "" {
-		c.Request = c.Request.WithContext(types.WithAgent24TokenJTI(c.Request.Context(), jti))
+	if tokenInfo.JTI != "" {
+		c.Request = c.Request.WithContext(types.WithAgent24TokenJTI(c.Request.Context(), tokenInfo.JTI))
 	}
+	// A24-KB-32: C expires at the earlier of the API key and the signed token. A zero token expiry is
+	// absent, not the Unix epoch. No value means the credential does not expire, and the context stays unset.
+	var exp time.Time
+	hasExp := false
+	if key != nil && key.ExpiresAt != nil {
+		exp = *key.ExpiresAt
+		hasExp = true
+	}
+	if !tokenInfo.ExpiresAt.IsZero() && (!hasExp || tokenInfo.ExpiresAt.Before(exp)) {
+		exp = tokenInfo.ExpiresAt
+		hasExp = true
+	}
+	if hasExp {
+		c.Request = c.Request.WithContext(types.WithAgent24CredentialExpiry(c.Request.Context(), exp))
+	}
+}
+
+// agent24TokenInfo is the signed_token identity resolveAPIPrincipal returns (A24-KB-32).
+// A zero ExpiresAt means no exp was read. It is not the Unix epoch and must not be stored as an expiry.
+type agent24TokenInfo struct {
+	JTI       string
+	ExpiresAt time.Time
 }
 
 func resolveAPIPrincipal(
 	ctx context.Context, tenant *types.Tenant, header http.Header,
-) (principal types.Principal, authSource string, jti string, err error) {
+) (principal types.Principal, authSource string, tokenInfo agent24TokenInfo, err error) {
 	tenantID := uint64(0)
 	if tenant != nil {
 		tenantID = tenant.ID
 	}
 	fallback := types.Principal{Type: types.PrincipalAPITenant, ID: strconv.FormatUint(tenantID, 10)}
 	if tenant == nil || tenantID == 0 {
-		return fallback, types.AuthSourceAPITenantKey, "", nil
+		return fallback, types.AuthSourceAPITenantKey, agent24TokenInfo{}, nil
 	}
 	cfg := tenant.APIPrincipalConfig
 	if cfg == nil || cfg.Mode == "" || cfg.Mode == types.APIPrincipalModeTenant {
-		return fallback, types.AuthSourceAPITenantKey, "", nil
+		return fallback, types.AuthSourceAPITenantKey, agent24TokenInfo{}, nil
 	}
 	switch cfg.Mode {
 	case types.APIPrincipalModeDirect:
 		externalUserID := strings.TrimSpace(header.Get(defaultExternalUserIDHeader))
 		if externalUserID == "" {
 			if cfg.RequireDirectHeader {
-				return types.Principal{}, "", "", errMissingDirectHeader
+				return types.Principal{}, "", agent24TokenInfo{}, errMissingDirectHeader
 			}
-			return fallback, types.AuthSourceAPITenantKey, "", nil
+			return fallback, types.AuthSourceAPITenantKey, agent24TokenInfo{}, nil
 		}
 		if err := validateExternalUserID(externalUserID); err != nil {
-			return types.Principal{}, "", "", fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
+			return types.Principal{}, "", agent24TokenInfo{}, fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
 		}
 		return types.Principal{
 			Type: types.PrincipalAPIExternalUser,
 			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
-		}, types.AuthSourceAPIDirectHeader, "", nil
+		}, types.AuthSourceAPIDirectHeader, agent24TokenInfo{}, nil
 	case types.APIPrincipalModeSignedToken:
 		tok, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
 		if errors.Is(err, errExternalUserTokenExpired) {
@@ -693,36 +715,40 @@ func resolveAPIPrincipal(
 			// apart; a sub that would fail validateExternalUserID must not turn that into "invalid external
 			// user id", so that case is a plain invalid token with no principal.
 			if vErr := validateExternalUserID(tok.Subject); vErr != nil {
-				return types.Principal{}, "", "", fmt.Errorf("%w: %v", errInvalidExternalUserToken, vErr)
+				return types.Principal{}, "", agent24TokenInfo{}, fmt.Errorf("%w: %v",
+					errInvalidExternalUserToken, vErr)
 			}
 			return types.Principal{
 				Type: types.PrincipalAPIExternalUser,
 				ID:   strconv.FormatUint(tenantID, 10) + ":" + tok.Subject,
-			}, "", tok.JTI, fmt.Errorf("%w: %w", errInvalidExternalUserToken, errExternalUserTokenExpired)
+			}, "", agent24TokenInfo{JTI: tok.JTI, ExpiresAt: tok.ExpiresAt}, fmt.Errorf("%w: %w",
+				errInvalidExternalUserToken, errExternalUserTokenExpired)
 		}
 		if err != nil || tok.Subject == "" {
 			logger.Warnf(ctx,
 				"invalid external user token for tenant=%d: error_len=%d error_type=%T",
 				tenantID, len(fmt.Sprint(err)), err)
-			return types.Principal{}, "", "", fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
+			return types.Principal{}, "", agent24TokenInfo{}, fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
 		}
 		if err := validateExternalUserID(tok.Subject); err != nil {
-			return types.Principal{}, "", "", fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
+			return types.Principal{}, "", agent24TokenInfo{}, fmt.Errorf("%w: %v", errInvalidExternalUserID, err)
 		}
 		return types.Principal{
 			Type: types.PrincipalAPIExternalUser,
 			ID:   strconv.FormatUint(tenantID, 10) + ":" + tok.Subject,
-		}, types.AuthSourceAPISignedToken, tok.JTI, nil
+		}, types.AuthSourceAPISignedToken, agent24TokenInfo{JTI: tok.JTI, ExpiresAt: tok.ExpiresAt}, nil
 	default:
-		return fallback, types.AuthSourceAPITenantKey, "", nil
+		return fallback, types.AuthSourceAPITenantKey, agent24TokenInfo{}, nil
 	}
 }
 
 // externalUserToken is a signature-checked X-External-User-Token. JTI is empty when the claim is absent
-// or not a usable string; a bad jti does not by itself reject the token.
+// or not a usable string; a bad jti does not by itself reject the token. ExpiresAt is zero when exp was
+// not read (A24-KB-32); a zero value is not the Unix epoch.
 type externalUserToken struct {
-	Subject string
-	JTI     string // "" when absent or not a usable string
+	Subject   string
+	JTI       string    // "" when absent or not a usable string
+	ExpiresAt time.Time // zero when exp was not read
 }
 
 func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (externalUserToken, error) {
@@ -758,7 +784,12 @@ func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (
 			if sub == "" {
 				return externalUserToken{}, err
 			}
-			return externalUserToken{Subject: sub, JTI: externalUserJTI(claims)}, errExternalUserTokenExpired
+			tok := externalUserToken{Subject: sub, JTI: externalUserJTI(claims)}
+			// A24-KB-32: keep exp when it can be read. A missing exp stays zero and the error is unchanged.
+			if exp, expErr := claims.GetExpirationTime(); expErr == nil && exp != nil {
+				tok.ExpiresAt = exp.Time
+			}
+			return tok, errExternalUserTokenExpired
 		}
 		return externalUserToken{}, err
 	}
@@ -783,7 +814,7 @@ func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (
 	if sub == "" {
 		return externalUserToken{}, errors.New("missing subject")
 	}
-	return externalUserToken{Subject: sub, JTI: externalUserJTI(claims)}, nil
+	return externalUserToken{Subject: sub, JTI: externalUserJTI(claims), ExpiresAt: exp.Time}, nil
 }
 
 // externalUserTokenOnlyExpired reports whether expiry is the only failure: v5 checks the signature before the
