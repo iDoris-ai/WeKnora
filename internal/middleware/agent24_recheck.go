@@ -103,7 +103,7 @@ func Agent24RecheckAPIKey(
 	if Agent24PrincipalMode(tenant) != entry.Mode {
 		return invalid, nil
 	}
-	principal, jti, err := resolveAPIPrincipal(ctx, tenant, header)
+	principal, _, jti, err := resolveAPIPrincipal(ctx, tenant, header)
 	same := principal.Normalize() == entry.Principal.Normalize() && jti == entry.JTI
 	if errors.Is(err, errExternalUserTokenExpired) {
 		if !same {

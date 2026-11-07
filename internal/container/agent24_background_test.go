@@ -49,6 +49,11 @@ var agent24BackgroundSteps = map[string]bool{
 	"RunAsynqServer":                true,
 	"RegisterSyncHandlers":          true,
 	"recoverPendingWikiTasks":       true,
+	// Upstream v0.9.0 (WeKnora#127).
+	"startUserMachineGC":     true,
+	"startAgentRuntimes":     true,
+	"startAgentPromptReaper": true,
+	"startShellJobSweeper":   true,
 }
 
 // agent24ForegroundInvokes are the steps container.go may pass to
@@ -70,6 +75,56 @@ var agent24ForegroundInvokes = map[string]bool{
 	// other closure, or a change to its body, is unreviewed.
 	"func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) " +
 		`{ cleaner.Promote("BrowserSkill") }`: true,
+	// Upstream v0.9.0 wiring steps (WeKnora#127), keyed by their whole text: each
+	// only sets dependencies or registers cleanup and starts nothing; the
+	// background steps they sit next to go through invokeBackground.
+	`func( svc *service.TenantSandboxConfigService, repo ` +
+		`interfaces.SandboxAllocationRepository, reg admission.Registry, ) { ` +
+		`svc.WithAllocationRepo(repo).WithAdmission(reg) }`: true,
+	`func(f *service.SessionForkService, a *sandboxalloc.Service) { f.WithAllocations(a) }`: true,
+	`func( p *service.SessionSandboxPinner, skills *service.TenantSkillService, a ` +
+		`*sandboxalloc.Service, ) { p.WithPlacer(a) skills.WithPlacer(a) }`: true,
+	`func( s interfaces.SessionService, c *sandboxalloc.WorkspaceCleaner, resolver ` +
+		`sandbox.TenantSandboxResolver, ) { if handler.Edition == "lite" || resolver == nil { ` +
+		`return } if svc, ok := s.(interface { ` +
+		`WithWorkspaceCleaner(*sandboxalloc.WorkspaceCleaner) }); ok { svc.WithWorkspaceCleaner(c) ` +
+		`} }`: true,
+	`func( u interfaces.UserService, c *sandboxalloc.WorkspaceCleaner, resolver ` +
+		`sandbox.TenantSandboxResolver, ) { if handler.Edition == "lite" || resolver == nil { ` +
+		`return } if svc, ok := u.(interface { WithSandboxReleaser(service.SandboxOwnerReleaser) ` +
+		`}); ok { svc.WithSandboxReleaser(c) } }`: true,
+	`func( cfgSvc *service.TenantSandboxConfigService, cleaner *sandboxalloc.WorkspaceCleaner, ` +
+		`resolver sandbox.TenantSandboxResolver, ) { if handler.Edition == "lite" || resolver == ` +
+		`nil { return } cfgSvc.WithUserMachineReleaser(cleaner) }`: true,
+	`func(r *service.AgentCollaboration, s interfaces.SessionService, cleaner ` +
+		`interfaces.ResourceCleaner) { r.Bind(s) cleaner.RegisterWithName("AgentCollaboration", ` +
+		`func() error { ctx, cancel := context.WithTimeout(context.Background(), ` +
+		`cleanupStepTimeout) defer cancel() return r.Runtime.Stop(ctx) }) }`: true,
+	`func( sessions *session.Handler, mcp *handler.MCPServiceHandler, broker *hitl.Broker, ` +
+		`runs *service.SuspendedRunService, rewind *service.SessionRewindService, collaboration ` +
+		`*service.AgentCollaboration, automations *service.AutomationService, sessionService ` +
+		`interfaces.SessionService, messages *handler.MessageHandler, gate *approval.Gate, streams ` +
+		`interfaces.StreamManager, ) { rewind.SetSuspendedRuns(runs) ` +
+		`sessions.SetSuspendedRuns(broker, runs) ` +
+		`sessions.SetCollaborationStopper(collaboration.Stop) // Automation runs resume under ` +
+		`their automation, delegated ones // through the collaboration scheduler; neither as an ` +
+		`ordinary chat. sessions.SetDelegatedPromptRouter(func(ctx context.Context, p ` +
+		`*types.AgentPrompt) bool { return automations.HandlesPrompt(ctx, p) || ` +
+		`collaboration.HandlesPrompt(ctx, p) }) messages.DelegatedPrompts = ` +
+		`collaboration.PendingPrompts messages.CollaborationStatuses = ` +
+		`collaboration.HistoryStatuses collaboration.BindRecovery(broker, gate, streams) ` +
+		`collaboration.ParentEvents = sessions.CollaborationEvents collaboration.ChildEvents = ` +
+		`sessions.CollaborationEvents collaboration.ParentSteer = sessions.CollaborationSteer ` +
+		`runs.RecoverAnswered = func(ctx context.Context, p *types.AgentPrompt) (bool, error) { if ` +
+		`ok, err := automations.RecoverAnswered(ctx, p); ok || err != nil { return ok, err } ` +
+		`return collaboration.RecoverAnswered(ctx, p) } automations.Bind(sessionService, broker, ` +
+		`runs, streams) automations.Events = sessions.CollaborationEvents ` +
+		`automations.StopDelegation = collaboration.StopOwned broker.SetRunHooks(runs.Hooks()) ` +
+		`runs.StopDelegation = func(ctx context.Context, p *types.AgentPrompt) error { return ` +
+		`collaboration.StopPrompt(ctx, p) } mcp.SetRunResumer(sessions) ` +
+		`mcp.SetScheduledPromptRouter(automations.HandlesPrompt) }`: true,
+	`func(cleaner interfaces.ResourceCleaner, _ *service.ShellJobService) { ` +
+		`cleaner.Promote("LocalShellJobs") }`: true,
 }
 
 // invokeArgName names an Invoke argument: a function name, or the whole text
