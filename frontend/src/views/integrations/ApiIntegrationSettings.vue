@@ -693,6 +693,11 @@ import {
   type TenantAPIKeyCapability,
 } from '@/api/tenant'
 import { getApiBaseUrl } from '@/utils/api-base'
+// Agent24 fork A24-KB-40: capabilities this page cannot show are kept on edit.
+import {
+  preservedAPIKeyCapabilities,
+  preservedCapabilitiesUseKnowledgeScope,
+} from '@/config/agent24ApiKeyCapabilities'
 import {
   DEFAULT_TENANT_API_KEY_CAPABILITIES,
   KB_SCOPED_API_KEY_CAPABILITIES,
@@ -787,9 +792,12 @@ const editingAPIKeyAccessMode = computed<'scoped' | 'full'>({
 const editingSelectedCapabilities = computed(() => (
   API_KEY_CAPABILITIES.filter((capability) => editingCapabilitySelections[capability])
 ))
+// Agent24 fork A24-KB-40: capabilities of the edited key that are not in the table (issued through the API).
+const editingPreservedCapabilities = ref<string[]>([])
 const editingKnowledgeScopeApplies = computed(() => (
   !editingAPIKeyFullAccessEnabled.value
-  && editingSelectedCapabilities.value.some((capability) => KB_SCOPED_CAPABILITIES.has(capability))
+  && (editingSelectedCapabilities.value.some((capability) => KB_SCOPED_CAPABILITIES.has(capability))
+    || preservedCapabilitiesUseKnowledgeScope(editingPreservedCapabilities.value))
 ))
 
 watch(editingKnowledgeScopeApplies, (applies) => {
@@ -1493,6 +1501,7 @@ function openEditAPIKeyScope(key: TenantAPIKey) {
   API_KEY_CAPABILITIES.forEach((capability) => {
     editingCapabilitySelections[capability] = currentCapabilities.has(capability)
   })
+  editingPreservedCapabilities.value = preservedAPIKeyCapabilities(key.capabilities, API_KEY_CAPABILITIES)
   apiKeyScopeDialogVisible.value = true
   void loadKnowledgeBaseOptions()
 }
@@ -1505,7 +1514,8 @@ async function saveAPIKeyConfiguration() {
     MessagePlugin.error(t('integrations.api.apiKeyNameRequired'))
     return
   }
-  if (!editingAPIKeyFullAccessEnabled.value && editingSelectedCapabilities.value.length === 0) {
+  if (!editingAPIKeyFullAccessEnabled.value && editingSelectedCapabilities.value.length === 0
+    && editingPreservedCapabilities.value.length === 0) {
     MessagePlugin.error(t('integrations.api.apiKeyCapabilitiesRequired'))
     return
   }
@@ -1514,7 +1524,10 @@ async function saveAPIKeyConfiguration() {
     const resp = await updateTenantAPIKey(tenantId.value, key.id, {
       name: editingAPIKeyForm.name.trim(),
       full_access: editingAPIKeyFullAccessEnabled.value,
-      capabilities: editingAPIKeyFullAccessEnabled.value ? [] : editingSelectedCapabilities.value,
+      capabilities: editingAPIKeyFullAccessEnabled.value
+        ? []
+        : [...editingSelectedCapabilities.value,
+            ...editingPreservedCapabilities.value as TenantAPIKeyCapability[]],
       knowledge_base_ids: editingKnowledgeScopeApplies.value ? editingAPIKeyForm.knowledge_base_ids : [],
       expires_at_unix: editingAPIKeyForm.expires_at_unix,
     })

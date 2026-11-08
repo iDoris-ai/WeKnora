@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -136,6 +137,24 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 			},
 			`"kb-a"`, http.StatusForbidden, nil, nil, "API key scope does not allow this operation",
 		},
+		// A24-KB-40: write capabilities on the key change nothing for search; without retrieve they read nothing.
+		{
+			"write capabilities ride along",
+			types.TenantAPIKeyScope{
+				KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: agent24WriteKeyCaps(retrieve),
+			},
+			`"kb-a","kb-b"`, http.StatusOK,
+			[]string{"kb-a"},
+			[][]string{{"kb-a"}},
+			"",
+		},
+		{
+			"write capabilities only",
+			types.TenantAPIKeyScope{
+				KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: agent24WriteKeyCaps(nil),
+			},
+			`"kb-a"`, http.StatusForbidden, nil, nil, "API key scope does not allow this operation",
+		},
 		{
 			"unrestricted",
 			types.TenantAPIKeyScope{Capabilities: retrieve},
@@ -210,10 +229,29 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 func TestAgent24KnowledgeReadRouteKBAllowList(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	scope := types.TenantAPIKeyScope{
-		KnowledgeBaseIDs: types.StringArray{"kb-a"},
-		Capabilities:     types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+	retrieve := types.StringArray{string(types.APIKeyCapabilityRetrieve)}
+	plain := agent24ReadRouteKBAllowList(t, types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: retrieve,
+	})
+	// A24-KB-40: the same key with every write capability added reads the same, byte for byte.
+	withWrite := agent24ReadRouteKBAllowList(t, types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: agent24WriteKeyCaps(retrieve),
+	})
+	if !maps.Equal(plain, withWrite) {
+		t.Fatalf("read bodies with write capabilities %v, want %v", withWrite, plain)
 	}
+}
+
+// agent24WriteKeyCaps is base plus the four A24-KB-40 write capabilities.
+func agent24WriteKeyCaps(base types.StringArray) types.StringArray {
+	return append(append(types.StringArray{}, base...), "kb_candidate_propose", "kb_candidate_review",
+		"kb_candidate_approve", "kb_entry_withdraw")
+}
+
+// agent24ReadRouteKBAllowList runs the read cases with scope and returns each case's response body.
+func agent24ReadRouteKBAllowList(t *testing.T, scope types.TenantAPIKeyScope) map[string]string {
+	t.Helper()
+	bodies := map[string]string{}
 	for _, tc := range []struct {
 		name, kbs, knowledge string
 		status               int
@@ -248,6 +286,11 @@ func TestAgent24KnowledgeReadRouteKBAllowList(t *testing.T) {
 			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
 				t.Fatalf("status %d body %s, want %d with %s", w.Code, w.Body.String(), tc.status, tc.want)
 			}
+			bodies[tc.name] = w.Body.String()
 		})
 	}
+	if len(bodies) != 3 {
+		t.Fatalf("read cases ran %d of 3", len(bodies))
+	}
+	return bodies
 }
