@@ -18,6 +18,10 @@ var ErrAgent24UIFamilyOwner = errors.New("agent24 ui family belongs to another t
 // the ticket.
 var ErrAgent24UIFamilyRevoked = errors.New("agent24 ui family is revoked")
 
+// ErrAgent24UIFamilyGone means the family a registration read was removed (purged) before the ticket could
+// be inserted (A24-KB-32). CreateTicket returns it and does not insert the ticket; the caller may retry.
+var ErrAgent24UIFamilyGone = errors.New("agent24 ui family changed during registration")
+
 // Agent24UISessionStore is the UI ticket and view-family store (A24-KB-31).
 // now is supplied by the caller so tests can fix the clock.
 type Agent24UISessionStore interface {

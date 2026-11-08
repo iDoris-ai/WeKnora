@@ -205,7 +205,8 @@ func (h *Agent24KnowledgeUITicketsHandler) Issue(c *gin.Context) {
 	}
 	if err = h.store.CreateTicket(ctx, ticket); err != nil {
 		if errors.Is(err, interfaces.ErrAgent24UIFamilyOwner) ||
-			errors.Is(err, interfaces.ErrAgent24UIFamilyRevoked) {
+			errors.Is(err, interfaces.ErrAgent24UIFamilyRevoked) ||
+			errors.Is(err, interfaces.ErrAgent24UIFamilyGone) {
 			writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), echo)
 			return
 		}

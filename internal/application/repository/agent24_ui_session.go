@@ -146,22 +146,48 @@ func (s *agent24UISessionStore) CreateTicket(ctx context.Context, t *types.Agent
 				return interfaces.ErrAgent24UIFamilyOwner
 			case family.RevokedAt != nil:
 				return interfaces.ErrAgent24UIFamilyRevoked
-			case extended.After(family.ExpiresAt):
-				// expires_at only moves later. The guard is in the WHERE so the database decides it on the
-				// current row: a concurrent issuance that read the same old value and wrote a later expiry first
-				// is not overwritten with this earlier one (which would let PurgeExpired drop a revoked family
-				// while one of its session JWTs is still valid).
-				err := tx.Model(&types.Agent24UIFamily{}).
-					Where("vph = ? AND tenant_id = ? AND principal = ? AND revoked_at IS NULL AND expires_at < ?",
-						row.VPH, row.TenantID, row.Principal, extended).
-					Update("expires_at", extended).Error
-				if err != nil {
-					return err
-				}
+			}
+			// The read above takes no lock, so the family can be purged, revoked or (after a purge) re-created
+			// by another owner before the ticket is inserted. One conditional UPDATE both re-asserts the state
+			// the read saw and extends the expiry, and it must match exactly one row: on PostgreSQL it locks
+			// the row until commit, so a concurrent revoke or purge either lands before it (0 rows, no ticket)
+			// or waits for this transaction. expires_at only moves later: the CASE keeps a later value that a
+			// concurrent issuance wrote, which would otherwise let PurgeExpired drop a revoked family while
+			// one of its session JWTs is still valid.
+			res := tx.Model(&types.Agent24UIFamily{}).
+				Where("vph = ? AND tenant_id = ? AND principal = ? AND revoked_at IS NULL",
+					row.VPH, row.TenantID, row.Principal).
+				Update("expires_at", gorm.Expr("CASE WHEN expires_at < ? THEN ? ELSE expires_at END",
+					extended, extended))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return agent24UIFamilyChanged(tx, row)
 			}
 		}
 		return tx.Create(&row).Error
 	})
+}
+
+// agent24UIFamilyChanged classifies a family that no longer matched the registration's conditional UPDATE:
+// revoked or owned by someone else when it is still there, interfaces.ErrAgent24UIFamilyGone when a purge
+// removed it. No ticket is inserted in any case.
+func agent24UIFamilyChanged(tx *gorm.DB, row types.Agent24UITicket) error {
+	var family types.Agent24UIFamily
+	err := tx.Where("vph = ?", row.VPH).Take(&family).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return interfaces.ErrAgent24UIFamilyGone
+	case err != nil:
+		return err
+	case family.TenantID != row.TenantID || family.Principal != row.Principal:
+		return interfaces.ErrAgent24UIFamilyOwner
+	case family.RevokedAt != nil:
+		return interfaces.ErrAgent24UIFamilyRevoked
+	default:
+		return interfaces.ErrAgent24UIFamilyGone
+	}
 }
 
 func (s *agent24UISessionStore) ConsumeTicket(
