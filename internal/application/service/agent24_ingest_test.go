@@ -24,9 +24,13 @@ func (e agent24IngestExec) Available(context.Context) error { return e.err }
 type agent24AttemptTracker struct {
 	noopSpanTracker
 	next int
+	err  error
 }
 
 func (t *agent24AttemptTracker) OpenAttempt(context.Context, string, string) (*Span, int, error) {
+	if t.err != nil {
+		return nil, 0, t.err
+	}
 	t.next++
 	return &Span{}, t.next, nil
 }
@@ -220,6 +224,7 @@ func TestAgent24IngestRevisionSupersedesTheEarlierJob(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.Agent24JobCancelled, old.Status)
 	require.Equal(t, types.Agent24JobCancelSuperseded, old.CancelReason)
+	require.True(t, old.Cost.Final, "a superseded job spends nothing more")
 	cur, err := h.jobs.Occupying(h.ctx, 7, k.ID)
 	require.NoError(t, err)
 	require.Equal(t, second.ID, cur.ID)
@@ -262,7 +267,79 @@ func TestAgent24IngestEnqueueFailureFailsTheJob(t *testing.T) {
 	require.Equal(t, types.Agent24JobFailed, got.Status)
 	require.Equal(t, types.Agent24JobFailEnqueue, got.FailureReason)
 	require.NotNil(t, got.TerminalAt)
+	require.True(t, got.Cost.Final)
 	var row types.Knowledge
 	require.NoError(t, h.db.Where("id = ?", k.ID).Take(&row).Error)
 	require.Equal(t, types.ParseStatusFailed, row.ParseStatus)
+}
+
+// An attempt that cannot be opened is a dispatch failure: no task without a recorded attempt is enqueued.
+func TestAgent24IngestAttemptFailureFailsTheJob(t *testing.T) {
+	h := newAgent24IngestHarness(t, nil)
+	h.tracker.err = errors.New("spans table unavailable")
+	job, _, err := h.submit(t, agent24Req("a.md", "x", agent24Sha("x")))
+	require.Error(t, err)
+	require.NotContains(t, h.events, "enqueue")
+	got, gerr := h.jobs.Get(h.ctx, 7, job.ID)
+	require.NoError(t, gerr)
+	require.Equal(t, types.Agent24JobFailed, got.Status)
+	require.Equal(t, types.Agent24JobFailEnqueue, got.FailureReason)
+	require.Equal(t, 0, got.Attempt)
+}
+
+// A Dispatch that comes after a newer revision was staged and dispatched touches nothing of the newer one.
+func TestAgent24IngestLateDispatchOfASupersededRevision(t *testing.T) {
+	h := newAgent24IngestHarness(t, nil)
+	_, k, err := h.submit(t, agent24Req("a.md", "v1", agent24Sha("v1")))
+	require.NoError(t, err)
+	revise := func(content string) Agent24IngestRequest {
+		r := agent24Req("a.md", content, agent24Sha(content))
+		r.KnowledgeID = k.ID
+		return r
+	}
+	p1, err := h.ingest.Prepare(h.ctx, revise("v2"))
+	require.NoError(t, err)
+	var j1 *types.Agent24IngestJob
+	var k1 *types.Knowledge
+	require.NoError(t, h.db.Transaction(func(tx *gorm.DB) error {
+		j1, k1, err = h.ingest.Stage(h.ctx, tx, p1, agent24TestPrincipal, agent24Revision)
+		return err
+	}))
+	j2, _, err := h.submit(t, revise("v3"))
+	require.NoError(t, err)
+	var before types.Knowledge
+	require.NoError(t, h.db.Where("id = ?", k.ID).Take(&before).Error)
+	h.events = nil
+
+	require.ErrorIs(t, h.ingest.Dispatch(h.ctx, j1, k1, p1), ErrAgent24JobSuperseded)
+	require.Empty(t, h.events, "no dequeue, no enqueue")
+	var after types.Knowledge
+	require.NoError(t, h.db.Where("id = ?", k.ID).Take(&after).Error)
+	require.Equal(t, before.FilePath, after.FilePath)
+	require.Equal(t, before.ParseStatus, after.ParseStatus)
+	cur, err := h.jobs.Occupying(h.ctx, 7, k.ID)
+	require.NoError(t, err)
+	require.Equal(t, j2.ID, cur.ID)
+	require.Equal(t, j2.Attempt, cur.Attempt)
+
+	// a failure recorded for an older job does not fail the newer revision's row
+	require.NoError(t, h.ingest.failDispatch(h.ctx, 7, j1.ID, k.ID))
+	require.NoError(t, h.db.Where("id = ?", k.ID).Take(&after).Error)
+	require.Equal(t, before.ParseStatus, after.ParseStatus)
+}
+
+// Only file documents are revised: a manual knowledge's own edit path would drop the Agent24 marker.
+func TestAgent24IngestRefusesToReviseAManualKnowledge(t *testing.T) {
+	h := newAgent24IngestHarness(t, nil)
+	require.NoError(t, h.db.Create(&types.Knowledge{
+		ID: "m-1", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "manual", ParseStatus: types.ParseStatusCompleted,
+	}).Error)
+	r := agent24Req("a.md", "x", agent24Sha("x"))
+	r.KnowledgeID = "m-1"
+	_, _, err := h.submit(t, r)
+	require.ErrorIs(t, err, ErrAgent24UnsupportedKnowledge)
+	var row types.Knowledge
+	require.NoError(t, h.db.Where("id = ?", "m-1").Take(&row).Error)
+	require.Equal(t, "manual", row.Type)
+	require.Equal(t, types.ParseStatusCompleted, row.ParseStatus)
 }

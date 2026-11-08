@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -73,20 +74,31 @@ func (s *Agent24IngestJobStore) SupersedeForKnowledge(
 		return errors.New("agent24 ingest job: a transaction is required")
 	}
 	now = now.UTC()
-	q := tx.WithContext(ctx).Model(&types.Agent24IngestJob{}).
-		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID)
-	if err := q.Session(&gorm.Session{}).Where("status IN ?", agent24OccupyingStatuses).Updates(map[string]any{
-		"status": types.Agent24JobCancelled, "cancel_reason": types.Agent24JobCancelSuperseded,
-		"terminal_at": now, "updated_at": now,
-	}).Error; err != nil {
+	var jobs []types.Agent24IngestJob
+	if err := tx.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Where("status IN ? OR (status = ? AND enrichment = ?)", agent24OccupyingStatuses,
+			types.Agent24JobIndexed, types.Agent24EnrichmentRunning).
+		Find(&jobs).Error; err != nil {
 		return err
 	}
-	return q.Session(&gorm.Session{}).
-		Where("status = ? AND enrichment = ?", types.Agent24JobIndexed, types.Agent24EnrichmentRunning).
-		Updates(map[string]any{
-			"enrichment": types.Agent24EnrichmentStopped, "stop_reason": types.Agent24JobCancelSuperseded,
-			"updated_at": now,
-		}).Error
+	store := &Agent24IngestJobStore{db: tx}
+	for _, job := range jobs {
+		change := types.Agent24JobChange{
+			Status: types.Agent24JobCancelled, CancelReason: types.Agent24JobCancelSuperseded,
+			Enrichment: job.Enrichment,
+		}
+		if job.Status == types.Agent24JobIndexed {
+			change = types.Agent24JobChange{
+				Status: types.Agent24JobIndexed, Enrichment: types.Agent24EnrichmentStopped,
+				StopReason: types.Agent24JobCancelSuperseded,
+			}
+		}
+		if _, err := store.Apply(ctx, job, change, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Get returns the tenant's job id, or nil when there is none.
@@ -144,6 +156,13 @@ func (s *Agent24IngestJobStore) Apply(
 	case change.Status.Terminal():
 		set["terminal_at"] = now
 	}
+	if change.Status.Terminal() ||
+		(change.Status == types.Agent24JobIndexed && change.Enrichment != types.Agent24EnrichmentRunning) {
+		// nothing more is spent (W5.10): the cost becomes final in the same write that settles the job
+		cost := job.Cost
+		cost.Final = true
+		set["cost"] = cost
+	}
 	res := s.db.WithContext(ctx).Model(&types.Agent24IngestJob{}).
 		Where("tenant_id = ? AND id = ? AND status = ? AND enrichment = ?",
 			job.TenantID, job.ID, job.Status, job.Enrichment).
@@ -151,24 +170,21 @@ func (s *Agent24IngestJobStore) Apply(
 	return res.RowsAffected == 1, res.Error
 }
 
-// SetAttempt records the upstream processing attempt a job's task carries.
-func (s *Agent24IngestJobStore) SetAttempt(ctx context.Context, tenantID uint64, id string, attempt int) error {
-	return s.db.WithContext(ctx).Model(&types.Agent24IngestJob{}).
-		Where("tenant_id = ? AND id = ?", tenantID, id).Update("attempt", attempt).Error
+// SetAttempt records the upstream processing attempt a job's task carries, on a job still saved. It reports
+// false when the job moved on (superseded or settled) and nothing was recorded.
+func (s *Agent24IngestJobStore) SetAttempt(
+	ctx context.Context, tenantID uint64, id string, attempt int,
+) (bool, error) {
+	res := s.db.WithContext(ctx).Model(&types.Agent24IngestJob{}).
+		Where("tenant_id = ? AND id = ? AND status = ?", tenantID, id, types.Agent24JobSaved).
+		Update("attempt", attempt)
+	return res.RowsAffected == 1, res.Error
 }
 
 // SetIndexBuild records the build a job activated.
 func (s *Agent24IngestJobStore) SetIndexBuild(ctx context.Context, tenantID uint64, id, build string) error {
 	return s.db.WithContext(ctx).Model(&types.Agent24IngestJob{}).
 		Where("tenant_id = ? AND id = ?", tenantID, id).Update("index_build_id", build).Error
-}
-
-// SetCost replaces the job's cost report.
-func (s *Agent24IngestJobStore) SetCost(
-	ctx context.Context, tenantID uint64, id string, cost types.Agent24JobCost,
-) error {
-	return s.db.WithContext(ctx).Model(&types.Agent24IngestJob{}).
-		Where("tenant_id = ? AND id = ?", tenantID, id).Update("cost", cost).Error
 }
 
 // ListUnsettled returns up to limit jobs reconciliation may still move: occupying ones and indexed ones whose
@@ -249,6 +265,42 @@ func agent24FailureHint(message, stage string) types.Agent24FailureHint {
 		return types.Agent24FailureHintIndex
 	}
 	return types.Agent24FailureHintUnknown
+}
+
+// Transaction runs fn over a store bound to one database transaction.
+func (s *Agent24IngestJobStore) Transaction(ctx context.Context, fn func(tx *Agent24IngestJobStore) error) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(&Agent24IngestJobStore{db: tx})
+	})
+}
+
+// LockKnowledge reads the knowledge row under a row lock (inside Transaction), so a job's writes to it cannot
+// interleave with a Stage of the same knowledge, which takes the same lock. It returns nil when the row is gone.
+func (s *Agent24IngestJobStore) LockKnowledge(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (*types.Knowledge, error) {
+	var k types.Knowledge
+	err := s.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).Take(&k).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
+// MoveKnowledge sets the knowledge's parse status (with its message) when the row is in one of from; a row that
+// moved on is left alone.
+func (s *Agent24IngestJobStore) MoveKnowledge(
+	ctx context.Context, tenantID uint64, knowledgeID string, from []string, to, message string, now time.Time,
+) error {
+	return s.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ? AND parse_status IN ?", tenantID, knowledgeID, from).
+		Updates(map[string]any{
+			"parse_status": to, "error_message": message, "pending_subtasks_count": 0, "updated_at": now.UTC(),
+		}).Error
 }
 
 // FailPendingKnowledge fails a knowledge row that is still pending: the row of a job that timed out in saved.

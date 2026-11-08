@@ -102,7 +102,30 @@ func TestAgent24IngestJobSupersedeForKnowledge(t *testing.T) {
 		if w[1] == "superseded" {
 			require.NotNil(t, got.TerminalAt, id)
 		}
+		// the jobs this supersede ended spend nothing more; the others keep their cost as it was
+		final := id == "saved" || id == "proc" || id == "idx"
+		require.Equal(t, final, got.Cost.Final, id)
 	}
+}
+
+func TestAgent24IngestJobSetAttemptOnlyOnASavedJob(t *testing.T) {
+	db, store := agent24IngestJobDB(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(agent24TestJob("saved", "k", types.Agent24JobSaved, t0)).Error)
+	require.NoError(t, db.Create(agent24TestJob("gone", "k", types.Agent24JobCancelled, t0)).Error)
+	ok, err := store.SetAttempt(ctx, 1, "saved", 3)
+	require.NoError(t, err)
+	require.True(t, ok)
+	ok, err = store.SetAttempt(ctx, 1, "gone", 4)
+	require.NoError(t, err)
+	require.False(t, ok, "a superseded job records no attempt")
+	got, err := store.Get(ctx, 1, "gone")
+	require.NoError(t, err)
+	require.Equal(t, 0, got.Attempt)
+	got, err = store.Get(ctx, 1, "saved")
+	require.NoError(t, err)
+	require.Equal(t, 3, got.Attempt)
 }
 
 func TestAgent24IngestJobOccupyingAndApply(t *testing.T) {

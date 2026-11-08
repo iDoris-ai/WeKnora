@@ -57,6 +57,12 @@ var (
 	ErrAgent24InvalidFileName = errors.New("agent24 ingest: invalid file name")
 	// ErrAgent24UnsupportedKB: the target knowledge base does not take document ingest (FAQ type).
 	ErrAgent24UnsupportedKB = errors.New("agent24 ingest: the knowledge base does not take documents")
+	// ErrAgent24UnsupportedKnowledge: a revision names a knowledge that is not a file document (a manual or URL
+	// knowledge keeps its own edit path, which would drop the Agent24 marker). Nothing was written to it.
+	ErrAgent24UnsupportedKnowledge = errors.New("agent24 ingest: only file documents can be revised")
+	// ErrAgent24JobSuperseded: Dispatch found the job no longer the knowledge's occupying saved job (a newer
+	// revision staged meanwhile, or the job settled). Nothing was enqueued.
+	ErrAgent24JobSuperseded = errors.New("agent24 ingest: the job was superseded before dispatch")
 )
 
 // The origin values of CONTRACT-OPS-v2 §6, stored as knowledge metadata agent24_origin.
@@ -266,6 +272,9 @@ func (a *Agent24Ingest) stageRevise(
 	if err != nil {
 		return nil, err
 	}
+	if k.Type != "file" {
+		return nil, ErrAgent24UnsupportedKnowledge
+	}
 	cols := map[string]any{
 		"file_name": p.req.FileName, "file_type": p.fileType, "file_size": int64(len(p.req.Content)),
 		"file_hash": p.fileHash, "file_path": p.filePath, "parse_status": types.ParseStatusPending,
@@ -292,45 +301,83 @@ func (a *Agent24Ingest) stageRevise(
 	return &k, nil
 }
 
-// Dispatch enqueues a committed job. Earlier tasks of a revised knowledge are dequeued first; the attempt is
-// opened here so the payload carries it and an older worker stops at the upstream supersede checks. An enqueue
-// failure leaves the job failed/enqueue_failed and the knowledge failed (W5.7): the job never waits in saved
-// for a task that does not exist.
+// Dispatch enqueues a committed job, only while the job is still the knowledge's occupying saved job: a late
+// Dispatch of a superseded revision returns ErrAgent24JobSuperseded and writes nothing. Earlier tasks of a revised
+// knowledge are dequeued first; the attempt is opened and recorded (on a job still saved) before the task that
+// carries it is enqueued, so an older worker stops at the upstream supersede checks. A failure to open or record
+// the attempt, or to enqueue, leaves the job failed/enqueue_failed and the knowledge failed (W5.7): the job never
+// waits in saved for a task that does not exist. The upstream tracker writes on its own connection, so no
+// transaction is held across it (SQLite runs on one connection).
 func (a *Agent24Ingest) Dispatch(
 	ctx context.Context, job *types.Agent24IngestJob, k *types.Knowledge, p *Agent24IngestPrepared,
 ) error {
 	if job == nil || k == nil || p == nil {
 		return errors.New("agent24 ingest: Dispatch needs the staged job")
 	}
+	cur, err := a.jobs.Occupying(ctx, job.TenantID, k.ID)
+	if err != nil {
+		return err
+	}
+	if cur == nil || cur.ID != job.ID || cur.Status != types.Agent24JobSaved {
+		return ErrAgent24JobSuperseded
+	}
 	if p.req.KnowledgeID != "" {
 		a.ks.dequeueKnowledgeTasks(context.WithoutCancel(ctx), k.ID)
 	}
-	attempt := 0
-	if _, n, err := a.ks.tracker().OpenAttempt(ctx, k.ID, ""); err == nil && n > 0 {
-		attempt = n
-		if err := a.jobs.SetAttempt(ctx, job.TenantID, job.ID, n); err != nil {
-			logger.Warnf(ctx, "[agent24] ingest: recording the attempt failed: error_type=%T", err)
-		} else {
-			job.Attempt = n
+	_, n, err := a.ks.tracker().OpenAttempt(ctx, k.ID, "")
+	if err == nil && n <= 0 {
+		err = errors.New("agent24 ingest: no attempt was opened")
+	}
+	if err == nil {
+		recorded, rerr := a.jobs.SetAttempt(ctx, job.TenantID, job.ID, n)
+		if rerr == nil && !recorded {
+			// a newer revision superseded the job after the check above; its own Dispatch enqueues
+			return ErrAgent24JobSuperseded
 		}
+		err = rerr
 	}
-	payload := types.DocumentProcessPayload{
-		TenantID: p.tenantID, KnowledgeID: k.ID, KnowledgeBaseID: p.kb.ID, FilePath: p.filePath,
-		FileName: p.req.FileName, FileType: p.fileType, Attempt: attempt,
-		Language: types.LanguageFromContextOrDefault(ctx),
+	if err == nil {
+		job.Attempt = n
+		err = a.enqueue(types.DocumentProcessPayload{
+			TenantID: p.tenantID, KnowledgeID: k.ID, KnowledgeBaseID: p.kb.ID, FilePath: p.filePath,
+			FileName: p.req.FileName, FileType: p.fileType, Attempt: n,
+			Language: types.LanguageFromContextOrDefault(ctx),
+		})
 	}
-	err := a.enqueue(payload)
 	if err == nil {
 		return nil
 	}
-	logger.Warnf(ctx, "[agent24] ingest: enqueue failed: error_type=%T", err)
-	a.ks.markKnowledgeEnqueueFailed(context.WithoutCancel(ctx), k)
-	if _, aerr := a.jobs.Apply(context.WithoutCancel(ctx), *job, types.Agent24JobChange{
-		Status: types.Agent24JobFailed, FailureReason: types.Agent24JobFailEnqueue, Enrichment: job.Enrichment,
-	}, a.now()); aerr != nil {
-		logger.Warnf(ctx, "[agent24] ingest: recording enqueue_failed failed: error_type=%T", aerr)
+	logger.Warnf(ctx, "[agent24] ingest: dispatch failed: error_type=%T", err)
+	if ferr := a.failDispatch(context.WithoutCancel(ctx), job.TenantID, job.ID, k.ID); ferr != nil {
+		logger.Warnf(ctx, "[agent24] ingest: recording enqueue_failed failed: error_type=%T", ferr)
 	}
 	return fmt.Errorf("agent24 ingest: enqueue: %w", err)
+}
+
+// failDispatch records enqueue_failed: under the knowledge row lock Stage takes, and only while the job is still
+// the knowledge's occupying job, so a newer revision's row is never failed by an older job.
+func (a *Agent24Ingest) failDispatch(ctx context.Context, tenantID uint64, jobID, knowledgeID string) error {
+	return a.jobs.Transaction(ctx, func(tx *repository.Agent24IngestJobStore) error {
+		row, err := tx.LockKnowledge(ctx, tenantID, knowledgeID)
+		if err != nil {
+			return err
+		}
+		cur, err := tx.Occupying(ctx, tenantID, knowledgeID)
+		if err != nil || cur == nil || cur.ID != jobID {
+			return err
+		}
+		now := a.now()
+		if row != nil {
+			if err := tx.MoveKnowledge(ctx, tenantID, knowledgeID, agent24InFlight, types.ParseStatusFailed,
+				"Failed to enqueue processing task", now); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Apply(ctx, *cur, types.Agent24JobChange{
+			Status: types.Agent24JobFailed, FailureReason: types.Agent24JobFailEnqueue, Enrichment: cur.Enrichment,
+		}, now)
+		return err
+	})
 }
 
 func (a *Agent24Ingest) enqueue(payload types.DocumentProcessPayload) error {

@@ -113,12 +113,62 @@ func TestAgent24StageGatePassesAndRecordsProcessing(t *testing.T) {
 	require.Equal(t, types.Agent24JobProcessing, h.jobRow(t).Status)
 }
 
-func TestAgent24StageGateWithoutOccupyingJobPasses(t *testing.T) {
+// A run no job covers: a task delivered after its job settled (here: timed out and the row failed), or an
+// upstream reparse of an Agent24 ingest, does not run (W5.8).
+func TestAgent24StageGateWithoutOccupyingJobStops(t *testing.T) {
+	for _, tc := range []struct {
+		row, want string
+		job       types.Agent24JobStatus
+	}{
+		{types.ParseStatusFailed, types.ParseStatusFailed, types.Agent24JobFailed},
+		{types.ParseStatusPending, types.ParseStatusFailed, types.Agent24JobCancelled},
+		{types.ParseStatusProcessing, types.ParseStatusFailed, types.Agent24JobFailed},
+	} {
+		t.Run(tc.row, func(t *testing.T) {
+			h := newAgent24GateHarness(t)
+			h.job(t, tc.job, types.Agent24JobOpIngestSubmit)
+			require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
+				Update("parse_status", tc.row).Error)
+			aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+			require.True(t, aborted)
+			require.Equal(t, types.ParseStatusCancelled, status)
+			require.Equal(t, tc.want, h.knowledge(t).ParseStatus)
+			require.Equal(t, tc.job, h.jobRow(t).Status, "the settled job is not touched")
+		})
+	}
+}
+
+// A build already servable is upstream's: a retried post-process of an activated build finishes its enrichment.
+func TestAgent24StageGateLeavesAnActivatedBuild(t *testing.T) {
+	for _, row := range []string{types.ParseStatusFinalizing, types.ParseStatusCompleted} {
+		h := newAgent24GateHarness(t)
+		h.job(t, types.Agent24JobIndexed, types.Agent24JobOpIngestSubmit)
+		require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
+			Update("parse_status", row).Error)
+		h.policy.err = ErrAgent24PolicyDenied // not consulted: no job is in flight
+		aborted, _ := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.False(t, aborted, row)
+		require.Equal(t, row, h.knowledge(t).ParseStatus)
+	}
+}
+
+// A gate that read an older job does not stop the knowledge of the revision that superseded it.
+func TestAgent24StageGateSettleLosesToANewerRevision(t *testing.T) {
 	h := newAgent24GateHarness(t)
-	h.job(t, types.Agent24JobIndexed, types.Agent24JobOpIngestSubmit)
-	h.policy.err = ErrAgent24PolicyDenied // not consulted: no job is in flight
-	aborted, _ := agent24StageGateAborts(h.ctx, h.knowledge(t))
-	require.False(t, aborted)
+	h.job(t, types.Agent24JobProcessing, types.Agent24JobOpIngestSubmit)
+	stale := h.jobRow(t)
+	// J2 staged meanwhile: J1 superseded, the row reset to pending for J2
+	require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Where("id = ?", "j-1").Updates(map[string]any{
+		"status": types.Agent24JobCancelled, "cancel_reason": types.Agent24JobCancelSuperseded,
+	}).Error)
+	g := agent24Gate.Load()
+	aborted, status := g.settle(h.ctx, stale, h.knowledge(t), types.Agent24JobChange{
+		Status: types.Agent24JobCancelled, CancelReason: types.Agent24JobCancelRevoked,
+	}, types.ParseStatusCancelled, "revoked")
+	require.True(t, aborted)
+	require.Equal(t, abortStatusUnreadable, status, "the task retries and reads the new state")
+	require.Equal(t, types.ParseStatusPending, h.knowledge(t).ParseStatus)
+	require.Equal(t, types.Agent24JobCancelSuperseded, h.jobRow(t).CancelReason)
 }
 
 func TestAgent24StageGateRevokedAuthorization(t *testing.T) {
@@ -171,6 +221,7 @@ func TestAgent24StageGateRevokedAuthorization(t *testing.T) {
 			require.Equal(t, types.Agent24JobCancelled, j.Status)
 			require.Equal(t, types.Agent24JobCancelRevoked, j.CancelReason)
 			require.NotNil(t, j.TerminalAt)
+			require.True(t, j.Cost.Final, "nothing more is spent after the cancel (W1.3)")
 			require.Equal(t, types.ParseStatusCancelled, h.knowledge(t).ParseStatus)
 		})
 	}
@@ -195,6 +246,7 @@ func TestAgent24StageGatePolicyDenied(t *testing.T) {
 	j := h.jobRow(t)
 	require.Equal(t, types.Agent24JobFailed, j.Status)
 	require.Equal(t, types.Agent24JobFailPolicy, j.FailureReason)
+	require.True(t, j.Cost.Final)
 	k := h.knowledge(t)
 	require.Equal(t, types.ParseStatusFailed, k.ParseStatus)
 	require.NotEmpty(t, k.ErrorMessage)

@@ -42,13 +42,18 @@ func (p agent24IngestPolicy) AllowIngest(ctx context.Context, kb *types.Knowledg
 	if err != nil || policy == nil {
 		return service.ErrAgent24PolicyDenied
 	}
-	dest, ok, err := p.destinations.QueryEmbedding(ctx, []*types.KnowledgeBase{kb})
+	if !kb.NeedsEmbeddingModel() {
+		// neither vector nor keyword indexing: processChunks resolves no embedder
+		return nil
+	}
+	if kb.EmbeddingModelID == "" {
+		// an indexing KB without a model has no destination the policy could allow
+		return service.ErrAgent24PolicyDenied
+	}
+	// the ingest side embeds for keyword indexing too (NeedsEmbeddingModel), unlike the query side
+	dest, err := p.destinations.destination(ctx, kb)
 	if err != nil {
 		return err
-	}
-	if !ok {
-		// no embedding model: the pipeline calls no embedding destination
-		return nil
 	}
 	if err := policy.Allow(ctx, dest); err != nil {
 		if errors.Is(err, types.ErrProcessingDenied) {

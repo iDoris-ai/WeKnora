@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -71,9 +70,6 @@ func (r *Agent24JobReconciler) reconcile(ctx context.Context, job types.Agent24I
 	if err != nil || !applied {
 		return err
 	}
-	if change.Status.Terminal() || change.Status == types.Agent24JobIndexed {
-		r.finishCost(ctx, job, change)
-	}
 	if change.FailKnowledge {
 		if err := r.jobs.FailPendingKnowledge(ctx, job.TenantID, job.KnowledgeID,
 			"Agent24: no worker picked the job up in time", r.now()); err != nil {
@@ -81,21 +77,6 @@ func (r *Agent24JobReconciler) reconcile(ctx context.Context, job types.Agent24I
 		}
 	}
 	return nil
-}
-
-// finishCost marks the cost final once nothing more can be spent (W5.10): a terminal job, or an indexed one whose
-// enrichment is no longer running.
-func (r *Agent24JobReconciler) finishCost(
-	ctx context.Context, job types.Agent24IngestJob, change types.Agent24JobChange,
-) {
-	if change.Status == types.Agent24JobIndexed && change.Enrichment == types.Agent24EnrichmentRunning {
-		return
-	}
-	cost := job.Cost
-	cost.Final = true
-	if err := r.jobs.SetCost(ctx, job.TenantID, job.ID, cost); err != nil {
-		logger.Warnf(ctx, "[agent24] job reconcile: marking the cost final failed: error_type=%T", err)
-	}
 }
 
 // Sweep reconciles one batch of unsettled jobs and purges jobs settled longer ago than the retention. It returns

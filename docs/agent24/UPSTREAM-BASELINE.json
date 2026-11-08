@@ -908,6 +908,7 @@
             "internal/application/service/knowledge_post_process.go",
             "internal/handler/agent24_ingest_policy.go",
             "internal/handler/agent24_ingest_policy_test.go",
+            "internal/handler/agent24_knowledge_search.go",
             "internal/router/agent24_ingest_executor.go",
             "internal/router/agent24_ingest_executor_test.go",
             "internal/container/agent24_ingest.go",

@@ -63,9 +63,25 @@ func TestAgent24IngestPolicy(t *testing.T) {
 	set(`{"version":`)
 	require.ErrorIs(t, p.AllowIngest(ctx, kb), service.ErrAgent24PolicyDenied)
 
-	// a KB without an embedding model calls no embedding destination
+	// a KB that indexes neither vectors nor keywords calls no embedding destination
 	set("")
-	require.NoError(t, p.AllowIngest(ctx, &types.KnowledgeBase{ID: "kb2", TenantID: 42}))
+	require.NoError(t, p.AllowIngest(ctx, &types.KnowledgeBase{ID: "kb2", TenantID: 42, EmbeddingModelID: "m1"}))
+
+	// keyword indexing embeds on the ingest side too: its destination is checked like a vector KB's
+	keyword := *kb
+	keyword.IndexingStrategy.VectorEnabled = false
+	keyword.IndexingStrategy.KeywordEnabled = true
+	require.ErrorIs(t, p.AllowIngest(ctx, &keyword), service.ErrAgent24PolicyDenied)
+
+	// an indexing KB without a model has no destination to allow
+	noModel := *kb
+	noModel.EmbeddingModelID = ""
+	set(`{"version":"v","destinations":[{"category":"embedding",` +
+		`"endpoint":"https://agent24-unresolvable.invalid:443",` +
+		`"model":"text-embedding-3-small"}],"budget":{"max_external_calls":4,"max_input_bytes":65536,` +
+		`"max_inflight_external":8}}`)
+	require.NoError(t, p.AllowIngest(ctx, &keyword), "the listed destination allows a keyword KB")
+	require.ErrorIs(t, p.AllowIngest(ctx, &noModel), service.ErrAgent24PolicyDenied)
 
 	// a model row that cannot be read is retried, not a denial
 	failing := NewAgent24IngestPolicy(agent24FailingModels{})

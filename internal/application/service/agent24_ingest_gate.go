@@ -14,6 +14,13 @@
 //
 // ① or ② failing cancels the knowledge (upstream checkpoints then stop) and the job becomes
 // cancelled/authorization_revoked; ③ failing fails the knowledge and the job becomes failed/policy_denied.
+// The job and the knowledge move in one transaction under the knowledge row lock Stage takes, so a gate that
+// read an older job cannot stop the knowledge of a newer revision.
+//
+// An Agent24 ingest that no job occupies any more (its job ended, or an upstream reparse restarted it) does not
+// run: a late or retried task stops, and a row still pending or processing is failed (W5.8: a settled job's
+// knowledge does not become servable afterwards). A build already servable (finalizing, completed) is left to
+// upstream, so a retried post-process of an activated build still finishes its enrichment.
 // A gate that cannot read what it needs aborts with the upstream "unreadable" status, so the task is retried
 // rather than run unchecked; so does a process where the gate was never installed.
 
@@ -91,9 +98,7 @@ func (g *agent24StageGate) check(ctx context.Context, k *types.Knowledge) (bool,
 		return true, abortStatusUnreadable
 	}
 	if job == nil {
-		// no occupying job: it already ended (superseded, cancelled, failed) or the row is being processed after
-		// its job settled; upstream's own checks decide
-		return false, ""
+		return g.orphan(ctx, k)
 	}
 	held, err := g.holds(ctx, job)
 	if err != nil {
@@ -168,25 +173,70 @@ func (g *agent24StageGate) keyHolds(
 	return slices.Contains([]string(scope.KnowledgeBaseIDs), job.KnowledgeBaseID), nil
 }
 
-// settle ends the job and moves the knowledge so upstream stops. The knowledge is only moved from a state that
-// is still in flight, so a cancel or delete that won the race is kept.
+// errAgent24GateRace: the knowledge's occupying job changed under the gate; the task retries and the next check
+// reads the new state.
+var errAgent24GateRace = errors.New("agent24 stage gate: the knowledge's job changed")
+
+// settle ends the job and moves the knowledge so upstream stops. Both happen under the knowledge row lock, and
+// only while the job is still the one the gate read; the knowledge is only moved from a state still in flight,
+// so a cancel or delete that won the race is kept.
 func (g *agent24StageGate) settle(
 	ctx context.Context, job *types.Agent24IngestJob, k *types.Knowledge, change types.Agent24JobChange,
 	parseStatus, message string,
 ) (bool, string) {
-	if _, err := g.jobs.Apply(ctx, *job, change, g.now()); err != nil {
-		return true, abortStatusUnreadable
-	}
-	if err := g.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND id = ? AND parse_status IN ?", k.TenantID, k.ID, []string{
-			types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing,
-		}).
-		Updates(map[string]any{
-			"parse_status": parseStatus, "error_message": message, "pending_subtasks_count": 0,
-			"updated_at": g.now(),
-		}).Error; err != nil {
+	now := g.now()
+	err := g.jobs.Transaction(ctx, func(tx *repository.Agent24IngestJobStore) error {
+		row, err := tx.LockKnowledge(ctx, k.TenantID, k.ID)
+		if err != nil {
+			return err
+		}
+		applied, err := tx.Apply(ctx, *job, change, now)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			return errAgent24GateRace
+		}
+		if row == nil {
+			return nil
+		}
+		return tx.MoveKnowledge(ctx, k.TenantID, k.ID, agent24InFlight, parseStatus, message, now)
+	})
+	if err != nil {
 		return true, abortStatusUnreadable
 	}
 	logger.Infof(ctx, "[agent24] stage gate stopped knowledge %s: job=%s status=%s", k.ID, job.ID, change.Status)
+	return true, types.ParseStatusCancelled
+}
+
+// agent24InFlight are the knowledge states a run is still moving.
+var agent24InFlight = []string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}
+
+// orphan stops an Agent24 ingest that no job occupies (see the file comment).
+func (g *agent24StageGate) orphan(ctx context.Context, k *types.Knowledge) (bool, string) {
+	switch k.ParseStatus {
+	case types.ParseStatusFinalizing, types.ParseStatusCompleted:
+		return false, ""
+	}
+	err := g.jobs.Transaction(ctx, func(tx *repository.Agent24IngestJobStore) error {
+		row, err := tx.LockKnowledge(ctx, k.TenantID, k.ID)
+		if err != nil || row == nil {
+			return err
+		}
+		cur, err := tx.Occupying(ctx, k.TenantID, k.ID)
+		if err != nil {
+			return err
+		}
+		if cur != nil {
+			return errAgent24GateRace
+		}
+		return tx.MoveKnowledge(ctx, k.TenantID, k.ID,
+			[]string{types.ParseStatusPending, types.ParseStatusProcessing}, types.ParseStatusFailed,
+			"Agent24: no Agent24 job covers this run; submit the document again through Agent24", g.now())
+	})
+	if err != nil {
+		return true, abortStatusUnreadable
+	}
+	logger.Infof(ctx, "[agent24] stage gate stopped knowledge %s: no occupying job", k.ID)
 	return true, types.ParseStatusCancelled
 }
