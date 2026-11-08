@@ -236,14 +236,14 @@ func TestAgent24UIExchangeHappy(t *testing.T) {
 	require.LessOrEqual(t, resp.ExpiresIn, 600)
 	require.Greater(t, resp.ExpiresIn, 0)
 	require.Equal(t, []string{"kb-b", "kb-a"}, resp.EffectiveScope.KnowledgeBaseIDs)
-	require.Equal(t, append([]string(nil), agent24uisession.UIOps...), resp.Ops)
+	require.Equal(t, agent24uisession.UIRouteOps(), resp.Ops) // A24-KB-34
 	claims, err := agent24uisession.Verify(
 		agent24UIExchangeKey(), agent24uisession.DefaultIssuer, resp.SessionToken, time.Now())
 	require.NoError(t, err)
 	require.Equal(t, "api_tenant:principal-7", claims.Subject)
 	require.Equal(t, uint64(9), claims.TenantID)
 	require.Equal(t, []string{"kb-b", "kb-a"}, claims.Scope.KnowledgeBaseIDs)
-	require.Equal(t, agent24uisession.UIOps, claims.Ops)
+	require.Equal(t, agent24uisession.UIRouteOps(), claims.Ops) // A24-KB-34
 	require.Equal(t, issued.TicketID, claims.TicketID)
 	require.Equal(t, vph, claims.Cnf.VPH)
 	require.NotNil(t, claims.Gen)
@@ -599,6 +599,21 @@ func TestAgent24UIExchangeLifetime(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	_, reason, _ := agent24UIError(t, w)
 	require.Equal(t, "credential_expired", reason)
+
+	// #140 PR-Daemon S1 (A24-KB-34): a key with no expiry leaves the ticket's recorded C expiry as the only cap.
+	_, store = agent24UIHandlerDB(t)
+	agent24UISeedTicket(t, store, agent24UIRawTicket(52), vph, func(ticket *types.Agent24UITicket) {
+		soon := time.Now().Add(3 * time.Minute)
+		ticket.CredentialExpiresAt = &soon
+	})
+	h = agent24UIExchangeHandler(store, []*types.TenantAPIKey{
+		agent24UILiveKey([]string{"kb-b", "kb-a"}, false, nil, nil),
+	}, nil, nil, nil)
+	w, _ = agent24UIExchangeCall(h, agent24UIRawTicket(52), proof, "203.0.113.52:1")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.GreaterOrEqual(t, resp.ExpiresIn, 178)
+	require.LessOrEqual(t, resp.ExpiresIn, 180)
 }
 
 func TestAgent24UIExchangeRateLimit(t *testing.T) {
