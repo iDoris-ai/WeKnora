@@ -69,6 +69,23 @@ func agent24ReadCut(s string, off, maxBytes int) (string, bool) {
 	return rest[:i], i < len(rest)
 }
 
+// agent24RevisionPair is the document revision agent24JudgeRead computes (R5.1, A24-KB-35).
+// source_revision is always set. index_build_id is the servable chunk ids' build id when the snapshot has a
+// build (Chunks non-nil, including an empty set) and nil without one. The input order does not matter:
+// agent24IndexBuildID sorts the ids.
+func agent24RevisionPair(key []byte, knowledgeID string, snap agent24ReadSnapshot) (string, *string) {
+	source := agent24SourceRevision(key, knowledgeID, snap.Fingerprint)
+	if snap.Chunks == nil {
+		return source, nil
+	}
+	ids := make([]string, len(snap.Chunks))
+	for i, c := range snap.Chunks {
+		ids[i] = c.ID
+	}
+	build := agent24IndexBuildID(key, knowledgeID, ids)
+	return source, &build
+}
+
 // agent24JudgeRead applies the R6.4 order after E to one snapshot: document (not_found, R2.6), then anchor
 // and revision (stale, R4.4, R4.5), then the page. Text is valid UTF-8 (invalid bytes become U+FFFD) and is
 // cut and counted in bytes of that form; content_tag is over the stored text, as in search.
@@ -78,16 +95,7 @@ func agent24JudgeRead(key []byte, req agent24ReadRequest, snap agent24ReadSnapsh
 	if !snap.Found {
 		return agent24ReadPage{}, agent24NotFound()
 	}
-	source := agent24SourceRevision(key, req.KnowledgeID, snap.Fingerprint)
-	var build *string
-	if snap.Chunks != nil {
-		ids := make([]string, len(snap.Chunks))
-		for i, c := range snap.Chunks {
-			ids[i] = c.ID
-		}
-		b := agent24IndexBuildID(key, req.KnowledgeID, ids)
-		build = &b
-	}
+	source, build := agent24RevisionPair(key, req.KnowledgeID, snap) // A24-KB-35
 	if req.ChunkID != "" {
 		return agent24JudgeChunkRead(key, req, snap, source, build)
 	}

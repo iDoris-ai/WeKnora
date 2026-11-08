@@ -53,6 +53,9 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases"},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id"},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags"},
+		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents"}, // A24-KB-35
+		{http.MethodGet, "/api/v1/agent24/knowledge/ui/documents/:knowledge_id"},
+		{http.MethodGet, "/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks"},
 	} {
 		n := 0
 		for _, got := range engine.Routes() {
@@ -69,9 +72,9 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 			}
 		}
 	}
-	if len(engine.Routes()) != 10 {
+	if len(engine.Routes()) != 13 { // A24-KB-35: six ui reads
 		t.Fatalf("routes = %#v, want ready, search, read, ui tickets, "+
-			"ui revocations, exchange, session and three ui reads",
+			"ui revocations, exchange, session and six ui reads",
 			engine.Routes())
 	}
 }
@@ -90,7 +93,10 @@ func TestAgent24KnowledgeRoutesWithoutUIHandlers(t *testing.T) {
 			rt.Path == "/api/v1/agent24/knowledge/ui/exchange" || rt.Path == "/api/v1/agent24/knowledge/ui/session" ||
 			rt.Path == "/api/v1/agent24/knowledge/ui/knowledge-bases" ||
 			rt.Path == "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id" ||
-			rt.Path == "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags" {
+			rt.Path == "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags" ||
+			rt.Path == "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents" || // A24-KB-35
+			rt.Path == "/api/v1/agent24/knowledge/ui/documents/:knowledge_id" ||
+			rt.Path == "/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks" {
 			t.Fatalf("nil UI handler registered %s", rt.Path)
 		}
 	}

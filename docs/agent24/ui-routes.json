@@ -14,6 +14,21 @@
       "method": "GET",
       "path": "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags",
       "op": "tag.list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents",
+      "op": "doc.list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/documents/:knowledge_id",
+      "op": "doc.get"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks",
+      "op": "chunk.list"
     }
   ]
 }

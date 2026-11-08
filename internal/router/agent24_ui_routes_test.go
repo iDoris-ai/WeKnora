@@ -115,6 +115,7 @@ func TestAgent24UIReadRoutesAbsentWhenHandlerNil(t *testing.T) {
 		// A registered read route would skip Auth and answer the contract envelope instead.
 		w := httptest.NewRecorder()
 		path := strings.ReplaceAll(rt.Path, ":kb_id", "kb1")
+		path = strings.ReplaceAll(path, ":knowledge_id", "doc1") // A24-KB-35
 		engine.ServeHTTP(w, httptest.NewRequest(rt.Method, path, nil))
 		if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "missing authentication") {
 			t.Fatalf("standalone %s %s status %d body %s, want 401 missing authentication",

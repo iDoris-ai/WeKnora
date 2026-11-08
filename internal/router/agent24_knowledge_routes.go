@@ -74,6 +74,12 @@ func agent24UIReadDispatch(read *handler.Agent24KnowledgeUIReadHandler, op strin
 		return read.GetKnowledgeBase
 	case "tag.list":
 		return read.ListTags
+	case "doc.list": // A24-KB-35
+		return read.ListDocuments
+	case "doc.get": // A24-KB-35
+		return read.GetDocument
+	case "chunk.list": // A24-KB-35
+		return read.ListChunks
 	default:
 		return nil
 	}

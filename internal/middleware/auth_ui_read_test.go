@@ -24,9 +24,15 @@ func TestAuthSkipsUIReadRoutesOnly(t *testing.T) {
 	r.GET("/api/v1/agent24/knowledge/ui/knowledge-bases", ok)
 	r.GET("/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id", ok)
 	r.GET("/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags", ok)
+	r.GET("/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents", ok) // A24-KB-35
+	r.GET("/api/v1/agent24/knowledge/ui/documents/:knowledge_id", ok)
+	r.GET("/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks", ok)
 	r.POST("/api/v1/agent24/knowledge/ui/knowledge-bases", ok)
 	r.POST("/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id", ok)
 	r.POST("/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags", ok)
+	r.POST("/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents", ok)
+	r.POST("/api/v1/agent24/knowledge/ui/documents/:knowledge_id", ok)
+	r.POST("/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks", ok)
 	r.GET("/api/v1/knowledge-bases", ok)
 	r.POST("/api/v1/agent24/knowledge/search", ok)
 	r.GET("/api/v1/agent24/knowledge/ready", ok)
@@ -35,6 +41,9 @@ func TestAuthSkipsUIReadRoutesOnly(t *testing.T) {
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases", "Bearer user-jwt", ""},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/kb1", "", "sk-live"},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/tags", "Bearer user-jwt", "sk-live"},
+		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/documents", "", "sk-live"}, // A24-KB-35
+		{http.MethodGet, "/api/v1/agent24/knowledge/ui/documents/doc1", "Bearer user-jwt", ""},
+		{http.MethodGet, "/api/v1/agent24/knowledge/ui/documents/doc1/chunks", "", ""},
 	}
 	for _, tc := range skip {
 		w := authUIReadDo(r, tc.method, tc.path, tc.auth, tc.key)
@@ -54,6 +63,16 @@ func TestAuthSkipsUIReadRoutesOnly(t *testing.T) {
 			"", "sk-live", "API key service is not configured",
 		},
 		{http.MethodPost, "/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/tags", "", "", "missing authentication"},
+		// A24-KB-35: POST on the document routes stays behind Auth.
+		{
+			http.MethodPost, "/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/documents",
+			"Bearer user-jwt", "", "invalid or expired token",
+		},
+		{
+			http.MethodPost, "/api/v1/agent24/knowledge/ui/documents/doc1",
+			"", "sk-live", "API key service is not configured",
+		},
+		{http.MethodPost, "/api/v1/agent24/knowledge/ui/documents/doc1/chunks", "", "", "missing authentication"},
 		// A failed bearer falls through to X-API-Key. Both headers therefore surface the API-key error.
 		{
 			http.MethodPost, "/api/v1/agent24/knowledge/search",
@@ -94,6 +113,13 @@ func authUIReadFullPath(path string) string {
 		return path
 	case strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/knowledge-bases/") && strings.HasSuffix(path, "/tags"):
 		return "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags"
+	case strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/knowledge-bases/") &&
+		strings.HasSuffix(path, "/documents"): // A24-KB-35: before the generic :kb_id mapping
+		return "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents"
+	case strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/documents/") && strings.HasSuffix(path, "/chunks"):
+		return "/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks"
+	case strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/documents/"):
+		return "/api/v1/agent24/knowledge/ui/documents/:knowledge_id"
 	case strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/knowledge-bases/"):
 		return "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id"
 	default:
