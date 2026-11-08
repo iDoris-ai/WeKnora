@@ -538,7 +538,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// worker pool against one provider, so install an in-process governor.
 		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
-	provideAgent24Ingest(container, redisAvailable) // A24-KB-41
+	provideAgent24Ingest(container, redisAvailable)                                    // A24-KB-41
+	must(container.Invoke(installAgent24StageGate))                                    // A24-KB-41
+	invokeBackground(container, "Agent24IngestReconcile", startAgent24IngestReconcile) // A24-KB-41
 	must(container.Provide(service.NewTemporaryDocumentService))
 	invokeBackground(container, "TemporaryDocumentCleanup", startTemporaryDocumentCleanup) // A24-KB-30
 

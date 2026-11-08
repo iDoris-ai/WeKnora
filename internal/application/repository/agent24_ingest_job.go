@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -191,4 +192,74 @@ func (s *Agent24IngestJobStore) PurgeSettled(ctx context.Context, before time.Ti
 			types.Agent24JobIndexed, types.Agent24EnrichmentRunning, before).
 		Delete(&types.Agent24IngestJob{})
 	return res.RowsAffected, res.Error
+}
+
+// KnowledgeView reads what reconciliation needs about a job's knowledge: the row's state, the latest upstream
+// processing attempt, and which stage of that attempt failed. A missing row is Exists false.
+func (s *Agent24IngestJobStore) KnowledgeView(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (types.Agent24KnowledgeView, error) {
+	var row struct {
+		ParseStatus  string
+		ErrorMessage string
+	}
+	res := s.db.WithContext(ctx).Model(&types.Knowledge{}).Select("parse_status", "error_message").
+		Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).Limit(1).Scan(&row)
+	if res.Error != nil {
+		return types.Agent24KnowledgeView{}, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return types.Agent24KnowledgeView{}, nil
+	}
+	view := types.Agent24KnowledgeView{Exists: true, ParseStatus: row.ParseStatus}
+	if err := s.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+		Where("knowledge_id = ?", knowledgeID).Select("COALESCE(MAX(attempt), 0)").
+		Row().Scan(&view.LatestAttempt); err != nil {
+		return types.Agent24KnowledgeView{}, err
+	}
+	if row.ParseStatus != types.ParseStatusFailed {
+		return view, nil
+	}
+	var stage string
+	if err := s.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).Select("name").
+		Where("knowledge_id = ? AND attempt = ? AND kind = ? AND status = ?",
+			knowledgeID, view.LatestAttempt, types.SpanKindStage, types.SpanStatusFailed).
+		Order("updated_at DESC").Limit(1).Scan(&stage).Error; err != nil {
+		return types.Agent24KnowledgeView{}, err
+	}
+	view.FailureHint = agent24FailureHint(row.ErrorMessage, stage)
+	return view, nil
+}
+
+// agent24FailureHint classifies an upstream failure from the row's message (the enqueue and housekeeping
+// messages are fixed upstream strings) and the failed stage span.
+func agent24FailureHint(message, stage string) types.Agent24FailureHint {
+	switch {
+	case message == "Failed to enqueue processing task":
+		return types.Agent24FailureHintEnqueue
+	case strings.Contains(message, "recovered by housekeeping"):
+		return types.Agent24FailureHintStalled
+	}
+	switch stage {
+	case types.StageDocReader, types.StageChunking, types.StageMultimodal:
+		return types.Agent24FailureHintParse
+	case types.StageEmbedding:
+		return types.Agent24FailureHintEmbedding
+	case types.StagePostProcess:
+		return types.Agent24FailureHintIndex
+	}
+	return types.Agent24FailureHintUnknown
+}
+
+// FailPendingKnowledge fails a knowledge row that is still pending: the row of a job that timed out in saved.
+// A row a worker has picked up in the meantime is left alone.
+func (s *Agent24IngestJobStore) FailPendingKnowledge(
+	ctx context.Context, tenantID uint64, knowledgeID, message string, now time.Time,
+) error {
+	return s.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ? AND parse_status = ?", tenantID, knowledgeID, types.ParseStatusPending).
+		Updates(map[string]any{
+			"parse_status": types.ParseStatusFailed, "error_message": message, "updated_at": now.UTC(),
+		}).
+		Error
 }

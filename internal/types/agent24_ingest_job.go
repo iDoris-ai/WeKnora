@@ -270,7 +270,8 @@ func agent24FailureReason(h Agent24FailureHint) string {
 	case Agent24FailureHintEnqueue:
 		return Agent24JobFailEnqueue
 	case Agent24FailureHintStalled:
-		return Agent24JobFailInterrupt
+		// housekeeping fails a row with no progress past the processing time limit (W5.7 超过处理时限)
+		return Agent24JobFailTimeout
 	case Agent24FailureHintStorage:
 		return Agent24JobFailStorage
 	default:

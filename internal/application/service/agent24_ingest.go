@@ -274,6 +274,14 @@ func (a *Agent24Ingest) stageRevise(
 	if k.Title == k.FileName {
 		cols["title"] = p.req.FileName
 	}
+	if !agent24IsIngest(&k) {
+		// the stage gate recognises Agent24 ingests by this key; a revised upstream document gains it
+		meta, err := agent24WithOrigin(k.Metadata, p.req.Origin)
+		if err != nil {
+			return nil, err
+		}
+		cols["metadata"] = meta
+	}
 	if err := tx.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND id = ?", p.tenantID, k.ID).Updates(cols).Error; err != nil {
 		return nil, err
@@ -333,6 +341,22 @@ func (a *Agent24Ingest) enqueue(payload types.DocumentProcessPayload) error {
 	task := asynq.NewTask(types.TypeDocumentProcess, b, documentProcessTaskOptions(a.ks.config)...)
 	_, err = a.ks.task.Enqueue(task)
 	return err
+}
+
+// agent24WithOrigin adds the origin key to existing knowledge metadata, keeping the other keys.
+func agent24WithOrigin(raw types.JSON, origin string) (types.JSON, error) {
+	meta := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			return nil, err
+		}
+	}
+	meta[agent24OriginMetadataKey] = agent24Origin(origin)
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return nil, err
+	}
+	return types.JSON(b), nil
 }
 
 func agent24Origin(o string) string {
