@@ -162,6 +162,22 @@ const (
 	APIKeyCapabilitySystemRuntimeRead    APIKeyCapability = "system_runtime_read"
 	APIKeyCapabilitySystemRuntimeManage  APIKeyCapability = "system_runtime_manage"
 	APIKeyCapabilitySystemAuditRead      APIKeyCapability = "system_audit_read"
+
+	// Agent24 fork product patch A24-KB-40 (WeKnora#135, CONTRACT-OPS-v2 W1.1/W2.5): the write operation
+	// classes of an Agent24 credential, one capability each. No upstream route policy names them, so they lift
+	// no upstream route, and they are not ingest. Only the fork's agent24WriteAuthorizer reads them, and no
+	// route calls it until KB-SOP-02 (WeKnora#146) adds the write routes. FullAccess does not imply them
+	// (HasCapability does not look at FullAccess). The data scope of each is the key's knowledge_base_ids,
+	// resolved like reads, except that an empty list or a full-access key gives an empty scope.
+
+	// APIKeyCapabilityKBCandidatePropose lets a key submit, withdraw and read its own knowledge-entry candidates.
+	APIKeyCapabilityKBCandidatePropose APIKeyCapability = "kb_candidate_propose"
+	// APIKeyCapabilityKBCandidateReview lets a key list, read and return the candidates of its knowledge bases.
+	APIKeyCapabilityKBCandidateReview APIKeyCapability = "kb_candidate_review"
+	// APIKeyCapabilityKBCandidateApprove lets a key approve a candidate into its knowledge base.
+	APIKeyCapabilityKBCandidateApprove APIKeyCapability = "kb_candidate_approve"
+	// APIKeyCapabilityKBEntryWithdraw lets a key take a published knowledge entry out of service.
+	APIKeyCapabilityKBEntryWithdraw APIKeyCapability = "kb_entry_withdraw"
 )
 
 // NormalizeAPIKeyCapability maps an input capability string to a known
@@ -218,6 +234,15 @@ func NormalizeAPIKeyCapability(c APIKeyCapability) APIKeyCapability {
 		return APIKeyCapabilitySystemRuntimeManage
 	case APIKeyCapabilitySystemAuditRead:
 		return APIKeyCapabilitySystemAuditRead
+	// A24-KB-40: Agent24 write operation classes.
+	case APIKeyCapabilityKBCandidatePropose:
+		return APIKeyCapabilityKBCandidatePropose
+	case APIKeyCapabilityKBCandidateReview:
+		return APIKeyCapabilityKBCandidateReview
+	case APIKeyCapabilityKBCandidateApprove:
+		return APIKeyCapabilityKBCandidateApprove
+	case APIKeyCapabilityKBEntryWithdraw:
+		return APIKeyCapabilityKBEntryWithdraw
 	default:
 		return ""
 	}
