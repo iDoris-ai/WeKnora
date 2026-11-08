@@ -31,6 +31,10 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	// A24-KB-33: exact method. The other method on each path stays off the list.
 	"POST /api/v1/agent24/knowledge/ui/exchange": {},
 	"GET /api/v1/agent24/knowledge/ui/session":   {},
+	// A24-KB-39: the embed knowledge page. Registered only with the UI read routes and a page directory.
+	"GET " + agent24EmbedAdminListPath:   {},
+	"GET " + agent24EmbedAdminDetailPath: {},
+	"GET " + agent24EmbedAdminAssetPath:  {},
 }
 
 // agent24UIReadPaths is the set of UI read route paths, the only paths that may take a preflight (A24-KB-38).

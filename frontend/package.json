@@ -9,6 +9,7 @@
     "build-with-types": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
+    "build:embed-admin": "vite build --config vite.embed-admin.config.ts",
     "type-check": "vue-tsc --build",
     "test": "tsx --test",
     "check-i18n": "tsx --test src/i18n/localeKeyAudit.test.ts",

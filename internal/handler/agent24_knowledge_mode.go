@@ -64,5 +64,9 @@ func ValidateAgent24IntegrationConfig(cfg *config.Config) error {
 	if _, err := Agent24KnowledgeUIOriginsFromEnv(); err != nil {
 		return err
 	}
+	// A24-KB-39: a configured embed page directory must hold the build. Unset is not an error: no page routes.
+	if _, err := Agent24KnowledgeEmbedAdminDirFromEnv(); err != nil {
+		return err
+	}
 	return nil
 }
