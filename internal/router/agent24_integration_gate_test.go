@@ -12,7 +12,7 @@ import (
 func TestAgent24IntegrationGate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	applyAgent24IntegrationGate(r)
+	applyAgent24IntegrationGate(r, false)
 	ok := func(c *gin.Context) { c.Status(http.StatusOK) }
 	for _, rt := range [][2]string{
 		{"GET", "/health"},
@@ -110,7 +110,7 @@ func TestAgent24IntegrationGate(t *testing.T) {
 func TestAgent24IntegrationGatePrecedesCORS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	applyAgent24IntegrationGate(r)
+	applyAgent24IntegrationGate(r, false)
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"*"},
 		AllowMethods: []string{"GET", "POST", "OPTIONS"},

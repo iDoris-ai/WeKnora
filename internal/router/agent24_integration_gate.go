@@ -33,17 +33,27 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	"GET /api/v1/agent24/knowledge/ui/session":   {},
 }
 
+// agent24UIReadPaths is the set of UI read route paths, the only paths that may take a preflight (A24-KB-38).
+var agent24UIReadPaths = map[string]struct{}{}
+
 func init() {
 	// A24-KB-34: UI read routes come from the single table. Do not hand-copy them.
 	for _, rt := range agent24uisession.UIReadRoutes {
 		agent24IntegrationAllowlist[rt.Method+" "+rt.Path] = struct{}{}
+		agent24UIReadPaths[rt.Path] = struct{}{}
 	}
 }
 
-func agent24IntegrationGate() gin.HandlerFunc {
+// agent24IntegrationGate passes allowlisted method+route pairs. With uiPreflight (A24-KB-38: UI origins
+// configured) it also passes OPTIONS on a UI read path; agent24UICORS then answers it before Auth.
+func agent24IntegrationGate(uiPreflight bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if p := c.FullPath(); p != "" {
 			if _, ok := agent24IntegrationAllowlist[c.Request.Method+" "+p]; ok {
+				c.Next()
+				return
+			}
+			if _, ok := agent24UIReadPaths[p]; ok && uiPreflight && c.Request.Method == http.MethodOptions {
 				c.Next()
 				return
 			}
@@ -54,10 +64,10 @@ func agent24IntegrationGate() gin.HandlerFunc {
 
 // applyAgent24IntegrationGate configures r for integration mode: no automatic
 // path redirects, and the allowlist gate as a global middleware.
-func applyAgent24IntegrationGate(r *gin.Engine) {
+func applyAgent24IntegrationGate(r *gin.Engine, uiPreflight bool) {
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
-	r.Use(agent24IntegrationGate())
+	r.Use(agent24IntegrationGate(uiPreflight))
 }
 
 // installAgent24IntegrationMode must run before any route is registered. It
@@ -73,11 +83,13 @@ func installAgent24IntegrationMode(r *gin.Engine, cfg *config.Config) error {
 	if err := handler.ValidateAgent24IntegrationConfig(cfg); err != nil {
 		return fmt.Errorf("agent24 integration config: %w", err)
 	}
-	applyAgent24IntegrationGate(r)
+	origins := agent24UIOrigins()
+	applyAgent24IntegrationGate(r, len(origins) > 0)
 	// The policy version goes to the log only (decided 2026-11-06, D-B): the wire field waits for contract r11.
 	// Validation above refused a version with control characters or over 128 runes.
 	logger.Infof(context.Background(), "Agent24 knowledge integration mode: only %d allowlisted routes are served; "+
-		"processing policy version %q", len(agent24IntegrationAllowlist), handler.Agent24ProcessingPolicyVersion())
+		"processing policy version %q; %d cross-origin UI origins", len(agent24IntegrationAllowlist),
+		handler.Agent24ProcessingPolicyVersion(), len(origins))
 	return nil
 }
 

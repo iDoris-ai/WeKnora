@@ -53,6 +53,9 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 	// Registered only when the handler is non-nil, which is when the UI session key is configured.
 	// Paths come from UIReadRoutes so the registered FullPath stays the table's path.
 	if read != nil {
+		// A24-KB-38: with UI origins configured, each UI read path also gets an OPTIONS route so the
+		// preflight has a FullPath. agent24UICORS answers it before Auth; the handler is never reached.
+		preflight := len(agent24UIOrigins()) > 0
 		for _, rt := range agent24uisession.UIReadRoutes {
 			if rt.Method != http.MethodGet || !strings.HasPrefix(rt.Path, "/api/v1/") {
 				panic("agent24 ui read route is not a GET under /api/v1: " + rt.Method + " " + rt.Path)
@@ -62,6 +65,9 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 				panic("agent24 ui read route has no handler: " + rt.Op)
 			}
 			r.GET(strings.TrimPrefix(rt.Path, "/api/v1"), read.Guard(rt.Op), next)
+			if preflight {
+				r.OPTIONS(strings.TrimPrefix(rt.Path, "/api/v1"), agent24UIPreflightUnreachable)
+			}
 		}
 	}
 }
