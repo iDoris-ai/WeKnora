@@ -263,6 +263,11 @@ func agent24UIReadSeed(t *testing.T, db *gorm.DB) {
 			ID: "tag-foreign", SeqID: 4, TenantID: 9, KnowledgeBaseID: "kb-b",
 			Name: "Foreign", Color: "black", SortOrder: 0,
 		},
+		// A row of another tenant on kb-a: the tag queries filter tenant_id as well as the knowledge base.
+		{
+			ID: "tag-tenant8", SeqID: 6, TenantID: 8, KnowledgeBaseID: "kb-a",
+			Name: "Tenant8", Color: "white", SortOrder: 3,
+		},
 	}
 	for _, tag := range tags {
 		require.NoError(t, db.Create(tag).Error)
@@ -568,6 +573,7 @@ func TestAgent24UIReadEntries(t *testing.T) {
 		got := p2["tags"].([]any)
 		require.Len(t, got, 1)
 		require.Equal(t, "tag-c", got[0].(map[string]any)["id"])
+		require.NotContains(t, page2.Body.String(), "tag-tenant8")
 		require.Equal(t, float64(0), got[0].(map[string]any)["document_count"])
 
 		defaults := rig.authed("/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/tags")
