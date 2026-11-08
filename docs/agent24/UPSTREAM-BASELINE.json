@@ -871,6 +871,36 @@
           "added_on": "2026-11-09"
         },
         {
+          "id": "A24-KB-41",
+          "issue": "iDoris-ai/WeKnora#136",
+          "summary": "服务端内部 ingest 核心（agent24_ingest_jobs、Prepare/Stage/Dispatch、执行方 fail closed、standalone 阶段边界复验 W1.3、job 对账与扫描；不加集成路由）",
+          "upstream_commit": null,
+          "paths": [
+            "internal/types/agent24_ingest_job.go",
+            "internal/types/agent24_ingest_job_test.go",
+            "internal/application/repository/agent24_ingest_job.go",
+            "internal/application/repository/agent24_ingest_job_test.go",
+            "internal/application/service/agent24_ingest.go",
+            "internal/application/service/agent24_ingest_test.go",
+            "internal/application/service/agent24_ingest_gate.go",
+            "internal/application/service/agent24_ingest_gate_test.go",
+            "internal/application/service/agent24_ingest_reconcile.go",
+            "internal/application/service/agent24_ingest_reconcile_test.go",
+            "internal/application/service/knowledge.go",
+            "internal/application/service/knowledge_post_process.go",
+            "internal/handler/agent24_ingest_policy.go",
+            "internal/handler/agent24_ingest_policy_test.go",
+            "internal/router/agent24_ingest_executor.go",
+            "internal/router/agent24_ingest_executor_test.go",
+            "internal/container/agent24_ingest.go",
+            "internal/container/agent24_ingest_test.go",
+            "internal/container/container.go",
+            "internal/container/agent24_background_test.go"
+          ],
+          "remove_when": "长期保留（Agent24 集成专用）；上游若提供带授权复验的作业框架可改走它",
+          "added_on": "2026-11-09"
+        },
+        {
           "id": "A24-OBS-01",
           "issue": "iDoris-ai/WeKnora#40",
           "summary": "服务端默认不记正文与凭据（KB-OBS-01）：访问日志默认不记正文、查询值打码、能力令牌路径记模板；gorm 日志不带绑定值；Langfuse 的 http.query 打码",
