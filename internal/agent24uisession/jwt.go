@@ -34,6 +34,12 @@ var ErrExpired = errors.New("agent24 ui session token expired")
 // missing claims all use this error.
 var ErrInvalid = errors.New("agent24 ui session token invalid")
 
+// UIOps is the first UI operation list (A24-KB-33, U3.2). C2-01c narrows it to the routes in
+// ui-routes.json. The exchange copies it into the session JWT.
+var UIOps = []string{
+	"kb.list", "kb.get", "doc.list", "doc.get", "chunk.list", "wiki.list", "wiki.get", "tag.list",
+}
+
 // Scope is the knowledge-base allowlist carried in a session JWT (U3.2).
 type Scope struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
@@ -91,7 +97,7 @@ func Issue(key []byte, issuer string, c Claims, now time.Time, lifetime time.Dur
 	c.IssuedAt = jwt.NewNumericDate(now)
 	c.NotBefore = jwt.NewNumericDate(now)
 	c.ExpiresAt = jwt.NewNumericDate(now.Add(lifetime))
-	c.ID = uuid.NewString()
+	c.ID = bootID + "." + uuid.NewString() // A24-KB-33: the boot id lets a restart refuse it (U2.3)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, c)
 	signed, err := token.SignedString(key)
 	if err != nil {

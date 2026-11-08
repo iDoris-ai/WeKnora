@@ -27,6 +27,9 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	// A24-KB-32
 	"POST /api/v1/agent24/knowledge/ui/tickets":     {},
 	"POST /api/v1/agent24/knowledge/ui/revocations": {},
+	// A24-KB-33: exact method. The other method on each path stays off the list.
+	"POST /api/v1/agent24/knowledge/ui/exchange": {},
+	"GET /api/v1/agent24/knowledge/ui/session":   {},
 }
 
 func agent24IntegrationGate() gin.HandlerFunc {

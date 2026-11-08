@@ -156,7 +156,7 @@ func agent24UITicketsFor(
 	if recheck == nil {
 		recheck = agent24FixedRecheck{}
 	}
-	return &Agent24KnowledgeUITicketsHandler{scope: scope, recheck: recheck, store: store}
+	return &Agent24KnowledgeUITicketsHandler{scope: scope, recheck: recheck, store: store, key: agent24UIExchangeKey()}
 }
 
 func agent24UIServe(ctx context.Context, h gin.HandlerFunc, path, body string) *httptest.ResponseRecorder {
@@ -712,4 +712,41 @@ func TestAgent24UITicketRefusalAudit(t *testing.T) {
 	blob := string(stub.entries[0].Details)
 	require.NotContains(t, blob, partition)
 	require.NotContains(t, blob, vph)
+}
+
+// A24-KB-33: issuance records the key id and the principal mode. KeyID 0 is credential_invalid once a
+// credential id exists (a jti), and it does not insert a row.
+func TestAgent24UITicketRecordsKeyID(t *testing.T) {
+	db, store := agent24UIHandlerDB(t)
+	h := agent24UITicketsFor(store, agent24UIResolver(agent24UIKBs(9, "kb-a", "kb-b")...), nil)
+	body := agent24UITicketJSON(agent24UITestTag(1), agent24UITestTag(2), agent24UITestTag(3), "1")
+	id := agent24UIHappyIdentity(nil)
+	tenant := &types.Tenant{
+		ID: 9, APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode: types.APIPrincipalModeSignedToken, HMACSecret: "S3NT1NEL-secret",
+		},
+	}
+	ctx := context.WithValue(id.context(), types.TenantInfoContextKey, tenant)
+	w := agent24UIServe(ctx, h.Issue, agent24AuditPathUITickets, body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp struct {
+		TicketID string `json:"ticket_id"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	row := agent24UITicketRow(t, db, resp.TicketID)
+	require.Equal(t, uint64(7), row.KeyID)
+	require.Equal(t, string(types.APIPrincipalModeSignedToken), row.PrincipalMode)
+	require.Equal(t, agent24UIPrincipalSecretTag(agent24UIExchangeKey(), tenant), row.PrincipalSecretTag)
+	noSecret := agent24UIPrincipalSecretTag(agent24UIExchangeKey(), &types.Tenant{ID: 9})
+	require.NotEqual(t, noSecret, row.PrincipalSecretTag)
+	require.NotContains(t, row.PrincipalSecretTag, "S3NT1NEL")
+
+	zero := agent24UIHappyIdentity(nil)
+	zero.scope.KeyID = 0
+	zero.jti = "jti-zero-key"
+	w = agent24UIServe(zero.context(), h.Issue, agent24AuditPathUITickets, body)
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	_, reason, _ := agent24UIError(t, w)
+	require.Equal(t, "credential_invalid", reason)
+	require.Equal(t, int64(1), agent24UICount(t, db, &types.Agent24UITicket{}))
 }

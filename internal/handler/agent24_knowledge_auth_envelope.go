@@ -64,6 +64,12 @@ func (w *agent24HeldWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // Agent24IntegrationCredentialGate (right after Auth) releases the writer.
 func Agent24KnowledgeAuthEnvelope() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// A24-KB-33: exchange and the session probe are not authenticated by Auth. Do not hold the writer:
+		// a held writer would be rewritten as credential_missing, since these requests carry no C.
+		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path) {
+			c.Next()
+			return
+		}
 		if !strings.HasPrefix(c.Request.URL.Path, agent24KnowledgePathPrefix) {
 			c.Next()
 			return

@@ -167,7 +167,9 @@ func TestIssueVerifyRoundTrip(t *testing.T) {
 	require.True(t, got.IssuedAt.Equal(now))
 	require.True(t, got.NotBefore.Equal(now))
 	require.True(t, got.ExpiresAt.Equal(now.Add(DefaultLifetime)))
-	_, err = uuid.Parse(got.ID)
+	// A24-KB-33: jti is "<boot id>.<uuid>".
+	require.True(t, IssuedByBoot(got, BootID()))
+	_, err = uuid.Parse(strings.TrimPrefix(got.ID, BootID()+"."))
 	require.NoError(t, err)
 	require.Equal(t, in.TenantID, got.TenantID)
 	require.Equal(t, in.Scope, got.Scope)

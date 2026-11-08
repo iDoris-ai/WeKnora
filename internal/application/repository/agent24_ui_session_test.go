@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -524,4 +525,239 @@ func TestAgent24UISessionPurgeExpired(t *testing.T) {
 	require.Len(t, families, 2)
 	require.Equal(t, "vph-keep", families[0].VPH)
 	require.Equal(t, "vph-live", families[1].VPH)
+}
+
+// A24-KB-33: GetTicketByID returns the row, including the key id and principal mode, or (nil, nil).
+func TestAgent24UISessionGetTicketByID(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-get", "hash-get", "id-get", now.Add(time.Minute))
+	ticket.KeyID = 42
+	ticket.PrincipalMode = "signed_token"
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+
+	got, err := store.GetTicketByID(ctx, "id-get")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(42), got.KeyID)
+	require.Equal(t, "signed_token", got.PrincipalMode)
+	require.Equal(t, "hash-get", got.TicketHash)
+
+	var stored types.Agent24UITicket
+	require.NoError(t, db.Where("ticket_id = ?", "id-get").Take(&stored).Error)
+	require.Equal(t, uint64(42), stored.KeyID)
+	require.Equal(t, "signed_token", stored.PrincipalMode)
+
+	missing, err := store.GetTicketByID(ctx, "missing")
+	require.NoError(t, err)
+	require.Nil(t, missing)
+}
+
+// A24-KB-33: a read that fails after the spend rolls the spend back. The next presentation is then a
+// first presentation, not a replay that the caller never had the row to judge.
+func TestAgent24UISessionConsumeTicketReadFailureRollsBack(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, store.CreateTicket(ctx, newAgent24UITicket(t, "vph-r", "hash-r", "id-r", now.Add(time.Minute))))
+
+	const name = "agent24_test_fail_ticket_read"
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "agent24_ui_tickets" {
+			_ = tx.AddError(fmt.Errorf("read down"))
+		}
+	}))
+	_, _, err := store.ConsumeTicket(ctx, "hash-r", now)
+	require.Error(t, err)
+	require.NoError(t, db.Callback().Query().Remove(name))
+
+	spent := countWhere(t, db, &types.Agent24UITicket{}, "consumed_at IS NOT NULL AND ticket_hash = ?", "hash-r")
+	require.Equal(t, int64(0), spent)
+	row, first, err := store.ConsumeTicket(ctx, "hash-r", now)
+	require.NoError(t, err)
+	require.True(t, first)
+	require.NotNil(t, row)
+}
+
+const agent24RevokedVPH = "revoked_at IS NOT NULL AND vph = ?"
+
+// agent24FamilyWriteSwitch registers one update callback on db for the families table. It never changes
+// afterwards, so background retries cannot race a registration: failing makes the write fail, and a
+// non-nil hold blocks the write until it is closed. writes counts the writes that reached it.
+type agent24FamilyWriteSwitch struct {
+	failing atomic.Bool
+	writes  atomic.Int32
+	mu      sync.Mutex
+	hold    chan struct{}
+}
+
+func newAgent24FamilyWriteSwitch(t *testing.T, db *gorm.DB) *agent24FamilyWriteSwitch {
+	t.Helper()
+	sw := &agent24FamilyWriteSwitch{}
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("agent24_test_family_write",
+		func(tx *gorm.DB) {
+			if tx.Statement.Table != "agent24_ui_families" {
+				return
+			}
+			sw.writes.Add(1)
+			sw.mu.Lock()
+			hold := sw.hold
+			sw.mu.Unlock()
+			if hold != nil {
+				<-hold
+			}
+			if sw.failing.Load() {
+				_ = tx.AddError(fmt.Errorf("write down"))
+			}
+		}))
+	return sw
+}
+
+func (sw *agent24FamilyWriteSwitch) holdWrites() chan struct{} {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	sw.hold = make(chan struct{})
+	return sw.hold
+}
+
+// A24-KB-33: a leak revocation whose write fails is still in force (U2.8): FamilyRevoked is true and
+// CreateTicket refuses the family, and once the database recovers a background retry writes the row.
+func TestAgent24UISessionLeakRevokeWriteFailureStaysRevoked(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-p", "hash-p", "id-p", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+	revoked, err := store.FamilyRevoked(ctx, "vph-p")
+	require.NoError(t, err)
+	require.False(t, revoked)
+
+	sw := newAgent24FamilyWriteSwitch(t, db)
+	sw.failing.Store(true)
+	require.Error(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-p", now))
+	revoked, err = store.FamilyRevoked(ctx, "vph-p")
+	require.NoError(t, err)
+	require.True(t, revoked, "a failed revocation must still hold")
+	next := newAgent24UITicket(t, "vph-p", "hash-p2", "id-p2", now.Add(time.Minute))
+	require.ErrorIs(t, store.CreateTicket(ctx, next), interfaces.ErrAgent24UIFamilyRevoked)
+	require.Equal(t, int64(0), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-p"))
+
+	sw.failing.Store(false)
+	require.Eventually(t, func() bool {
+		revoked, err := store.FamilyRevoked(ctx, "vph-p")
+		return err == nil && revoked &&
+			countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-p") == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	// The row now carries the revocation on its own: a fresh store over the same database sees it.
+	revoked, err = NewAgent24UISessionStore(db).FamilyRevoked(ctx, "vph-p")
+	require.NoError(t, err)
+	require.True(t, revoked)
+}
+
+// A24-KB-33: the host revocation path (RevokeFamily) by another owner neither clears nor replaces a
+// pending leak revocation, and has no effect on the family (U3.7).
+func TestAgent24UISessionOtherOwnerDoesNotTouchPendingRevoke(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-o", "hash-o", "id-o", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+
+	sw := newAgent24FamilyWriteSwitch(t, db)
+	sw.failing.Store(true)
+	require.Error(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-o", now))
+	// Another owner's revocation fails while the database is down, then succeeds as a no-op after it
+	// recovers. Neither may change the pending entry.
+	require.Error(t, store.RevokeFamily(ctx, 99, "principal-b", "vph-o", now))
+	sw.failing.Store(false)
+	require.NoError(t, store.RevokeFamily(ctx, 99, "principal-b", "vph-o", now))
+	require.Equal(t, int64(0), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-o"))
+
+	revoked, err := store.FamilyRevoked(ctx, "vph-o")
+	require.NoError(t, err)
+	require.True(t, revoked, "another owner's revocation cleared the pending leak revocation")
+	require.Eventually(t, func() bool {
+		var row types.Agent24UIFamily
+		if db.Where("vph = ?", "vph-o").Take(&row).Error != nil || row.RevokedAt == nil {
+			return false
+		}
+		return row.TenantID == ticket.TenantID && row.Principal == ticket.Principal
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// A24-KB-33: FamilyRevoked does not wait on the retry write, and one family has at most one retry in flight.
+func TestAgent24UISessionPendingRetryDoesNotBlock(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-b", "hash-b", "id-b", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+	sw := newAgent24FamilyWriteSwitch(t, db)
+	sw.failing.Store(true)
+	require.Error(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-b", now))
+	sw.failing.Store(false)
+	sw.writes.Store(0)
+	release := sw.holdWrites()
+
+	for i := 0; i < 5; i++ {
+		start := time.Now()
+		revoked, err := store.FamilyRevoked(ctx, "vph-b")
+		require.NoError(t, err)
+		require.True(t, revoked)
+		require.Less(t, time.Since(start), time.Second, "FamilyRevoked waited on the retry write")
+	}
+	require.Eventually(t, func() bool { return sw.writes.Load() == 1 }, 2*time.Second, 5*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, int32(1), sw.writes.Load(), "more than one retry in flight")
+	close(release)
+	require.Eventually(t, func() bool {
+		return countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-b") == 1
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// A24-KB-33: RevokeLeakedFamily succeeds only once the row is confirmed revoked. A write that matched no
+// row of an existing family (the owner does not match) is an error, and the family stays pending.
+func TestAgent24UISessionLeakRevokeConfirmsRow(t *testing.T) {
+	db := agent24UISessionDB(t)
+	store := NewAgent24UISessionStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	ticket := newAgent24UITicket(t, "vph-c2", "hash-c2", "id-c2", now.Add(time.Minute))
+	require.NoError(t, store.CreateTicket(ctx, ticket))
+
+	require.Error(t, store.RevokeLeakedFamily(ctx, 99, "principal-b", "vph-c2", now))
+	require.Equal(t, int64(0), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-c2"))
+	revoked, err := store.FamilyRevoked(ctx, "vph-c2")
+	require.NoError(t, err)
+	require.True(t, revoked)
+
+	// A family that no longer exists is done: FamilyRevoked treats a missing row as revoked.
+	require.NoError(t, store.RevokeLeakedFamily(ctx, 7, "principal-a", "vph-missing", now))
+	require.NoError(t, store.RevokeLeakedFamily(ctx, ticket.TenantID, ticket.Principal, "vph-c2", now))
+	require.Equal(t, int64(1), countWhere(t, db, &types.Agent24UIFamily{}, agent24RevokedVPH, "vph-c2"))
+}
+
+// A24-KB-33: at most one background retry per family is in flight.
+func TestAgent24UISessionPendingRetrySingleFlight(t *testing.T) {
+	store := NewAgent24UISessionStore(agent24UISessionDB(t)).(*agent24UISessionStore)
+	_, ok := store.startPendingRetry("vph-s")
+	require.False(t, ok, "nothing pending")
+	store.addPendingRevoke("vph-s", agent24UIPendingRevoke{tenantID: 7, principal: "principal-a"})
+	_, ok = store.startPendingRetry("vph-s")
+	require.True(t, ok)
+	_, ok = store.startPendingRetry("vph-s")
+	require.False(t, ok, "a second retry started while one is in flight")
+	store.endPendingRetry("vph-s")
+	_, ok = store.startPendingRetry("vph-s")
+	require.True(t, ok)
+	// A later failure does not replace the first owner.
+	store.addPendingRevoke("vph-s", agent24UIPendingRevoke{tenantID: 99, principal: "principal-b"})
+	p, _ := store.pendingRevoke("vph-s")
+	require.Equal(t, uint64(7), p.tenantID)
 }

@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,11 +17,78 @@ import (
 
 type agent24UISessionStore struct {
 	db *gorm.DB
+	// A24-KB-33: family revocations whose write failed, by vph. U2.8 needs the revocation to hold even
+	// when the write fails and later reads succeed: until the row is written, FamilyRevoked answers true
+	// for these and retries the write. The container provides one store, so this covers the process.
+	pendingMu sync.Mutex
+	pending   map[string]agent24UIPendingRevoke
 }
+
+type agent24UIPendingRevoke struct {
+	tenantID  uint64
+	principal string
+	at        time.Time
+	retrying  bool
+}
+
+// agent24UIPendingRetryTimeout bounds one background retry of a pending family revocation.
+const agent24UIPendingRetryTimeout = 5 * time.Second
 
 // NewAgent24UISessionStore stores UI tickets and view families.
 func NewAgent24UISessionStore(db *gorm.DB) interfaces.Agent24UISessionStore {
-	return &agent24UISessionStore{db: db}
+	return &agent24UISessionStore{db: db, pending: map[string]agent24UIPendingRevoke{}}
+}
+
+func (s *agent24UISessionStore) pendingRevoke(vph string) (agent24UIPendingRevoke, bool) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	p, ok := s.pending[vph]
+	return p, ok
+}
+
+// addPendingRevoke records a leak revocation whose write failed. An existing entry is kept: the first
+// confirmed owner stays, and a later failure does not replace it.
+func (s *agent24UISessionStore) addPendingRevoke(vph string, p agent24UIPendingRevoke) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if s.pending == nil {
+		s.pending = map[string]agent24UIPendingRevoke{}
+	}
+	if _, ok := s.pending[vph]; !ok {
+		s.pending[vph] = p
+	}
+}
+
+// clearPendingRevoke drops the entry for vph only if it is still for this owner.
+func (s *agent24UISessionStore) clearPendingRevoke(vph string, tenantID uint64, principal string) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if p, ok := s.pending[vph]; ok && p.tenantID == tenantID && p.principal == principal {
+		delete(s.pending, vph)
+	}
+}
+
+// startPendingRetry marks vph as being retried. It returns the entry and false when a retry is already
+// running or nothing is pending, so at most one retry per family is in flight.
+func (s *agent24UISessionStore) startPendingRetry(vph string) (agent24UIPendingRevoke, bool) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	p, ok := s.pending[vph]
+	if !ok || p.retrying {
+		return p, false
+	}
+	p.retrying = true
+	s.pending[vph] = p
+	return p, true
+}
+
+func (s *agent24UISessionStore) endPendingRetry(vph string) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if p, ok := s.pending[vph]; ok {
+		p.retrying = false
+		s.pending[vph] = p
+	}
 }
 
 func agent24UTCPtr(t *time.Time) *time.Time {
@@ -37,6 +105,10 @@ func (s *agent24UISessionStore) CreateTicket(ctx context.Context, t *types.Agent
 	}
 	if _, err := t.ScopeKnowledgeBaseIDs(); err != nil {
 		return err
+	}
+	// A24-KB-33: a family whose revocation is pending is revoked.
+	if _, ok := s.pendingRevoke(t.VPH); ok {
+		return interfaces.ErrAgent24UIFamilyRevoked
 	}
 	row := *t
 	row.ExpiresAt = row.ExpiresAt.UTC()
@@ -122,22 +194,32 @@ func (s *agent24UISessionStore) ConsumeTicket(
 	ctx context.Context, ticketHash string, now time.Time,
 ) (*types.Agent24UITicket, bool, error) {
 	// U2.6: spend the ticket before any expiry or revocation decision. At most one caller updates the row.
-	res := s.db.WithContext(ctx).Exec(
-		"UPDATE agent24_ui_tickets SET consumed_at = ? WHERE ticket_hash = ? AND consumed_at IS NULL",
-		now.UTC(), ticketHash,
-	)
-	if res.Error != nil {
-		return nil, false, res.Error
-	}
+	// A24-KB-33: the update and the read are one transaction. A read that fails rolls the spend back, so a
+	// ticket is never consumed without the caller seeing the row it needs for the U2.8 leak decision.
 	var row types.Agent24UITicket
-	err := s.db.WithContext(ctx).Where("ticket_hash = ?", ticketHash).Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
+	var first, found bool
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(
+			"UPDATE agent24_ui_tickets SET consumed_at = ? WHERE ticket_hash = ? AND consumed_at IS NULL",
+			now.UTC(), ticketHash,
+		)
+		if res.Error != nil {
+			return res.Error
+		}
+		err := tx.Where("ticket_hash = ?", ticketHash).Take(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found, first = true, res.RowsAffected == 1
+		return nil
+	})
+	if err != nil || !found {
 		return nil, false, err
 	}
-	return &row, res.RowsAffected == 1, nil
+	return &row, first, nil
 }
 
 func (s *agent24UISessionStore) RevokeTicket(
@@ -153,11 +235,69 @@ func (s *agent24UISessionStore) RevokeTicket(
 func (s *agent24UISessionStore) RevokeFamily(
 	ctx context.Context, tenantID uint64, principal, vph string, now time.Time,
 ) error {
+	return s.writeFamilyRevoke(ctx, tenantID, principal, vph, now)
+}
+
+// RevokeLeakedFamily is the U2.8 revocation (A24-KB-33). The caller has the ticket row, so tenantID and
+// principal are the family's confirmed owner. A failed write leaves the family pending in this process.
+func (s *agent24UISessionStore) RevokeLeakedFamily(
+	ctx context.Context, tenantID uint64, principal, vph string, now time.Time,
+) error {
+	if err := s.persistLeakRevoke(ctx, tenantID, principal, vph, now); err != nil {
+		s.addPendingRevoke(vph, agent24UIPendingRevoke{tenantID: tenantID, principal: principal, at: now})
+		return err
+	}
+	s.clearPendingRevoke(vph, tenantID, principal)
+	return nil
+}
+
+// persistLeakRevoke writes the revocation and confirms it from the row: a family that is revoked, or no
+// longer exists (FamilyRevoked treats a missing row as revoked), is done. A row still unrevoked is an error.
+func (s *agent24UISessionStore) persistLeakRevoke(
+	ctx context.Context, tenantID uint64, principal, vph string, now time.Time,
+) error {
+	if err := s.writeFamilyRevoke(ctx, tenantID, principal, vph, now); err != nil {
+		return err
+	}
+	var row types.Agent24UIFamily
+	err := s.db.WithContext(ctx).Where("vph = ?", vph).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if row.RevokedAt == nil {
+		return errAgent24UIRevokeNotApplied
+	}
+	return nil
+}
+
+var errAgent24UIRevokeNotApplied = errors.New("agent24 ui family revocation did not apply")
+
+func (s *agent24UISessionStore) writeFamilyRevoke(
+	ctx context.Context, tenantID uint64, principal, vph string, now time.Time,
+) error {
 	res := s.db.WithContext(ctx).Model(&types.Agent24UIFamily{}).
 		Where("vph = ? AND tenant_id = ? AND principal = ? AND revoked_at IS NULL",
 			vph, tenantID, principal).
 		Update("revoked_at", now.UTC())
 	return res.Error
+}
+
+// A24-KB-33: the session probe needs the row. A missing ticket is (nil, nil).
+func (s *agent24UISessionStore) GetTicketByID(
+	ctx context.Context, ticketID string,
+) (*types.Agent24UITicket, error) {
+	var row types.Agent24UITicket
+	err := s.db.WithContext(ctx).Where("ticket_id = ?", ticketID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
 }
 
 func (s *agent24UISessionStore) TicketRevoked(ctx context.Context, ticketID string) (bool, error) {
@@ -173,6 +313,14 @@ func (s *agent24UISessionStore) TicketRevoked(ctx context.Context, ticketID stri
 }
 
 func (s *agent24UISessionStore) FamilyRevoked(ctx context.Context, vph string) (bool, error) {
+	if _, ok := s.pendingRevoke(vph); ok {
+		// A24-KB-33: a leak revocation whose write failed is in force. Retry it in the background with its
+		// own deadline; the request is not held on the write, and one retry per family runs at a time.
+		if p, start := s.startPendingRetry(vph); start {
+			go s.retryPendingRevoke(context.WithoutCancel(ctx), vph, p)
+		}
+		return true, nil
+	}
 	var row types.Agent24UIFamily
 	err := s.db.WithContext(ctx).Where("vph = ?", vph).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -182,6 +330,15 @@ func (s *agent24UISessionStore) FamilyRevoked(ctx context.Context, vph string) (
 		return false, err
 	}
 	return row.RevokedAt != nil, nil
+}
+
+func (s *agent24UISessionStore) retryPendingRevoke(base context.Context, vph string, p agent24UIPendingRevoke) {
+	defer s.endPendingRetry(vph)
+	ctx, cancel := context.WithTimeout(base, agent24UIPendingRetryTimeout)
+	defer cancel()
+	if s.persistLeakRevoke(ctx, p.tenantID, p.principal, vph, p.at) == nil {
+		s.clearPendingRevoke(vph, p.tenantID, p.principal)
+	}
 }
 
 func (s *agent24UISessionStore) PurgeExpired(ctx context.Context, now time.Time) (int64, error) {

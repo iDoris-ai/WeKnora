@@ -21,7 +21,8 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 	engine := gin.New()
 	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
 		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{},
-		&handler.Agent24KnowledgeUITicketsHandler{}, &handler.Agent24KnowledgeUIRevocationsHandler{}, g)
+		&handler.Agent24KnowledgeUITicketsHandler{}, &handler.Agent24KnowledgeUIRevocationsHandler{},
+		&handler.Agent24KnowledgeUIExchangeHandler{}, &handler.Agent24KnowledgeUISessionHandler{}, g)
 
 	for _, path := range agent24KnowledgeRoutePaths {
 		n := 0
@@ -45,8 +46,28 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 			t.Fatalf("%s PlatformOnly = true, want false", path)
 		}
 	}
-	if len(engine.Routes()) != 5 {
-		t.Fatalf("routes = %#v, want ready, search, read, ui tickets and ui revocations", engine.Routes())
+	for _, rt := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/agent24/knowledge/ui/exchange"},
+		{http.MethodGet, "/api/v1/agent24/knowledge/ui/session"},
+	} {
+		n := 0
+		for _, got := range engine.Routes() {
+			if got.Method == rt.method && got.Path == rt.path {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("%s %s count = %d, routes = %#v", rt.method, rt.path, n, engine.Routes())
+		}
+		if g.apiKeyAuthorizer != nil {
+			if _, ok := g.apiKeyAuthorizer.Lookup(rt.method, rt.path); ok {
+				t.Fatalf("%s %s must not have an API key policy", rt.method, rt.path)
+			}
+		}
+	}
+	if len(engine.Routes()) != 7 {
+		t.Fatalf("routes = %#v, want ready, search, read, ui tickets, ui revocations, exchange and session",
+			engine.Routes())
 	}
 }
 
@@ -54,12 +75,14 @@ func TestAgent24KnowledgeRoutesWithoutUIHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
-		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, &rbacGuards{})
+		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, nil, nil,
+		&rbacGuards{})
 	if len(engine.Routes()) != 3 {
 		t.Fatalf("routes = %#v, want exactly ready, search and read", engine.Routes())
 	}
 	for _, rt := range engine.Routes() {
-		if rt.Path == "/api/v1/agent24/knowledge/ui/tickets" || rt.Path == "/api/v1/agent24/knowledge/ui/revocations" {
+		if rt.Path == "/api/v1/agent24/knowledge/ui/tickets" || rt.Path == "/api/v1/agent24/knowledge/ui/revocations" ||
+			rt.Path == "/api/v1/agent24/knowledge/ui/exchange" || rt.Path == "/api/v1/agent24/knowledge/ui/session" {
 			t.Fatalf("nil UI handler registered %s", rt.Path)
 		}
 	}
@@ -92,7 +115,7 @@ func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &rbacGuards{}
 			engine := gin.New()
-			RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), tc.ready, tc.srch, tc.read, nil, nil, g)
+			RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), tc.ready, tc.srch, tc.read, nil, nil, nil, nil, g)
 			var got []string
 			for _, rt := range engine.Routes() {
 				got = append(got, rt.Path)
@@ -120,7 +143,8 @@ func TestAgent24KnowledgeRouteHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
-		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, &rbacGuards{})
+		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, nil, nil,
+		&rbacGuards{})
 	search := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 		`"scope":{"knowledge_base_ids":["a"]},"budget":{"deadline_ms":800,"max_results":5,"max_concurrency":1}}`
 	read := `{"protocol_version":1,"request_id":"r1","generation":7,"scope":{"knowledge_base_ids":["a"]},` +

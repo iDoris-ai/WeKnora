@@ -45,11 +45,22 @@ type Agent24UISessionStore interface {
 	// revoked_at is still null. No matching row is not an error: U3.7 makes existence indistinguishable.
 	RevokeTicket(ctx context.Context, tenantID uint64, principal, ticketID string, now time.Time) error
 	// RevokeFamily sets revoked_at on the family whose vph, tenant and principal all match and whose
-	// revoked_at is still null. No matching row is not an error (U3.7).
+	// revoked_at is still null. No matching row is not an error (U3.7), and it has no other effect.
 	RevokeFamily(ctx context.Context, tenantID uint64, principal, vph string, now time.Time) error
+	// RevokeLeakedFamily is the U2.8 revocation (A24-KB-33); tenantID and principal come from the ticket row,
+	// so they are the family's owner. Success means the row is confirmed revoked, or gone. When the write
+	// fails the error is returned and the family is still treated as revoked in this process
+	// (FamilyRevoked, CreateTicket) while FamilyRevoked retries the write in the background, so a failed
+	// leak revocation does not leave a leaked session usable once the database recovers. RevokeFamily
+	// never adds or clears that pending state. The pending state does not survive a restart; tickets and
+	// session JWTs from before the restart are refused instead (agent24uisession.BootID, U2.3).
+	RevokeLeakedFamily(ctx context.Context, tenantID uint64, principal, vph string, now time.Time) error
 	// TicketRevoked reports whether the ticket is revoked. revoked_at set is true. A missing row is true
 	// too: a JWT whose ticket cannot be found is refused (fail closed).
 	TicketRevoked(ctx context.Context, ticketID string) (bool, error)
+	// GetTicketByID returns the ticket row for ticketID (A24-KB-33). A missing row is (nil, nil).
+	// TicketRevoked stays fail-closed and does not return the row.
+	GetTicketByID(ctx context.Context, ticketID string) (*types.Agent24UITicket, error)
 	// FamilyRevoked reports whether the view family is revoked. revoked_at set is true. A missing row is
 	// true too (fail closed).
 	FamilyRevoked(ctx context.Context, vph string) (bool, error)

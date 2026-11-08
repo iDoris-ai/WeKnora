@@ -20,6 +20,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -1042,4 +1044,134 @@ func TestAgent24UISessionJWTRejected(t *testing.T) {
 			require.Equal(t, "no-store", w.Header().Get("Cache-Control"), path)
 		}
 	}
+}
+
+// TestAgent24UIExchangeAndSessionReachHandler guards A24-KB-33: the two routes authenticate with the
+// ticket or the session JWT, so a request with no C reaches the handler. The bypass is the exact method
+// and path. Standalone mode, and integration mode with the session key unset, leave the routes off.
+func TestAgent24UIExchangeAndSessionReachHandler(t *testing.T) {
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	const (
+		exchangePath = "/api/v1/agent24/knowledge/ui/exchange"
+		sessionPath  = "/api/v1/agent24/knowledge/ui/session"
+		readyPath    = "/api/v1/agent24/knowledge/ready"
+	)
+	sessionKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
+
+	t.Run("integration", func(t *testing.T) {
+		t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+		t.Setenv(agent24uisession.KeyEnv, sessionKey)
+		store := agent24UIRouterStore(t)
+		exchange, err := handler.NewAgent24KnowledgeUIExchangeHandler(nil, nil, nil, nil, store)
+		require.NoError(t, err)
+		require.NotNil(t, exchange)
+		session, err := handler.NewAgent24KnowledgeUISessionHandler(nil, nil, nil, store)
+		require.NoError(t, err)
+		require.NotNil(t, session)
+		tenantID := uint64(1)
+		r := NewRouter(RouterParams{
+			Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+			TenantAPIKeyService: agent24FakeKeySvc{key: &types.TenantAPIKey{
+				ID: 1, ScopeType: types.APIKeyScopePlatform,
+			}},
+			TenantService:                     agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}},
+			UserService:                       agent24FakeUserSvc{},
+			Agent24KnowledgeReadyHandler:      &handler.Agent24KnowledgeReadyHandler{},
+			Agent24KnowledgeUIExchangeHandler: exchange,
+			Agent24KnowledgeUISessionHandler:  session,
+		})
+
+		raw := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
+		req := httptest.NewRequest(http.MethodPost, exchangePath, strings.NewReader(`{"ticket":"`+raw+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
+		require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		require.NotContains(t, w.Body.String(), raw)
+
+		req = httptest.NewRequest(http.MethodGet, sessionPath, nil)
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
+		require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+
+		req = httptest.NewRequest(http.MethodPost, readyPath, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_missing", false)
+
+		for _, call := range []struct{ method, path string }{
+			{http.MethodGet, exchangePath},
+			{http.MethodPost, sessionPath},
+		} {
+			w = httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(call.method, call.path, nil))
+			require.Equal(t, http.StatusNotFound, w.Code, "%s %s: %s", call.method, call.path, w.Body.String())
+			require.Empty(t, w.Body.String(), "%s %s", call.method, call.path)
+		}
+	})
+
+	t.Run("standalone", func(t *testing.T) {
+		t.Setenv("AGENT24_KNOWLEDGE_MODE", "standalone")
+		t.Setenv(agent24uisession.KeyEnv, sessionKey)
+		exchange, err := handler.NewAgent24KnowledgeUIExchangeHandler(nil, nil, nil, nil, nil)
+		require.NoError(t, err)
+		require.Nil(t, exchange)
+		session, err := handler.NewAgent24KnowledgeUISessionHandler(nil, nil, nil, nil)
+		require.NoError(t, err)
+		require.Nil(t, session)
+		r := NewRouter(RouterParams{
+			Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		})
+		for _, call := range []struct{ method, path string }{
+			{http.MethodPost, exchangePath},
+			{http.MethodGet, sessionPath},
+		} {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(call.method, call.path, strings.NewReader(`{"ticket":"x"}`)))
+			require.Equal(t, http.StatusNotFound, w.Code, "%s %s: %s", call.method, call.path, w.Body.String())
+		}
+	})
+
+	t.Run("key unset", func(t *testing.T) {
+		t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+		t.Setenv(agent24uisession.KeyEnv, "")
+		exchange, err := handler.NewAgent24KnowledgeUIExchangeHandler(nil, nil, nil, nil, nil)
+		require.NoError(t, err)
+		require.Nil(t, exchange)
+		session, err := handler.NewAgent24KnowledgeUISessionHandler(nil, nil, nil, nil)
+		require.NoError(t, err)
+		require.Nil(t, session)
+		r := NewRouter(RouterParams{
+			Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		})
+		for _, call := range []struct{ method, path string }{
+			{http.MethodPost, exchangePath},
+			{http.MethodGet, sessionPath},
+		} {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(call.method, call.path, strings.NewReader(`{"ticket":"x"}`)))
+			require.Equal(t, http.StatusNotFound, w.Code, "%s %s: %s", call.method, call.path, w.Body.String())
+			require.Empty(t, w.Body.String(), "%s %s", call.method, call.path)
+		}
+	})
+}
+
+func agent24UIRouterStore(t *testing.T) interfaces.Agent24UISessionStore {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, apprepo.EnsureAgent24UISessionTables(db))
+	return apprepo.NewAgent24UISessionStore(db)
 }

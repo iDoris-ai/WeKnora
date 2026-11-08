@@ -31,6 +31,11 @@ const agent24KnowledgePathPrefix = "/api/v1/agent24/knowledge/"
 func Agent24IntegrationCredentialGate(revocations interfaces.Agent24CredentialRevocationStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		agent24ReleaseHeldWriter(c)
+		// A24-KB-33: these two paths carry no C. Exact method and path, not a prefix.
+		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path) {
+			c.Next()
+			return
+		}
 		if !agent24CredentialAccepted(c) {
 			if strings.HasPrefix(c.Request.URL.Path, agent24KnowledgePathPrefix) {
 				writeAgent24KnowledgeError(c, agent24Unauthorized("credential_invalid"), agent24KnowledgeEcho{})
@@ -84,6 +89,19 @@ func agent24RevocationCheckFailed(c *gin.Context, tenantID uint64, err error) {
 		return
 	}
 	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "credential check unavailable"})
+}
+
+// agent24UIBypassesCredential is the exchange (POST) and the session probe (GET) (A24-KB-33).
+// They are authenticated by the ticket or the session JWT, so the credential gate does not apply.
+func agent24UIBypassesCredential(method, path string) bool {
+	switch method {
+	case http.MethodPost:
+		return path == agent24AuditPathUIExchange
+	case http.MethodGet:
+		return path == agent24AuditPathUISession
+	default:
+		return false
+	}
 }
 
 func agent24CredentialAccepted(c *gin.Context) bool {
