@@ -277,6 +277,9 @@ func runSubmit(
 		if errors.Is(err, service.ErrAgent24KnowledgeNotFound) {
 			return refusal{"not_found"}, errRefused
 		}
+		if errors.Is(err, service.ErrAgent24UnsupportedKnowledge) {
+			return refusal{"invalid_request/unsupported_knowledge"}, errRefused
+		}
 		return nil, err
 	}
 	res := submitResult{
