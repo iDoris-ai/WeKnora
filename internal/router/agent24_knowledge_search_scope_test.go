@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -229,11 +230,15 @@ func TestAgent24KnowledgeReadRouteKBAllowList(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	retrieve := types.StringArray{string(types.APIKeyCapabilityRetrieve)}
+	plain := agent24ReadRouteKBAllowList(t, types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: retrieve,
+	})
 	// A24-KB-40: the same key with every write capability added reads the same, byte for byte.
-	for _, caps := range []types.StringArray{retrieve, agent24WriteKeyCaps(retrieve)} {
-		agent24ReadRouteKBAllowList(t, types.TenantAPIKeyScope{
-			KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: caps,
-		})
+	withWrite := agent24ReadRouteKBAllowList(t, types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: agent24WriteKeyCaps(retrieve),
+	})
+	if !maps.Equal(plain, withWrite) {
+		t.Fatalf("read bodies with write capabilities %v, want %v", withWrite, plain)
 	}
 }
 
@@ -243,8 +248,10 @@ func agent24WriteKeyCaps(base types.StringArray) types.StringArray {
 		"kb_candidate_approve", "kb_entry_withdraw")
 }
 
-func agent24ReadRouteKBAllowList(t *testing.T, scope types.TenantAPIKeyScope) {
+// agent24ReadRouteKBAllowList runs the read cases with scope and returns each case's response body.
+func agent24ReadRouteKBAllowList(t *testing.T, scope types.TenantAPIKeyScope) map[string]string {
 	t.Helper()
+	bodies := map[string]string{}
 	for _, tc := range []struct {
 		name, kbs, knowledge string
 		status               int
@@ -279,6 +286,11 @@ func agent24ReadRouteKBAllowList(t *testing.T, scope types.TenantAPIKeyScope) {
 			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
 				t.Fatalf("status %d body %s, want %d with %s", w.Code, w.Body.String(), tc.status, tc.want)
 			}
+			bodies[tc.name] = w.Body.String()
 		})
 	}
+	if len(bodies) != 3 {
+		t.Fatalf("read cases ran %d of 3", len(bodies))
+	}
+	return bodies
 }
