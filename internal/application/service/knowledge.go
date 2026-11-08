@@ -521,6 +521,9 @@ func (s *knowledgeService) isKnowledgeAborted(
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:
 		return true, knowledge.ParseStatus
 	}
+	if aborted, status := agent24StageGateAborts(ctx, knowledge); aborted { // Agent24 fork A24-KB-41 (W1.3)
+		return true, status
+	}
 	return false, knowledge.ParseStatus
 }
 

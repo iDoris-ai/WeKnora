@@ -127,22 +127,25 @@ func (d agent24ModelEmbeddingDestinations) QueryEmbedding(
 	if kb == nil {
 		return types.ProcessingDestination{}, false, nil
 	}
+	dest, err := d.destination(ctx, kb)
+	return dest, err == nil, err
+}
+
+// destination resolves the embedding destination of kb's embedding model.
+func (d agent24ModelEmbeddingDestinations) destination(
+	ctx context.Context, kb *types.KnowledgeBase,
+) (types.ProcessingDestination, error) {
 	if d.models == nil {
-		return types.ProcessingDestination{}, false, errors.New(
-			"agent24 knowledge: embedding model repository is unavailable")
+		return types.ProcessingDestination{}, errors.New("agent24 knowledge: embedding model repository is unavailable")
 	}
 	model, err := d.models.GetByID(ctx, kb.TenantID, kb.EmbeddingModelID)
 	if err != nil {
-		return types.ProcessingDestination{}, false, err
+		return types.ProcessingDestination{}, err
 	}
 	if model == nil || model.Status != types.ModelStatusActive {
-		return types.ProcessingDestination{}, false, errors.New("agent24 knowledge: embedding model is not active")
+		return types.ProcessingDestination{}, errors.New("agent24 knowledge: embedding model is not active")
 	}
-	dest, err := embedding.ProcessingDestinationForConfig(embedding.ConfigFromModel(model, "", ""), nil)
-	if err != nil {
-		return types.ProcessingDestination{}, false, err
-	}
-	return dest, true, nil
+	return embedding.ProcessingDestinationForConfig(embedding.ConfigFromModel(model, "", ""), nil)
 }
 
 // agent24QueryEmbeddingKB picks the KB whose embedding model HybridSearch would call.

@@ -54,6 +54,8 @@ var agent24BackgroundSteps = map[string]bool{
 	"startAgentRuntimes":     true,
 	"startAgentPromptReaper": true,
 	"startShellJobSweeper":   true,
+	// A24-KB-41: the Agent24 ingest job sweep, standalone only.
+	"startAgent24IngestReconcile": true,
 }
 
 // agent24ForegroundInvokes are the steps container.go may pass to
@@ -73,7 +75,11 @@ var agent24ForegroundInvokes = map[string]bool{
 	"ensureAgent24CredentialRevocations":  true,
 	// ensureAgent24UISessions is the A24-KB-31 UI session purge, the same kind of
 	// integration-only purge as the A24-KB-22 revocation purge, on the fork's own tables.
-	"ensureAgent24UISessions":        true,
+	"ensureAgent24UISessions": true,
+	// ensureAgent24IngestJobs only creates the A24-KB-41 job table; it starts nothing.
+	"ensureAgent24IngestJobs": true,
+	// installAgent24StageGate only stores the A24-KB-41 stage gate the pipeline calls.
+	"installAgent24StageGate":        true,
 	"registerChatLocalImageResolver": true,
 	// The BrowserSkill cleanup Promote closure, keyed by its whole text; any
 	// other closure, or a change to its body, is unreviewed.

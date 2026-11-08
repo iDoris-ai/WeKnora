@@ -538,6 +538,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// worker pool against one provider, so install an in-process governor.
 		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
+	provideAgent24Ingest(container, redisAvailable)                                    // A24-KB-41
+	must(container.Invoke(installAgent24StageGate))                                    // A24-KB-41
+	invokeBackground(container, "Agent24IngestReconcile", startAgent24IngestReconcile) // A24-KB-41
 	must(container.Provide(service.NewTemporaryDocumentService))
 	invokeBackground(container, "TemporaryDocumentCleanup", startTemporaryDocumentCleanup) // A24-KB-30
 
@@ -555,6 +558,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
 	must(container.Invoke(ensureAgent24CredentialRevocations)) // A24-KB-22
 	must(container.Invoke(ensureAgent24UISessions))            // A24-KB-31
+	must(container.Invoke(ensureAgent24IngestJobs))            // A24-KB-41
 	must(container.Provide(service.NewHousekeepingService))
 	invokeBackground(container, "KnowledgeHousekeeping", startHousekeepingService) // A24-KB-30
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")

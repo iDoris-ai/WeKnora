@@ -39,6 +39,12 @@ type policyEmbedder struct {
 func (p *policyEmbedder) authorize(ctx context.Context) (context.Context, error) {
 	guard := types.ProcessingGuardFromContext(ctx)
 	if guard == nil {
+		// Agent24 A24-KB-41: an Agent24 ingest's embedding calls run under the worker's embedding-only guard
+		if g := types.ProcessingEmbeddingGuardFromContext(ctx); g != nil {
+			ctx, guard = types.WithProcessingGuard(ctx, g), g
+		}
+	}
+	if guard == nil {
 		return ctx, nil
 	}
 	if p.destErr != nil {
