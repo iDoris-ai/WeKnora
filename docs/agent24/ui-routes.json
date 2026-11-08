@@ -29,6 +29,16 @@
       "method": "GET",
       "path": "/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks",
       "op": "chunk.list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/wiki/pages",
+      "op": "wiki.list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/wiki/pages/*slug",
+      "op": "wiki.get"
     }
   ]
 }

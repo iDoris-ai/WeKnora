@@ -19,10 +19,13 @@ var UIReadRoutes = []UIRoute{
 	{http.MethodGet, UIReadPrefix + "/knowledge-bases", "kb.list"},
 	{http.MethodGet, UIReadPrefix + "/knowledge-bases/:kb_id", "kb.get"},
 	{http.MethodGet, UIReadPrefix + "/knowledge-bases/:kb_id/tags", "tag.list"},
-	// A24-KB-35: documents and chunks. These three stay at the end, in this order.
+	// A24-KB-35: documents and chunks, in this order.
 	{http.MethodGet, UIReadPrefix + "/knowledge-bases/:kb_id/documents", "doc.list"},
 	{http.MethodGet, UIReadPrefix + "/documents/:knowledge_id", "doc.get"},
 	{http.MethodGet, UIReadPrefix + "/documents/:knowledge_id/chunks", "chunk.list"},
+	// A24-KB-36: wiki pages. These two stay at the end, in this order.
+	{http.MethodGet, UIReadPrefix + "/knowledge-bases/:kb_id/wiki/pages", "wiki.list"},
+	{http.MethodGet, UIReadPrefix + "/knowledge-bases/:kb_id/wiki/pages/*slug", "wiki.get"},
 }
 
 // IsUIReadRoute reports an exact method and FullPath match. A prefix is not enough.

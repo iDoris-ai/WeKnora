@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -88,6 +89,12 @@ func TestAgent24UIRoutesJSONMatchesTable(t *testing.T) {
 	for _, rt := range agent24uisession.UIReadRoutes {
 		want = append(want, rt.Method+" "+rt.Path)
 	}
+	// A24-KB-36: gin walks children by priority, not registration order.
+	// Both wiki routes sit under one node registered last, so that node's
+	// priority rises above tags and documents and Routes() lists wiki first.
+	// JSON already matches the table in order. Here the route sets must match.
+	slices.Sort(got)
+	slices.Sort(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("engine GET routes under the UI prefix (except session):\n%s\nwant:\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))

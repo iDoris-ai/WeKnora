@@ -80,6 +80,10 @@ func agent24UIReadDispatch(read *handler.Agent24KnowledgeUIReadHandler, op strin
 		return read.GetDocument
 	case "chunk.list": // A24-KB-35
 		return read.ListChunks
+	case "wiki.list": // A24-KB-36
+		return read.ListWikiPages
+	case "wiki.get": // A24-KB-36
+		return read.GetWikiPage
 	default:
 		return nil
 	}
