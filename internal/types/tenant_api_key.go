@@ -165,9 +165,10 @@ const (
 
 	// Agent24 fork product patch A24-KB-40 (WeKnora#135, CONTRACT-OPS-v2 W1.1/W2.5): the write operation
 	// classes of an Agent24 credential, one capability each. No upstream route policy names them, so they lift
-	// no upstream route; the integration-mode handlers check them, and they never imply ingest. FullAccess
-	// does not imply them either (HasCapability does not look at FullAccess). The data scope of each is the
-	// key's knowledge_base_ids, the same E as reads.
+	// no upstream route, and they are not ingest. Only the fork's agent24WriteAuthorizer reads them, and no
+	// route calls it until KB-SOP-02 (WeKnora#146) adds the write routes. FullAccess does not imply them
+	// (HasCapability does not look at FullAccess). The data scope of each is the key's knowledge_base_ids,
+	// resolved like reads, except that an empty list or a full-access key gives an empty scope.
 
 	// APIKeyCapabilityKBCandidatePropose lets a key submit, withdraw and read its own knowledge-entry candidates.
 	APIKeyCapabilityKBCandidatePropose APIKeyCapability = "kb_candidate_propose"
