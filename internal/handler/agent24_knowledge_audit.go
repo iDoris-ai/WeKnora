@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -38,6 +39,8 @@ const (
 	// A24-KB-33
 	agent24AuditActionUIExchange types.AuditAction = "knowledge.ui.exchange"
 	agent24AuditActionUISession  types.AuditAction = "knowledge.ui.session"
+	// A24-KB-34: one action for every UI read entry. The operation name is details.op.
+	agent24AuditActionUIView types.AuditAction = "knowledge.ui.view"
 
 	agent24AuditScopeType = "agent24_knowledge"
 
@@ -91,6 +94,8 @@ type agent24AuditFacts struct {
 	Principal    *types.Principal
 	CredentialID string
 	TenantID     uint64
+	// A24-KB-34: the UI read operation name. Empty on every other row, so the JSON key is omitted.
+	Op string
 }
 
 type agent24AuditPrincipal struct {
@@ -126,6 +131,8 @@ type agent24AuditDetails struct {
 	// rows of the same kind (anonymous, or that key's) the token bucket dropped since the previous one was
 	// written.
 	Suppressed int64 `json:"suppressed,omitempty"`
+	// A24-KB-34: the UI read operation. Absent on every other row.
+	Op string `json:"op,omitempty"`
 }
 
 // agent24AnonymousAuditLimiter is the token bucket for anonymous rows, with the count of rows it dropped.
@@ -347,7 +354,7 @@ func agent24WriteKnowledgeAudit(
 	if entry == nil {
 		// A24-KB-33: on the exchange and the session probe a suppressed anonymous row must not change how
 		// the response is sent (U2.7): flush as a written row would.
-		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path) {
+		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path, c.FullPath()) { // A24-KB-34
 			agent24FlushResponse(c)
 		}
 		return
@@ -387,15 +394,20 @@ func agent24KnowledgeAuditPath(c *gin.Context) bool {
 			return false
 		}
 	case http.MethodGet:
-		// A24-KB-33: the session probe is the only audited GET.
-		return c.Request.URL.Path == agent24AuditPathUISession
+		// A24-KB-33: the session probe. A24-KB-34: UI read entries, matched by FullPath.
+		return c.Request.URL.Path == agent24AuditPathUISession ||
+			agent24uisession.IsUIReadRoute(c.Request.Method, c.FullPath())
 	default:
 		return false
 	}
 }
 
-func agent24AuditAction(path string) types.AuditAction {
-	switch path {
+func agent24AuditAction(c *gin.Context) types.AuditAction {
+	// A24-KB-34: a parameterized read route's URL.Path is the concrete id, so match FullPath.
+	if _, ok := agent24uisession.UIRouteOp(c.Request.Method, c.FullPath()); ok {
+		return agent24AuditActionUIView
+	}
+	switch c.Request.URL.Path {
 	case agent24AuditPathSearch:
 		return agent24AuditActionSearch
 	case agent24AuditPathRead:
@@ -560,8 +572,8 @@ func agent24KnowledgeAuditEntry(
 	}
 	return &types.AuditLog{
 		TenantID:      tenant,
-		ActorUserID:   "", // R10.4: not a user row, and not a synthesized one
-		Action:        agent24AuditAction(c.Request.URL.Path),
+		ActorUserID:   "",                    // R10.4: not a user row, and not a synthesized one
+		Action:        agent24AuditAction(c), // A24-KB-34
 		ScopeType:     agent24AuditScopeType,
 		RequestPath:   path,
 		RequestMethod: c.Request.Method,
@@ -640,6 +652,9 @@ func agent24AuditDetail(
 			d.CredentialID = agent24AuditCredentialID(c)
 			d.TenantID = agent24AuditTenantDetail(c)
 		}
+	}
+	if facts != nil {
+		d.Op = facts.Op // A24-KB-34
 	}
 	return d
 }

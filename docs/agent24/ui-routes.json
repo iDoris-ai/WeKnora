@@ -1,0 +1,19 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/knowledge-bases",
+      "op": "kb.list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id",
+      "op": "kb.get"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags",
+      "op": "tag.list"
+    }
+  ]
+}

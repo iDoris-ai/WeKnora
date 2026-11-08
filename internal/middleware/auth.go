@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -149,6 +150,13 @@ func Auth(
 
 		// 检查请求是否在无需认证的API列表中
 		if isNoAuthAPI(c.Request.URL.Path, c.Request.Method) {
+			c.Next()
+			return
+		}
+		// A24-KB-34: UI read entries are authenticated by the session JWT plus the view proof.
+		// Auth would treat that session JWT as a user token and reject it. Exact method and FullPath,
+		// after the route has matched, so a parameterized path is not added to noAuthAPI.
+		if agent24uisession.IsUIReadRoute(c.Request.Method, c.FullPath()) {
 			c.Next()
 			return
 		}

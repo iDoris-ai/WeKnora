@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -31,8 +32,8 @@ const agent24KnowledgePathPrefix = "/api/v1/agent24/knowledge/"
 func Agent24IntegrationCredentialGate(revocations interfaces.Agent24CredentialRevocationStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		agent24ReleaseHeldWriter(c)
-		// A24-KB-33: these two paths carry no C. Exact method and path, not a prefix.
-		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path) {
+		// A24-KB-33, A24-KB-34: these paths carry no C. Exact method and path, not a prefix.
+		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path, c.FullPath()) {
 			c.Next()
 			return
 		}
@@ -91,9 +92,14 @@ func agent24RevocationCheckFailed(c *gin.Context, tenantID uint64, err error) {
 	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "credential check unavailable"})
 }
 
-// agent24UIBypassesCredential is the exchange (POST) and the session probe (GET) (A24-KB-33).
-// They are authenticated by the ticket or the session JWT, so the credential gate does not apply.
-func agent24UIBypassesCredential(method, path string) bool {
+// agent24UIBypassesCredential is the exchange (POST) and the session probe (GET) (A24-KB-33), plus the UI
+// read entries (A24-KB-34). Exchange and the probe match URL.Path. Read entries match method and FullPath:
+// the concrete URL contains the knowledge-base id, so a path match would miss them. They are authenticated
+// by the ticket or the session JWT, so the credential gate does not apply.
+func agent24UIBypassesCredential(method, path, fullPath string) bool {
+	if agent24uisession.IsUIReadRoute(method, fullPath) { // A24-KB-34
+		return true
+	}
 	switch method {
 	case http.MethodPost:
 		return path == agent24AuditPathUIExchange

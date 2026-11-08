@@ -260,7 +260,7 @@ func (h *Agent24KnowledgeUIExchangeHandler) Exchange(c *gin.Context) {
 	c.JSON(http.StatusOK, agent24UIExchangeResponse{
 		SessionToken:   token,
 		ExpiresIn:      int(lifetime / time.Second),
-		Ops:            append([]string(nil), agent24uisession.UIOps...),
+		Ops:            append([]string(nil), agent24uisession.UIRouteOps()...), // A24-KB-34
 		EffectiveScope: agent24UIExchangeScope{KnowledgeBaseIDs: effective},
 	})
 }
@@ -307,7 +307,7 @@ func (h *Agent24KnowledgeUIExchangeHandler) agent24UIIssueSession(
 		RegisteredClaims:   jwt.RegisteredClaims{Subject: ticket.Principal},
 		TenantID:           ticket.TenantID,
 		Scope:              agent24uisession.Scope{KnowledgeBaseIDs: append([]string(nil), effective...)},
-		Ops:                append([]string(nil), agent24uisession.UIOps...),
+		Ops:                append([]string(nil), agent24uisession.UIRouteOps()...), // A24-KB-34
 		TicketID:           ticket.TicketID,
 		ParentCredentialID: ticket.CredentialID,
 		BindingTag:         ticket.BindingTag,

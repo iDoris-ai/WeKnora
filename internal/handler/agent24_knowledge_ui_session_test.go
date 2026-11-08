@@ -147,6 +147,18 @@ func TestAgent24UISessionProbe(t *testing.T) {
 		agent24UIRequireProbeRefusal(t, w, stub, logs, "credential_expired", false, token, proof)
 	})
 
+	// #140 PR-Daemon S1 (A24-KB-34): the JWT is still live, but C's recorded expiry has passed.
+	t.Run("recorded C expired", func(t *testing.T) {
+		_, store := agent24UIHandlerDB(t)
+		ticket := agent24UISeedTicket(t, store, agent24UIRawTicket(82), vph, func(tk *types.Agent24UITicket) {
+			past := time.Now().Add(-time.Second)
+			tk.CredentialExpiresAt = &past
+		})
+		token := agent24UIIssueFor(t, ticket, agent24UIExchangeKey(), time.Now(), time.Minute)
+		w, stub, logs := agent24UIProbeCall(t, hSession(store, live), "Bearer "+token, proof)
+		agent24UIRequireProbeRefusal(t, w, stub, logs, "credential_expired", true, token, proof)
+	})
+
 	t.Run("wrong key", func(t *testing.T) {
 		_, store := agent24UIHandlerDB(t)
 		ticket := agent24UISeedTicket(t, store, agent24UIRawTicket(72), vph, nil)

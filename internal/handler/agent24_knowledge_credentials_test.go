@@ -219,6 +219,58 @@ func TestAgent24IntegrationCredentialGateRevocation(t *testing.T) {
 	})
 }
 
+// UI read entries bypass the credential gate by method and FullPath. POST on the same path does not.
+// A platform key on another knowledge path, and on GET /api/v1/knowledge-bases, is still refused.
+func TestAgent24UIReadCredentialGate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	platform := types.TenantAPIKeyScope{KeyID: 1, ScopeType: types.APIKeyScopePlatform}
+	serve := func(method, route, urlPath string) (int, bool, string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := gin.New()
+		called := false
+		r.Use(func(c *gin.Context) {
+			ctx := types.WithTenantAPIKeyScope(c.Request.Context(), platform)
+			c.Request = c.Request.WithContext(ctx)
+			c.Next()
+		}, Agent24IntegrationCredentialGate(nil))
+		r.Handle(method, route, func(c *gin.Context) {
+			called = true
+			c.Status(http.StatusNoContent)
+		})
+		r.ServeHTTP(w, httptest.NewRequest(method, urlPath, nil))
+		return w.Code, called, w.Body.String()
+	}
+
+	for _, tc := range []struct{ route, urlPath string }{
+		{"/api/v1/agent24/knowledge/ui/knowledge-bases", "/api/v1/agent24/knowledge/ui/knowledge-bases"},
+		{"/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id", "/api/v1/agent24/knowledge/ui/knowledge-bases/kb1"},
+		{
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags",
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/tags",
+		},
+	} {
+		code, called, body := serve(http.MethodGet, tc.route, tc.urlPath)
+		require.Equal(t, http.StatusNoContent, code, body)
+		require.True(t, called, tc.urlPath)
+		code, called, body = serve(http.MethodPost, tc.route, tc.urlPath)
+		require.Equal(t, http.StatusUnauthorized, code, body)
+		require.False(t, called, "POST "+tc.urlPath)
+		require.Contains(t, body, `"reason":"credential_invalid"`)
+	}
+
+	code, called, body := serve(http.MethodGet, "/api/v1/knowledge-bases", "/api/v1/knowledge-bases")
+	require.Equal(t, http.StatusUnauthorized, code, body)
+	require.False(t, called)
+	require.Contains(t, body, "credential not accepted in integration mode")
+	require.NotContains(t, body, `"code":"unauthorized"`)
+
+	code, called, body = serve(http.MethodPost, "/api/v1/agent24/knowledge/ready", "/api/v1/agent24/knowledge/ready")
+	require.Equal(t, http.StatusUnauthorized, code, body)
+	require.False(t, called)
+	require.Contains(t, body, `"reason":"credential_invalid"`)
+}
+
 // agent24CaptureCredentialLogs sends the logger to a buffer for one test, at info level and in the default
 // format, so LOG_LEVEL or LOG_FORMAT set for the test run cannot hide the warning.
 func agent24CaptureCredentialLogs(t *testing.T) *bytes.Buffer {

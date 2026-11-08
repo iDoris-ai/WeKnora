@@ -66,7 +66,7 @@ func Agent24KnowledgeAuthEnvelope() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// A24-KB-33: exchange and the session probe are not authenticated by Auth. Do not hold the writer:
 		// a held writer would be rewritten as credential_missing, since these requests carry no C.
-		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path) {
+		if agent24UIBypassesCredential(c.Request.Method, c.Request.URL.Path, c.FullPath()) { // A24-KB-34
 			c.Next()
 			return
 		}

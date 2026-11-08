@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -30,6 +31,13 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	// A24-KB-33: exact method. The other method on each path stays off the list.
 	"POST /api/v1/agent24/knowledge/ui/exchange": {},
 	"GET /api/v1/agent24/knowledge/ui/session":   {},
+}
+
+func init() {
+	// A24-KB-34: UI read routes come from the single table. Do not hand-copy them.
+	for _, rt := range agent24uisession.UIReadRoutes {
+		agent24IntegrationAllowlist[rt.Method+" "+rt.Path] = struct{}{}
+	}
 }
 
 func agent24IntegrationGate() gin.HandlerFunc {
