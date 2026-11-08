@@ -103,6 +103,7 @@ func agent24UIReadMigrate(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.AutoMigrate(
 		&agent24UIReadKBRow{}, &types.Knowledge{}, &types.Chunk{}, &types.KnowledgeTag{},
 		&types.KnowledgeTagRelation{}, &types.KnowledgeBaseShare{},
+		&types.WikiPage{}, // A24-KB-36
 	)) // A24-KB-35: chunks back doc.get and chunk.list
 }
 
@@ -163,6 +164,8 @@ func agent24UIReadMount(t *testing.T, h *Agent24KnowledgeUIReadHandler) agent24U
 		"doc.list":   h.ListDocuments,
 		"doc.get":    h.GetDocument,
 		"chunk.list": h.ListChunks,
+		"wiki.list":  h.ListWikiPages, // A24-KB-36
+		"wiki.get":   h.GetWikiPage,   // A24-KB-36
 	}
 	for _, rt := range agent24uisession.UIReadRoutes {
 		next := nextByOp[rt.Op]
@@ -347,6 +350,7 @@ func agent24UIReadSeed(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.First(&got, "id = ?", "share-1").Error)
 	require.Equal(t, "kb-other", got.KnowledgeBaseID)
 	require.Equal(t, uint64(8), got.SourceTenantID)
+	agent24UIReadSeedWiki(t, db) // A24-KB-36
 }
 
 func agent24UIReadFixture(

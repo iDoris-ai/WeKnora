@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -33,6 +35,10 @@ const (
 	agent24UIChunkPageDefault     = 1
 	agent24UIChunkPageSizeDefault = 25
 	agent24UIChunkPageSizeMax     = 100
+	// A24-KB-36: wiki.list page bounds. wiki.get takes no query parameters.
+	agent24UIWikiPageDefault     = 1
+	agent24UIWikiPageSizeDefault = 20
+	agent24UIWikiPageSizeMax     = 100
 )
 
 // agent24UIPageSpec is the page and page_size an entry recognizes. sizeMax is the inclusive upper bound.
@@ -55,8 +61,9 @@ type agent24UIReadState struct {
 	pageSize  int
 }
 
-// Agent24KnowledgeUIReadHandler serves the UI read entries (kb.list, kb.get, tag.list, and A24-KB-35
-// doc.list, doc.get, chunk.list). key is the revision key, read once; nil disables doc.get and chunk.list.
+// Agent24KnowledgeUIReadHandler serves the UI read entries (kb.list, kb.get, tag.list, A24-KB-35
+// doc.list, doc.get, chunk.list, and A24-KB-36 wiki.list, wiki.get). key is the revision key, read once;
+// nil disables doc.get and chunk.list.
 type Agent24KnowledgeUIReadHandler struct {
 	deps  agent24UISessionDeps
 	scope agent24ScopeResolver
@@ -106,17 +113,22 @@ func NewAgent24KnowledgeUIReadHandler(
 // Guard is the per-entry check (R6.4): session, shape, operation, then E. A failure does not call Next.
 // op is the route's operation, not a client field. Query keys other than the ones that entry lists are ignored,
 // including agent_id and agent_source_tenant_id.
-// A24-KB-35: page and page_size apply to tag.list, doc.list and chunk.list. doc.get and chunk.list also
-// require the revision key; a missing key is operation_disabled after the JWT op check and before E.
+// A24-KB-35: page and page_size apply to tag.list, doc.list and chunk.list.
+// A24-KB-36: wiki.list too (default 1 / 20, max 100). wiki.get takes no query parameters.
+// doc.get and chunk.list also require the revision key; a missing key is operation_disabled after the
+// JWT op check and before E.
 func (h *Agent24KnowledgeUIReadHandler) Guard(op string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
-		kbID, knowledgeID := "", ""
+		kbID, knowledgeID, slug := "", "", ""
 		switch op {
-		case "kb.get", "tag.list", "doc.list": // A24-KB-35: doc.list records kb_id
+		case "kb.get", "tag.list", "doc.list", "wiki.list": // A24-KB-36: wiki.list records kb_id
 			kbID = c.Param("kb_id")
 		case "doc.get", "chunk.list": // A24-KB-35: these record knowledge_id
 			knowledgeID = c.Param("knowledge_id")
+		case "wiki.get": // A24-KB-36: kb_id and the slug, with one leading "/" removed
+			kbID = c.Param("kb_id")
+			slug = agent24UIWikiSlugParam(c)
 		}
 		claims, ticket, scope, kerr := agent24UIVerifySession(
 			c.Request.Context(), h.deps, c.Request.Header, time.Now())
@@ -125,6 +137,9 @@ func (h *Agent24KnowledgeUIReadHandler) Guard(op string) gin.HandlerFunc {
 		}
 		// NoteTicket replaces the resource map, so op and the resource id are merged after it.
 		agent24UIReadNoteOp(c, op, kbID, knowledgeID) // A24-KB-35
+		if op == "wiki.get" {                         // A24-KB-36: slug is merged after NoteOp, which does not clear it
+			agent24UIReadNoteSlug(c, slug)
+		}
 		if kerr != nil {
 			writeAgent24KnowledgeError(c, kerr, agent24KnowledgeEcho{})
 			return
@@ -174,6 +189,10 @@ func agent24UIReadPageSpec(op string) (agent24UIPageSpec, bool) {
 	case "chunk.list": // A24-KB-35
 		return agent24UIPageSpec{
 			agent24UIChunkPageDefault, agent24UIChunkPageSizeDefault, agent24UIChunkPageSizeMax,
+		}, true
+	case "wiki.list": // A24-KB-36
+		return agent24UIPageSpec{
+			agent24UIWikiPageDefault, agent24UIWikiPageSizeDefault, agent24UIWikiPageSizeMax,
 		}, true
 	default:
 		return agent24UIPageSpec{}, false
@@ -305,6 +324,42 @@ func agent24UIReadNoteOp(c *gin.Context, op, kbID, knowledgeID string) { // A24-
 		}
 		f.Resource = resource
 	})
+}
+
+// agent24UIReadNoteSlug records wiki.get's slug on the resource map. An empty slug is left unset.
+// The value is cut to 255 bytes. A cut that would split a rune backs up to a valid UTF-8 prefix so the
+// audit JSON keeps that prefix (encoding/json would otherwise replace the partial rune).
+func agent24UIReadNoteSlug(c *gin.Context, slug string) { // A24-KB-36
+	if slug == "" {
+		return
+	}
+	slug = agent24UITruncateUTF8(slug, 255)
+	if slug == "" {
+		return
+	}
+	agent24NoteAudit(c, func(f *agent24AuditFacts) {
+		resource, _ := f.Resource.(map[string]any)
+		if resource == nil {
+			resource = map[string]any{}
+		}
+		resource["slug"] = slug
+		f.Resource = resource
+	})
+}
+
+// agent24UITruncateUTF8 replaces invalid UTF-8 and returns the leading prefix of at most n bytes, on a rune boundary.
+func agent24UITruncateUTF8(s string, n int) string { // A24-KB-36
+	if n < 0 {
+		return ""
+	}
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func agent24UIReadFinish(c *gin.Context, st *agent24UIReadState) {
