@@ -15,7 +15,8 @@
 // submit reads a tenant API key from FILE (a regular file, mode 0600 or stricter; the key is never printed) and
 // answers in the order an ingest route would (CONTRACT-OPS-v2 W1.9): the credential, then its scope (tenant key, not
 // full access, ingest capability, the target knowledge base in its non-empty allow-list), then the W5.2 format and
-// size checks; a refusal writes nothing. It then runs Prepare, Stage and Dispatch. status and workers never read a
+// size checks. A refusal saves nothing and creates no job (authentication itself records the key's last_used_at, as
+// on the route). It then runs Prepare, Stage and Dispatch. status and workers never read a
 // key: status reconciles one job first (the same write the standalone sweep makes) and prints it with its
 // knowledge's parse_status; workers lists live asynq servers and the default queue and writes nothing.
 //
@@ -174,9 +175,12 @@ func readKeyFile(path string) (string, error) {
 	return key, nil
 }
 
+var errProbeTenantGone = errors.New("the key's tenant is gone")
+
 // probeAdmission is the first refusal an ingest route would answer, in the W1.9 order: ① the credential
 // (authentication failed: unknown, revoked or expired), ③ its scope, ⑤ the W5.2 format and size checks. It is ""
-// when the submission may go on. Nothing has been written when it refuses.
+// when the submission may go on. A refusal comes before anything is saved or a job exists (W5.2). authErr
+// covers the whole credential step: authentication and the key's tenant, as the route middleware checks both.
 func probeAdmission(key *types.TenantAPIKey, authErr error, kb, name string, size int) string {
 	if authErr != nil {
 		return "unauthorized/credential_invalid"
@@ -253,13 +257,16 @@ func submit(args []string) (any, error) {
 	) error {
 		ctx := context.Background()
 		key, kerr := keys.AuthenticateAPIKey(ctx, rawKey)
+		var tenant *types.Tenant
+		if kerr == nil && key != nil && key.TenantID != nil {
+			// ① includes the key's tenant: the route answers 401 for a key whose tenant is gone
+			var terr error
+			if tenant, terr = tenants.GetTenantByID(ctx, *key.TenantID); terr != nil || tenant == nil {
+				kerr = errProbeTenantGone
+			}
+		}
 		if why := probeAdmission(key, kerr, f.kb, f.name, len(content)); why != "" {
 			out = refusal{why}
-			return errRefused
-		}
-		tenant, terr := tenants.GetTenantByID(ctx, *key.TenantID)
-		if terr != nil || tenant == nil {
-			out = refusal{"unauthorized/credential_invalid"}
 			return errRefused
 		}
 		ctx = context.WithValue(ctx, types.TenantIDContextKey, tenant.ID)
