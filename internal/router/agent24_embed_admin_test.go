@@ -255,8 +255,10 @@ func TestInstallAgent24IntegrationModeRejectsInvalidEmbedAdminDir(t *testing.T) 
 	require.ErrorContains(t, installAgent24IntegrationMode(gin.New(), cfg), handler.Agent24KnowledgeEmbedAdminDirEnv)
 	t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, dir)
 	require.NoError(t, installAgent24IntegrationMode(gin.New(), cfg))
-	t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, "")
-	require.NoError(t, installAgent24IntegrationMode(gin.New(), cfg))
+	for _, unset := range []string{"", " \t "} {
+		t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, unset)
+		require.NoError(t, installAgent24IntegrationMode(gin.New(), cfg), "%q", unset)
+	}
 }
 
 func TestAgent24EmbedAdminAssetName(t *testing.T) {
