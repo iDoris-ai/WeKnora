@@ -3,10 +3,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -237,4 +239,38 @@ func TestAgent24StageGateRunsInsideIsKnowledgeAborted(t *testing.T) {
 	require.True(t, aborted)
 	require.Equal(t, types.ParseStatusCancelled, status)
 	require.NoError(t, abortRetryErr(h.ctx, "k-1", status), "a settled abort acks the task")
+}
+
+type agent24PostProcessKBs struct {
+	reparseFailureKBService
+}
+
+func (s *agent24PostProcessKBs) GetKnowledgeBaseByIDOnly(context.Context, string) (*types.KnowledgeBase, error) {
+	return s.kb, nil
+}
+
+// The hook in the post-process handler: a revoked job's knowledge never reaches finalizing (the build never
+// becomes servable), and no enrichment subtask is enqueued.
+func TestAgent24StageGateRunsBeforePostProcessFinalizes(t *testing.T) {
+	h := newAgent24GateHarness(t)
+	h.job(t, types.Agent24JobProcessing, types.Agent24JobOpIngestSubmit)
+	require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
+		Update("parse_status", types.ParseStatusProcessing).Error)
+	require.NoError(t, h.db.Model(&types.TenantAPIKey{}).Where("id = 45").Update("revoked_at", time.Now()).Error)
+	events := []string{}
+	svc := &KnowledgePostProcessService{
+		knowledgeRepo: repository.NewKnowledgeRepository(h.db),
+		kbService: &agent24PostProcessKBs{
+			reparseFailureKBService{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}},
+		},
+		taskEnqueuer: &replaceFileEnqueuer{events: &events},
+	}
+	payload, err := json.Marshal(types.KnowledgePostProcessPayload{
+		TenantID: 7, KnowledgeID: "k-1", KnowledgeBaseID: "kb-1",
+	})
+	require.NoError(t, err)
+	require.NoError(t, svc.Handle(h.ctx, asynq.NewTask(types.TypeKnowledgePostProcess, payload)))
+	require.Equal(t, types.ParseStatusCancelled, h.knowledge(t).ParseStatus)
+	require.Equal(t, types.Agent24JobCancelRevoked, h.jobRow(t).CancelReason)
+	require.Empty(t, events, "no subtask enqueued")
 }
