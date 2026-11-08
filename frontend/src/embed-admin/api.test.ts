@@ -2,7 +2,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ApiError, getKnowledgeBase, listKnowledgeBases, setFetch } from './api.ts'
+import {
+  ApiError, getDocument, getDocumentIn, getKnowledgeBase, listChunks, listDocuments, listKnowledgeBases, listTags, setFetch,
+} from './api.ts'
 import { UI_ROUTES, uiPath } from './routes.ts'
 
 interface Seen {
@@ -79,4 +81,37 @@ test('uiPath encodes each parameter as one segment and refuses an empty one', ()
   assert.equal(uiPath(UI_ROUTES.kbGet, { kb_id: 'a b/c?d#e' }), '/api/v1/agent24/knowledge/ui/knowledge-bases/a%20b%2Fc%3Fd%23e')
   assert.throws(() => uiPath(UI_ROUTES.kbGet, {}))
   assert.throws(() => uiPath(UI_ROUTES.kbGet, { kb_id: '' }))
+})
+
+test('documents, chunks and tags: paths, page query, and a page shape that tolerates missing fields', async () => {
+  const seen: Seen[] = []
+  fake(200, { documents: [{ knowledge_id: 'k1' }], total: 41, page: 3, page_size: 20 }, seen)
+  const docs = await listDocuments('kb 1', 3)
+  assert.deepEqual([docs.items.length, docs.total, docs.page, docs.pageSize], [1, 41, 3, 20])
+  fake(200, { document: { knowledge_id: 'k/1', revision: { source_revision: 'r', index_build_id: null } } }, seen)
+  assert.equal((await getDocument('k/1')).knowledge_id, 'k/1')
+  fake(200, { chunks: [{ chunk_id: 'c' }], total: 1, page: 1, page_size: 25 }, seen)
+  assert.equal((await listChunks('k/1', 2)).items.length, 1)
+  fake(200, { tags: 'not a list', total: -5, page: 'x' }, seen)
+  const tags = await listTags('kb 1', 1)
+  assert.deepEqual([tags.items, tags.total, tags.page, tags.pageSize], [[], 0, 1, 1])
+  fake(200, {}, seen)
+  await assert.rejects(getDocument('k1'), (e: unknown) => e instanceof ApiError && e.code === 'internal')
+
+  assert.deepEqual(seen.map((s) => s.url), [
+    '/api/v1/agent24/knowledge/ui/knowledge-bases/kb%201/documents?page=3',
+    '/api/v1/agent24/knowledge/ui/documents/k%2F1',
+    '/api/v1/agent24/knowledge/ui/documents/k%2F1/chunks?page=2',
+    '/api/v1/agent24/knowledge/ui/knowledge-bases/kb%201/tags?page=1',
+    '/api/v1/agent24/knowledge/ui/documents/k1',
+  ])
+  for (const { init } of seen) assert.equal(init.credentials, 'omit')
+})
+
+test('a document of another knowledge base is not_found under this one (Codex b-r1 C2)', async () => {
+  const seen: Seen[] = []
+  fake(200, { document: { knowledge_id: 'k1', knowledge_base_id: 'kbB' } }, seen)
+  await assert.rejects(getDocumentIn('kbA', 'k1'), (e: unknown) => e instanceof ApiError && e.code === 'not_found')
+  fake(200, { document: { knowledge_id: 'k1', knowledge_base_id: 'kbA' } }, seen)
+  assert.equal((await getDocumentIn('kbA', 'k1')).knowledge_id, 'k1')
 })

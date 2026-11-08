@@ -1,0 +1,31 @@
+<script setup lang="ts">
+// Agent24 fork A24-KB-39 (KB-C2-02b, WeKnora#134, design §4). The only place the page sets HTML.
+// renderMarkdown already escapes everything and emits only SAFE_TAGS; DOMPurify with the same allowlist is a second
+// layer, a private instance so no global hook or config is shared with anything else.
+import DOMPurify from 'dompurify'
+import { computed } from 'vue'
+import { msg } from '../i18n'
+import { renderMarkdown, SAFE_ATTRS, SAFE_TAGS } from '../markdown'
+
+const props = defineProps<{ text: string }>()
+
+const purify = DOMPurify(window)
+purify.addHook('uponSanitizeAttribute', (_node, data) => {
+  if (data.attrName === 'class' && !/^ea-md-[a-z]+$/.test(data.attrValue)) data.keepAttr = false
+  if (data.attrName === 'start' && !/^\d{1,9}$/.test(data.attrValue)) data.keepAttr = false
+})
+
+const html = computed(() =>
+  purify.sanitize(renderMarkdown(props.text, { image: msg('md.image') }), {
+    ALLOWED_TAGS: [...SAFE_TAGS],
+    ALLOWED_ATTR: [...SAFE_ATTRS],
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: false,
+  }),
+)
+</script>
+
+<template>
+  <!-- eslint-disable-next-line vue/no-v-html -->
+  <div class="ea-md" v-html="html" />
+</template>

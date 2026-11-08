@@ -5,6 +5,10 @@
 export const UI_ROUTES = {
   kbList: '/api/v1/agent24/knowledge/ui/knowledge-bases',
   kbGet: '/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id',
+  tagList: '/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags',
+  docList: '/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents',
+  docGet: '/api/v1/agent24/knowledge/ui/documents/:knowledge_id',
+  chunkList: '/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks',
 } as const
 
 export type UIRouteTemplate = (typeof UI_ROUTES)[keyof typeof UI_ROUTES]

@@ -64,8 +64,25 @@ test('page code uses no storage, worker, keepalive or beacon', () => {
   for (const file of sources(HERE)) {
     const text = readFileSync(file, 'utf8')
     for (const word of ['localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'serviceWorker',
-      'new Worker', 'SharedWorker', 'keepalive', 'sendBeacon', 'pagehide', 'unload', 'v-html', 'innerHTML']) {
+      'new Worker', 'SharedWorker', 'keepalive', 'sendBeacon', 'pagehide', 'unload', 'innerHTML', 'outerHTML',
+      'insertAdjacentHTML', 'document.write']) {
       assert.equal(text.includes(word), false, `${relative(HERE, file)}: ${word}`)
     }
+  }
+})
+
+test('v-html appears only in MarkdownBlock.vue, on the sanitized render of renderMarkdown', () => {
+  for (const file of sources(HERE)) {
+    const name = relative(HERE, file)
+    const text = readFileSync(file, 'utf8')
+    if (name !== join('views', 'MarkdownBlock.vue')) {
+      assert.equal(text.includes('v-html='), false, name)
+      continue
+    }
+    assert.equal(text.match(/v-html=/g)?.length, 1)
+    assert.match(text, /v-html="html"/)
+    assert.match(text, /purify\.sanitize\(renderMarkdown\(/)
+    assert.match(text, /ALLOWED_TAGS: \[\.\.\.SAFE_TAGS\]/)
+    assert.match(text, /ALLOWED_ATTR: \[\.\.\.SAFE_ATTRS\]/)
   }
 })

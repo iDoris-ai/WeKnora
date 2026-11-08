@@ -1,17 +1,33 @@
 <script setup lang="ts">
-// Agent24 fork A24-KB-39 (KB-C2-02a, WeKnora#134). kb.get and the frame the next slices fill
-// (documents and tags in b, wiki in c).
-import { ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+// Agent24 fork A24-KB-39 (KB-C2-02a/b, WeKnora#134). kb.get, then one tab: documents (list or one document with
+// its chunks) or tags. What is shown lives in the query (tab, doc, page): the server answers only
+// /embed-admin/knowledge-bases[/:kb_id], so a reload must stay on that path. The tab loads after the knowledge
+// base, so one load reports to the bridge at a time.
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { getKnowledgeBase, type KnowledgeBase } from '../api'
 import { formatDate, msg, type MessageKey } from '../i18n'
 import { loads } from '../page'
+import DocumentDetail from './DocumentDetail.vue'
+import DocumentList from './DocumentList.vue'
+import { pageParam } from './docStatus'
 import { typeKey } from './kbType'
+import TagList from './TagList.vue'
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(true)
 const kb = ref<KnowledgeBase | null>(null)
 const error = ref<MessageKey | null>(null)
+
+const kbId = computed(() => (typeof route.params.kbId === 'string' ? route.params.kbId : ''))
+const tab = computed(() => (route.query.tab === 'tags' ? 'tags' : 'documents'))
+const docId = computed(() => (typeof route.query.doc === 'string' && route.query.doc !== '' ? route.query.doc : ''))
+const page = computed(() => pageParam(route.query.page))
+
+function show(query: Record<string, string>) {
+  void router.push({ name: 'kb-detail', params: { kbId: kbId.value }, query })
+}
 
 async function load(id: string) {
   loading.value = true
@@ -32,9 +48,9 @@ async function load(id: string) {
 }
 
 watch(
-  () => route.params.kbId,
+  kbId,
   (id) => {
-    if (typeof id === 'string' && id !== '') void load(id)
+    if (id !== '') void load(id)
   },
   { immediate: true },
 )
@@ -57,6 +73,30 @@ watch(
         {{ msg('detail.created', { d: formatDate(kb.created_at) }) }} ·
         {{ msg('list.updated', { d: formatDate(kb.updated_at) }) }}
       </p>
+      <nav class="ea-tabs" role="tablist">
+        <button type="button" role="tab" :aria-selected="tab === 'documents'" @click="show({})">
+          {{ msg('tab.documents') }}
+        </button>
+        <button type="button" role="tab" :aria-selected="tab === 'tags'" @click="show({ tab: 'tags' })">
+          {{ msg('tab.tags') }}
+        </button>
+      </nav>
+      <TagList v-if="tab === 'tags'" :kb-id="kb.id" :page="page" @page="(p) => show({ tab: 'tags', page: String(p) })" />
+      <DocumentDetail
+        v-else-if="docId"
+        :kb-id="kb.id"
+        :knowledge-id="docId"
+        :page="page"
+        @back="show({})"
+        @page="(p) => show({ doc: docId, page: String(p) })"
+      />
+      <DocumentList
+        v-else
+        :kb-id="kb.id"
+        :page="page"
+        @open="(id) => show({ doc: id })"
+        @page="(p) => show({ page: String(p) })"
+      />
     </template>
   </section>
 </template>
