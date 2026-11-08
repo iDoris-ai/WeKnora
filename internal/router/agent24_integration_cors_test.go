@@ -23,6 +23,7 @@ func agent24CORSRouter(t *testing.T, mode string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
 	t.Setenv("AGENT24_KNOWLEDGE_MODE", mode)
+	agent24EmbedAdminFixture(t) // A24-KB-39: so the page routes are registered too
 	// Every Agent24 handler is set so all allowlisted routes are registered. They are zero values:
 	// a request may fail inside the handler, which does not change the headers checked here.
 	return NewRouter(RouterParams{
@@ -57,7 +58,7 @@ func TestAgent24IntegrationModeSendsNoCORSHeaders(t *testing.T) {
 		if _, ok := agent24IntegrationAllowlist[key]; !ok {
 			continue
 		}
-		path := agent24RouteParam.ReplaceAllString(rt.Path, "x")
+		path := agent24ConcretePath(rt.Path)
 		req := httptest.NewRequest(rt.Method, path, nil)
 		req.Header.Set("Origin", "https://example.org")
 		w := httptest.NewRecorder()
@@ -160,7 +161,7 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 		if _, ok := agent24IntegrationAllowlist[key]; !ok {
 			continue
 		}
-		path := agent24RouteParam.ReplaceAllString(rt.Path, "x")
+		path := agent24ConcretePath(rt.Path)
 		checked[key] = true
 		if !ui[rt.Path] {
 			req := httptest.NewRequest(rt.Method, path, nil)

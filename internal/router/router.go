@@ -198,6 +198,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 		serveFrontendStatic(r)
 	}
 
+	// Agent24 A24-KB-39: the embed knowledge page (WeKnora#134). Before Auth: it serves only build output.
+	installAgent24EmbedAdmin(r, params.Agent24KnowledgeUIReadHandler != nil)
+
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
 	RegisterIMRoutes(r, params.IMHandler)
 
