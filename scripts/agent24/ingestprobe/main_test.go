@@ -73,7 +73,9 @@ func TestProbeAdmissionOrder(t *testing.T) {
 		want    string
 	}{
 		{nil, errors.New("revoked"), "a.pdf", 1, "unauthorized/credential_invalid"},
+		{good, errors.New("expired"), "a.pdf", big, "unauthorized/credential_invalid"},
 		{&noIngest, nil, "a.md", big, "forbidden/operation_not_allowed"},
+		{&noIngest, nil, "a.pdf", 1, "forbidden/operation_not_allowed"},
 		{good, nil, "a.pdf", big, "invalid_request/unsupported_format"},
 		{good, nil, "a.md", big, "invalid_request/too_large"},
 		{good, nil, "a.md", 10 << 20, ""},
