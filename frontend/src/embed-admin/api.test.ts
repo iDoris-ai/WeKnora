@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
-  ApiError, getDocument, getKnowledgeBase, listChunks, listDocuments, listKnowledgeBases, listTags, setFetch,
+  ApiError, getDocument, getDocumentIn, getKnowledgeBase, listChunks, listDocuments, listKnowledgeBases, listTags, setFetch,
 } from './api.ts'
 import { UI_ROUTES, uiPath } from './routes.ts'
 
@@ -106,4 +106,12 @@ test('documents, chunks and tags: paths, page query, and a page shape that toler
     '/api/v1/agent24/knowledge/ui/documents/k1',
   ])
   for (const { init } of seen) assert.equal(init.credentials, 'omit')
+})
+
+test('a document of another knowledge base is not_found under this one (Codex b-r1 C2)', async () => {
+  const seen: Seen[] = []
+  fake(200, { document: { knowledge_id: 'k1', knowledge_base_id: 'kbB' } }, seen)
+  await assert.rejects(getDocumentIn('kbA', 'k1'), (e: unknown) => e instanceof ApiError && e.code === 'not_found')
+  fake(200, { document: { knowledge_id: 'k1', knowledge_base_id: 'kbA' } }, seen)
+  assert.equal((await getDocumentIn('kbA', 'k1')).knowledge_id, 'k1')
 })

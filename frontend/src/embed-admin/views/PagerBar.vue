@@ -10,9 +10,9 @@ const pages = computed(() => Math.max(1, Math.ceil(props.total / Math.max(1, pro
 </script>
 
 <template>
-  <nav v-if="pages > 1" class="ea-pager">
+  <nav v-if="pages > 1 || page > 1" class="ea-pager">
     <button type="button" :disabled="page <= 1" @click="emit('go', page - 1)">{{ msg('pager.prev') }}</button>
-    <span class="ea-muted">{{ msg('pager.of', { p: page, n: pages }) }}</span>
+    <span v-if="page <= pages" class="ea-muted">{{ msg('pager.of', { p: page, n: pages }) }}</span>
     <button type="button" :disabled="page >= pages" @click="emit('go', page + 1)">{{ msg('pager.next') }}</button>
   </nav>
 </template>

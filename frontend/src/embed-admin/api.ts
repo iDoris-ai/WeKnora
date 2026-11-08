@@ -173,6 +173,16 @@ export async function getDocument(knowledgeId: string): Promise<DocumentDetail> 
   return body.document
 }
 
+/**
+ * doc.get answers any document in E, whatever knowledge base the page is on. Shown under one knowledge base, a
+ * document of another is the same not_found as a missing one (Codex b-r1 C2).
+ */
+export async function getDocumentIn(kbId: string, knowledgeId: string): Promise<DocumentDetail> {
+  const doc = await getDocument(knowledgeId)
+  if (doc.knowledge_base_id !== kbId) throw new ApiError('not_found', undefined, 200)
+  return doc
+}
+
 export async function listChunks(knowledgeId: string, page: number): Promise<Page<Chunk>> {
   const body = await getJSON<{ chunks?: unknown; total?: unknown; page?: unknown; page_size?: unknown }>(
     UI_ROUTES.chunkList, { knowledge_id: knowledgeId }, { page })

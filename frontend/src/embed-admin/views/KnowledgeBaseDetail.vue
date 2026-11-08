@@ -84,6 +84,7 @@ watch(
       <TagList v-if="tab === 'tags'" :kb-id="kb.id" :page="page" @page="(p) => show({ tab: 'tags', page: String(p) })" />
       <DocumentDetail
         v-else-if="docId"
+        :kb-id="kb.id"
         :knowledge-id="docId"
         :page="page"
         @back="show({})"

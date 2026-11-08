@@ -2,14 +2,14 @@
 // Agent24 fork A24-KB-39 (KB-C2-02b, WeKnora#134). doc.get, then chunk.list one server page at a time.
 // The document comes first: chunks load only after it, so one load reports to the bridge at a time.
 import { ref, watch } from 'vue'
-import { getDocument, listChunks, type Chunk, type DocumentDetail, type Page } from '../api'
+import { getDocumentIn, listChunks, type Chunk, type DocumentDetail, type Page } from '../api'
 import { msg, type MessageKey } from '../i18n'
 import { loads } from '../page'
 import { statusKey } from './docStatus'
 import MarkdownBlock from './MarkdownBlock.vue'
 import PagerBar from './PagerBar.vue'
 
-const props = defineProps<{ knowledgeId: string; page: number }>()
+const props = defineProps<{ kbId: string; knowledgeId: string; page: number }>()
 const emit = defineEmits<{ back: []; page: [page: number] }>()
 
 const loading = ref(true)
@@ -17,14 +17,14 @@ const doc = ref<DocumentDetail | null>(null)
 const chunks = ref<Page<Chunk> | null>(null)
 const error = ref<MessageKey | null>(null)
 
-async function load(knowledgeId: string, page: number) {
+async function load(kbId: string, knowledgeId: string, page: number) {
   loading.value = true
   doc.value = null
   chunks.value = null
   error.value = null
   const run = loads.begin()
   try {
-    const d = await getDocument(knowledgeId)
+    const d = await getDocumentIn(kbId, knowledgeId)
     if (!run.current) return
     const c = await listChunks(knowledgeId, page)
     if (!run.current) return
@@ -39,7 +39,11 @@ async function load(knowledgeId: string, page: number) {
   }
 }
 
-watch(() => [props.knowledgeId, props.page] as const, ([id, page]) => void load(id, page), { immediate: true })
+watch(
+  () => [props.kbId, props.knowledgeId, props.page] as const,
+  ([kbId, id, page]) => void load(kbId, id, page),
+  { immediate: true },
+)
 </script>
 
 <template>

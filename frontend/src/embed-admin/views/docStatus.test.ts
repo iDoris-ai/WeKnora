@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { pageParam, safeColor, statusKey } from './docStatus.ts'
+import { emptyKind, pageParam, safeColor, statusKey } from './docStatus.ts'
 
 test('parse_status labels', () => {
   assert.equal(statusKey('completed'), 'status.ready')
@@ -24,4 +24,10 @@ test('only plain hex colours are used', () => {
 test('page query values', () => {
   assert.equal(pageParam('3'), 3)
   for (const bad of [undefined, '', '0', '-1', '1.5', 'x', '01', '9999999', ['2']]) assert.equal(pageParam(bad), 1, String(bad))
+})
+
+test('an empty page past the end is not an empty list (Codex b-r1 C1)', () => {
+  assert.equal(emptyKind({ items: [], total: 0 }), 'none')
+  assert.equal(emptyKind({ items: [], total: 40 }), 'beyond')
+  assert.equal(emptyKind({ items: [1], total: 40 }), null)
 })
