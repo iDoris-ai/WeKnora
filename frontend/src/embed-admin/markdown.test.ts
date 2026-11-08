@@ -179,6 +179,8 @@ test('outside tables nothing is rewritten (Codex c-r2 C3, C4, C5)', () => {
   assert.equal(md(`[[a|${long}]]`), `<p><span class="ea-md-wiki" data-slug="a">${long}</span></p>\n`)
   assert.equal(md('[[a\\|b]]'), '<p><span class="ea-md-wiki" data-slug="a">b</span></p>\n')
   assert.equal(renderMarkdown('| h |\n| - |\n| \uE000 |\n', LABELS).includes('\uE000'), true)
+  // Outside wiki content a table is plain GFM: the bar splits the cell as written.
+  assert.match(renderMarkdown('| h | i |\n| - | - |\n| [[a|b]] | tail |\n', LABELS), /<td>\[\[a<\/td>\n<td>b\]\]<\/td>/)
 })
 
 test('hostile wiki content stays safe', () => {
