@@ -130,6 +130,9 @@ test('wiki.get keeps the slashes of a slug and encodes each part (no %2F); dot a
     '/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/wiki/pages?page=1',
   ])
   assert.equal(seen[0].url.includes('%2F'), false)
+  fake(200, {}, seen)
+  await assert.rejects(getWikiPage('kb1', 's'), (e: unknown) => e instanceof ApiError && e.code === 'internal')
+  seen.pop()
 
   for (const bad of ['', '/a', 'a/', 'a//b', '.', '..', 'a/../b', 'a/./b', '../../tags']) {
     const before = seen.length

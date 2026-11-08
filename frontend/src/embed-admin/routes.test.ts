@@ -84,5 +84,8 @@ test('v-html appears only in MarkdownBlock.vue, on the sanitized render of rende
     assert.match(text, /purify\.sanitize\(renderMarkdown\(/)
     assert.match(text, /ALLOWED_TAGS: \[\.\.\.SAFE_TAGS\]/)
     assert.match(text, /ALLOWED_ATTR: \[\.\.\.SAFE_ATTRS\]/)
+    // KB-C2-02c: data-slug survives only on span.ea-md-wiki, and a click moves only to a slug in this page's set.
+    assert.match(text, /data\.attrName === 'data-slug' && \(node\.nodeName !== 'SPAN' \|\| node\.getAttribute\('class'\) !== 'ea-md-wiki'\)/)
+    assert.match(text, /if \(slug && props\.wikiLinks\?\.has\(slug\)\) emit\('wiki', slug\)/)
   }
 })

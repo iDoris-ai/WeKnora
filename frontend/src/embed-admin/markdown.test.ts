@@ -158,7 +158,7 @@ test('code and raw HTML in wiki content keep the bar as written', () => {
 
 test('hostile wiki content stays safe', () => {
   const set = new Set(['a', 'x y', '<b>'])
-  for (const input of [...HOSTILE, '[[a|<img src=x onerror=1>]]', '[[<b>|t]]', '**[[a]]** [l]([[a]])', '[[a]]]]', '[[[[a]]]]']) {
+  for (const input of [...HOSTILE, '[[a|<img src=x onerror=1>]]', '[[nope|<img src=x onerror=1>]]', '[[<b>]]', '[[<b>|t]]', '**[[a]]** [l]([[a]])', '[[a]]]]', '[[[[a]]]]']) {
     assertSafe(renderMarkdown(input, LABELS, { wikiLinks: set }), input)
   }
 })
