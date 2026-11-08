@@ -66,10 +66,17 @@ func installAgent24EmbedAdmin(r *gin.Engine, uiRead bool) {
 		logger.Fatalf(context.Background(), "agent24 embed page: cannot read %s",
 			handler.Agent24KnowledgeEmbedAdminPageFile)
 	}
+	// Assets get their own root on assets/, so a link inside it cannot reach the rest of the directory.
+	// A build without assets/ serves none: the asset route then answers 404 for everything.
+	assets, err := root.OpenRoot(agent24EmbedAdminAssetDir)
+	if err != nil {
+		assets = nil
+	}
+	_ = root.Close()
 	serve := agent24EmbedAdminPage(page)
 	r.GET(agent24EmbedAdminListPath, serve)
 	r.GET(agent24EmbedAdminDetailPath, serve)
-	r.GET(agent24EmbedAdminAssetPath, agent24EmbedAdminAsset(root))
+	r.GET(agent24EmbedAdminAssetPath, agent24EmbedAdminAsset(assets))
 	logger.Infof(context.Background(), "Agent24 knowledge integration mode: serving the embed knowledge page")
 }
 
@@ -85,13 +92,14 @@ func agent24EmbedAdminPage(page []byte) gin.HandlerFunc {
 	}
 }
 
-// agent24EmbedAdminAsset serves one regular file directly under assets/. A name that is not a single plain
-// segment, any percent-encoding in the request path, a missing file, a directory and an unknown extension are
-// the gate's empty 404: no listing and no fallback to the page.
-func agent24EmbedAdminAsset(root *os.Root) gin.HandlerFunc {
+// agent24EmbedAdminAsset serves one regular file directly under assets/, opened through a root on assets/
+// itself (nil: no assets/, every request is 404). A name that is not a single plain segment, any
+// percent-encoding in the request path, a missing file, a directory, a link out of assets/ and an unknown
+// extension are the gate's empty 404: no listing and no fallback to the page.
+func agent24EmbedAdminAsset(assets *os.Root) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name, ok := agent24EmbedAdminAssetName(c.Request.URL.RawPath, c.Param("filepath"))
-		if !ok {
+		if !ok || assets == nil {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
@@ -100,7 +108,7 @@ func agent24EmbedAdminAsset(root *os.Root) gin.HandlerFunc {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		f, err := root.Open(agent24EmbedAdminAssetDir + "/" + name)
+		f, err := assets.Open(name)
 		if err != nil {
 			c.AbortWithStatus(http.StatusNotFound)
 			return

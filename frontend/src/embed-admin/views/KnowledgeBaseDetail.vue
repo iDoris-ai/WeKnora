@@ -5,7 +5,7 @@ import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getKnowledgeBase, type KnowledgeBase } from '../api'
 import { formatDate, msg, type MessageKey } from '../i18n'
-import { reportError, reportLoading, reportReady } from '../page'
+import { loads } from '../page'
 import { typeKey } from './kbType'
 
 const route = useRoute()
@@ -17,14 +17,17 @@ async function load(id: string) {
   loading.value = true
   kb.value = null
   error.value = null
-  reportLoading()
+  const run = loads.begin()
   try {
-    kb.value = await getKnowledgeBase(id)
-    reportReady()
+    const got = await getKnowledgeBase(id)
+    if (!run.current) return
+    kb.value = got
+    run.ready()
   } catch (err) {
-    error.value = reportError(err)
+    const key = run.error(err)
+    if (run.current) error.value = key
   } finally {
-    loading.value = false
+    if (run.current) loading.value = false
   }
 }
 

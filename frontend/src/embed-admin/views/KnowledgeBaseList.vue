@@ -3,7 +3,7 @@
 import { onMounted, ref } from 'vue'
 import { listKnowledgeBases, type KnowledgeBase } from '../api'
 import { formatDate, msg, type MessageKey } from '../i18n'
-import { reportError, reportLoading, reportReady } from '../page'
+import { loads } from '../page'
 import { typeKey } from './kbType'
 
 const loading = ref(true)
@@ -11,14 +11,17 @@ const items = ref<KnowledgeBase[]>([])
 const error = ref<MessageKey | null>(null)
 
 onMounted(async () => {
-  reportLoading()
+  const run = loads.begin()
   try {
-    items.value = await listKnowledgeBases()
-    reportReady()
+    const got = await listKnowledgeBases()
+    if (!run.current) return
+    items.value = got
+    run.ready()
   } catch (err) {
-    error.value = reportError(err)
+    const key = run.error(err)
+    if (run.current) error.value = key
   } finally {
-    loading.value = false
+    if (run.current) loading.value = false
   }
 })
 </script>

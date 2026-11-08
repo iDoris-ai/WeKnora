@@ -187,12 +187,20 @@ test('a new hello clears every pending request', async () => {
   assert.equal(host.sent.at(-1)!.document_id, DOC_B)
 })
 
-test('a hello without version 3 leaves the bridge closed: nothing more is sent', () => {
+test('a hello without version 3 leaves the bridge closed: nothing more is sent, not even hello requests', () => {
   const { host, bridge } = started()
   host.hello(DOC_A, 1, [2])
   bridge.setStatus({ state: 'ready' })
+  host.advance(HELLO_RETRY_MS * 10)
   assert.equal(bridge.ready, false)
   assert.equal(host.sent.length, 1)
+})
+
+test('a request before any hello sends nothing and resolves null', async () => {
+  const { host, bridge } = started()
+  assert.equal(await bridge.request('status', { state: 'ready' }), null)
+  assert.equal(host.sent.length, 1)
+  assert.equal(bridge.pendingCount, 0)
 })
 
 test('malformed or page-to-host data is ignored', () => {

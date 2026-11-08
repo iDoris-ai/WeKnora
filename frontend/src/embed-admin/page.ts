@@ -6,19 +6,48 @@ import type { MessageKey } from './i18n'
 
 export const bridge = new PageBridge(browserBridgeHost())
 
-/** The message a view shows for an error, and the status the page reports. Nothing is retried. */
-export function reportError(err: unknown): MessageKey {
+/** The message a view shows for an error. */
+export function errorMessage(err: unknown): MessageKey {
   const e = err instanceof ApiError ? err : new ApiError('internal', undefined, 0)
-  const status: PageStatus = { state: 'error', error_code: e.statusCode }
-  bridge.setStatus(status)
   if (e.code === 'forbidden' && e.reason === 'empty_scope') return 'error.empty_scope'
   return `error.${e.statusCode}` as MessageKey
 }
 
-export function reportReady(): void {
-  bridge.setStatus({ state: 'ready' })
+export interface Load {
+  /** False once a newer load has started: drop this load's result. */
+  readonly current: boolean
+  ready(): void
+  /** Reports the error if this load is still current, and returns the message to show. */
+  error(err: unknown): MessageKey
 }
 
-export function reportLoading(): void {
-  bridge.setStatus({ state: 'loading' })
+/**
+ * Only the latest load reports to the bridge. A view starts a load when it shows something new; a request of an
+ * earlier load that finishes later (the user went back, or opened another knowledge base) changes nothing.
+ */
+export class LoadTracker {
+  private seq = 0
+
+  constructor(private readonly sink: { setStatus(s: PageStatus): void }) {}
+
+  begin(): Load {
+    const token = ++this.seq
+    const tracker = this
+    this.sink.setStatus({ state: 'loading' })
+    return {
+      get current() {
+        return token === tracker.seq
+      },
+      ready() {
+        if (token === tracker.seq) tracker.sink.setStatus({ state: 'ready' })
+      },
+      error(err: unknown): MessageKey {
+        const e = err instanceof ApiError ? err : new ApiError('internal', undefined, 0)
+        if (token === tracker.seq) tracker.sink.setStatus({ state: 'error', error_code: e.statusCode })
+        return errorMessage(err)
+      },
+    }
+  }
 }
+
+export const loads = new LoadTracker(bridge)

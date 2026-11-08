@@ -45,6 +45,10 @@ func agent24EmbedAdminFixture(t *testing.T) string {
 	write("secret.js", "1")
 	require.NoError(t, os.WriteFile(filepath.Join(base, "outside.js"), []byte("1"), 0o644))
 	require.NoError(t, os.Symlink(filepath.Join(base, "outside.js"), filepath.Join(dir, "assets", "out.js")))
+	// A relative link that stays inside the build directory but leaves assets/ (Codex r1 C1).
+	require.NoError(t, os.Symlink("../secret.js", filepath.Join(dir, "assets", "up.js")))
+	// A relative link inside assets/ is still served.
+	require.NoError(t, os.Symlink("x.js", filepath.Join(dir, "assets", "alias.js")))
 	t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, dir)
 	return dir
 }
@@ -161,6 +165,9 @@ func TestAgent24EmbedAdminAssets(t *testing.T) {
 	}
 	w := agent24Serve(r, http.MethodGet, "/embed-admin/assets/x.js", nil)
 	require.Equal(t, agent24EmbedAdminFixtureJS, w.Body.String())
+	w = agent24Serve(r, http.MethodGet, "/embed-admin/assets/alias.js", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, agent24EmbedAdminFixtureJS, w.Body.String())
 
 	for _, target := range []string{
 		"/embed-admin/assets/",
@@ -179,6 +186,7 @@ func TestAgent24EmbedAdminAssets(t *testing.T) {
 		"/embed-admin/assets/x.js.map",
 		"/embed-admin/assets/x",
 		"/embed-admin/assets/out.js", // a symlink out of the directory
+		"/embed-admin/assets/up.js",  // a symlink out of assets/ into the build directory
 		"/embed-admin/assets/x.js;.css",
 	} {
 		w := agent24Serve(r, http.MethodGet, target, nil)
@@ -186,6 +194,19 @@ func TestAgent24EmbedAdminAssets(t *testing.T) {
 		require.Zero(t, w.Body.Len(), target)
 		require.Empty(t, w.Header().Get("Cache-Control"), target)
 	}
+}
+
+// TestAgent24EmbedAdminWithoutAssetsDir: a build without assets/ still serves the page; every asset is 404.
+func TestAgent24EmbedAdminWithoutAssetsDir(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, handler.Agent24KnowledgeEmbedAdminPageFile),
+		[]byte(agent24EmbedAdminFixturePage), 0o644))
+	t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, dir)
+	r := agent24EmbedAdminRouter(t, "integration", true)
+	require.Equal(t, http.StatusOK, agent24Serve(r, http.MethodGet, "/embed-admin/knowledge-bases", nil).Code)
+	w := agent24Serve(r, http.MethodGet, "/embed-admin/assets/x.js", nil)
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Zero(t, w.Body.Len())
 }
 
 // TestAgent24EmbedAdminNotRegistered: no page routes without the directory, without the UI read routes, or in
