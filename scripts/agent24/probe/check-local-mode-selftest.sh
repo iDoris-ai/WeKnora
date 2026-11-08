@@ -630,6 +630,43 @@ for bad_ids in '[{"paths":["a.txt"]}]' '[{"id":"","paths":["a.txt"]}]' '[{"id":"
   fi
 done
 
+# 已登记路径很多、差异路径排在最前面时，grep 一匹配就退出；比较不能经过管道，否则写端在 pipefail 下吃到
+# SIGPIPE，已登记的路径会被偶发报成「未登记」（11-09 构建 6d995f78 时遇到）。
+bigrepo=$BASE/bigrepo
+mkdir -p "$bigrepo/scripts/agent24/probe" "$bigrepo/docs/agent24" || { echo "FAIL 建 bigrepo 失败" >&2; exit 1; }
+cp "$HERE/lib.sh" "$HERE/patches.sh" "$bigrepo/scripts/agent24/probe/" || { echo "FAIL 拷 bigrepo 脚本失败" >&2; exit 1; }
+printf 'v1\n' >"$bigrepo/a.txt"
+git_at "$bigrepo" init -q || { echo "FAIL bigrepo init 失败" >&2; exit 1; }
+git_at "$bigrepo" add -A || { echo "FAIL bigrepo add 失败" >&2; exit 1; }
+git_at "$bigrepo" commit -q -m release || { echo "FAIL bigrepo commit 失败" >&2; exit 1; }
+bigrel=$(git_at "$bigrepo" rev-parse HEAD) || { echo "FAIL bigrepo rev 失败" >&2; exit 1; }
+printf 'v2\n' >"$bigrepo/a.txt"
+git_at "$bigrepo" commit -q -am patched || { echo "FAIL bigrepo commit2 失败" >&2; exit 1; }
+jq -n --arg c "$bigrel" '{current_baseline: {release: {tag: "v0.8.3", commit: $c},
+  product: {product_patches: [{id: "T-BIG", paths: (["a.txt"] + [range(5000) | "pad/p\(.)/x.go"])}]}}}' \
+  >"$BASE/big.json" || { echo "FAIL 写 big.json 失败" >&2; exit 1; }
+n=$((n + 1))
+d=$BASE/c$n
+mkdir -p "$d" || { bad=1; echo "不符 大量登记路径：建目录失败"; }
+misses=0
+for _ in $(seq 1 30); do
+  (
+    set -o pipefail
+    ROOT=$bigrepo
+    BASELINE=$BASE/big.json
+    REL_TAG=v0.8.3
+    REL_COMMIT=$bigrel
+    # shellcheck disable=SC1091
+    source "$bigrepo/scripts/agent24/probe/patches.sh"
+    probe_namespace_diff
+  ) >>"$d/log" 2>>"$d/err" || misses=$((misses + 1))
+done
+if [ "$misses" -ne 0 ]; then
+  bad=1
+  printf '不符 大量登记路径：30 次里 %s 次把已登记的 a.txt 报成未登记\n' "$misses"
+  show_err
+fi
+
 if [ "$n" -eq 0 ]; then
   echo "FAIL 自测总例数为 0" >&2
   exit 1
