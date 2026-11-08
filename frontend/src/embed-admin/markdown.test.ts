@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { escapeHtml, renderMarkdown, SAFE_ATTRS, SAFE_TAGS } from './markdown.ts'
+import { escapeHtml, type MarkdownOptions, renderMarkdown, SAFE_ATTRS, SAFE_TAGS } from './markdown.ts'
 
 const LABELS = { image: 'IMG' }
 const TAGS = new Set<string>(SAFE_TAGS)
@@ -181,6 +181,20 @@ test('outside tables nothing is rewritten (Codex c-r2 C3, C4, C5)', () => {
   assert.equal(renderMarkdown('| h |\n| - |\n| \uE000 |\n', LABELS).includes('\uE000'), true)
   // Outside wiki content a table is plain GFM: the bar splits the cell as written.
   assert.match(renderMarkdown('| h | i |\n| - | - |\n| [[a|b]] | tail |\n', LABELS), /<td>\[\[a<\/td>\n<td>b\]\]<\/td>/)
+})
+
+test('long wiki content without blank lines costs about what plain content costs (Codex c-r3 C1)', () => {
+  const text = 'p\n# h\n'.repeat(32000) + '[[a]]\n'
+  const time = (opts: MarkdownOptions) => {
+    const t0 = performance.now()
+    renderMarkdown(text, LABELS, opts)
+    return performance.now() - t0
+  }
+  time({})
+  const plain = time({})
+  const wiki = time({ wikiLinks: new Set(['a']) })
+  // Measured on 192 KB: about 1x here; the version that scanned the rest of the input was about 40x.
+  assert.ok(wiki < plain * 5 + 100, `plain ${plain}ms, wiki ${wiki}ms`)
 })
 
 test('hostile wiki content stays safe', () => {

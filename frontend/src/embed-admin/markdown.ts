@@ -89,11 +89,13 @@ function build(labels: MarkdownLabels): Marked {
     ],
     tokenizer: {
       table(this: Tokenizer, src: string): Tokens.Table | undefined | false {
-        if (!wikiLinks || !src.includes('[[')) return false
-        // A table ends at a blank line at the latest; only that much is masked.
-        const end = src.search(/\n[ \t]*\n/)
-        const head = end < 0 ? src : src.slice(0, end)
-        return Tokenizer.prototype.table.call(this, maskWikiBars(head) + src.slice(head.length))
+        if (!wikiLinks) return false
+        // Only the table marked's own rule matches here is looked at and masked, so each block position costs what
+        // the default tokenizer costs (Codex c-r3 C1: scanning the rest of the input made long wiki pages quadratic).
+        // Masking never adds a line or a bar, so the masked table is no longer than this match.
+        const cap = this.rules.block.table.exec(src)
+        if (!cap || !cap[0].includes('[[')) return false
+        return Tokenizer.prototype.table.call(this, maskWikiBars(cap[0]) + src.slice(cap[0].length))
       },
     },
     hooks: {
