@@ -164,6 +164,22 @@ func TestAgent24StageGateLeavesAnActivatedBuild(t *testing.T) {
 	}
 }
 
+// The build is servable before the reconciler moves the job to indexed: a redelivered document task stops at the
+// worker entry while the job is still processing; the post-process boundary still runs its checks.
+func TestAgent24StageGateEntryStopsAtAnActivatedBuildWithItsJobInFlight(t *testing.T) {
+	h := newAgent24GateHarness(t)
+	h.job(t, types.Agent24JobProcessing, types.Agent24JobOpIngestSubmit)
+	require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
+		Update("parse_status", types.ParseStatusFinalizing).Error)
+	aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+	require.True(t, aborted)
+	require.Equal(t, types.ParseStatusCancelled, status)
+	require.Equal(t, types.Agent24JobProcessing, h.jobRow(t).Status, "nothing is written")
+	require.Equal(t, types.ParseStatusFinalizing, h.knowledge(t).ParseStatus)
+	aborted, _ = agent24PostProcessGateAborts(h.ctx, h.knowledge(t))
+	require.False(t, aborted, "the post-process boundary checks the in-flight job as before")
+}
+
 // A worker that meets a saved job whose attempt is not recorded runs an older attempt (the job's task is not
 // enqueued yet): it stops, and the job stays saved for its own Dispatch.
 func TestAgent24StageGateStaleWorkerLeavesAnUndispatchedJob(t *testing.T) {

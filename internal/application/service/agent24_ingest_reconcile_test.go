@@ -91,9 +91,13 @@ func TestAgent24ReconcileGetMapsUpstreamFailures(t *testing.T) {
 	h.add(t, "denied", "k-denied", types.ParseStatusFailed,
 		"failed to write vectors: "+types.ErrProcessingDenied.Error(), types.Agent24JobProcessing, 1)
 	h.span(t, "k-denied", 1, types.StageEmbedding, types.SpanStatusFailed)
+	// the same text from another stage (a file name quoted in a docreader error) is not a policy refusal
+	h.add(t, "named", "k-named", types.ParseStatusFailed,
+		"anydoc conversion failed for \"x "+types.ErrProcessingDenied.Error()+".md\"", types.Agent24JobProcessing, 1)
+	h.span(t, "k-named", 1, types.StageDocReader, types.SpanStatusFailed)
 	for id, want := range map[string]string{
-		"denied": "policy_denied",
-		"emb":    "embedding_failed", "parse": "parse_failed", "enq": "enqueue_failed", "stall": "timeout",
+		"denied": "policy_denied", "named": "parse_failed",
+		"emb": "embedding_failed", "parse": "parse_failed", "enq": "enqueue_failed", "stall": "timeout",
 		"unknown": "internal",
 	} {
 		j := h.get(t, id)

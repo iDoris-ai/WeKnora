@@ -260,7 +260,7 @@ func (s *Agent24IngestJobStore) KnowledgeView(
 // messages are fixed upstream strings) and the failed stage span.
 func agent24FailureHint(message, stage string) types.Agent24FailureHint {
 	switch {
-	case strings.Contains(message, types.ErrProcessingDenied.Error()):
+	case stage == types.StageEmbedding && strings.Contains(message, types.ErrProcessingDenied.Error()):
 		// upstream records the embedding error text; the call-time guard refused the destination or a redirect
 		return types.Agent24FailureHintPolicy
 	case message == "Failed to enqueue processing task":

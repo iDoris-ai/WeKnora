@@ -135,6 +135,11 @@ func agent24RunStageGate(ctx context.Context, k *types.Knowledge, postProcess bo
 }
 
 func (g *agent24StageGate) check(ctx context.Context, k *types.Knowledge, postProcess bool) (bool, string) {
+	if !postProcess && (k.ParseStatus == types.ParseStatusFinalizing || k.ParseStatus == types.ParseStatusCompleted) {
+		// the build is already servable: a redelivered document task stops before it marks the row processing
+		// and rebuilds, whether or not the reconciler has moved the job to indexed yet
+		return true, types.ParseStatusCancelled
+	}
 	job, err := g.jobs.Occupying(ctx, k.TenantID, k.ID)
 	if err != nil {
 		return true, abortStatusUnreadable
