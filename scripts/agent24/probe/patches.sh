@@ -60,7 +60,7 @@ probe_namespace_diff() {
   REG_PATHS=$(jq -r '.[] | .paths[]?' <<<"$patches_json") || REG_PATHS=""
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    if [ -n "$REG_PATHS" ] && printf '%s\n' "$REG_PATHS" | grep -Fxq -- "$p"; then continue; fi
+    if [ -n "$REG_PATHS" ] && grep -Fxq -- "$p" <<<"$REG_PATHS"; then continue; fi
     UNREG_N=$((UNREG_N + 1))
     if [ "$UNREG_N" -le 10 ]; then UNREG_LIST=${UNREG_LIST:+$UNREG_LIST, }$p; fi
   done <<<"$DIFF_PATHS"
