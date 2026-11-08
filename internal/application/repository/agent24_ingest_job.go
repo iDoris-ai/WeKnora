@@ -150,6 +150,12 @@ func (s *Agent24IngestJobStore) Apply(
 	return res.RowsAffected == 1, res.Error
 }
 
+// SetAttempt records the upstream processing attempt a job's task carries.
+func (s *Agent24IngestJobStore) SetAttempt(ctx context.Context, tenantID uint64, id string, attempt int) error {
+	return s.db.WithContext(ctx).Model(&types.Agent24IngestJob{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).Update("attempt", attempt).Error
+}
+
 // SetIndexBuild records the build a job activated.
 func (s *Agent24IngestJobStore) SetIndexBuild(ctx context.Context, tenantID uint64, id, build string) error {
 	return s.db.WithContext(ctx).Model(&types.Agent24IngestJob{}).
