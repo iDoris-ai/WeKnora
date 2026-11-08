@@ -60,5 +60,9 @@ func ValidateAgent24IntegrationConfig(cfg *config.Config) error {
 	if _, _, err := agent24uisession.KeyFromEnv(); err != nil {
 		return err
 	}
+	// A24-KB-38: a configured UI origin allowlist must be valid. Unset is not an error: no CORS at all.
+	if _, err := Agent24KnowledgeUIOriginsFromEnv(); err != nil {
+		return err
+	}
 	return nil
 }
