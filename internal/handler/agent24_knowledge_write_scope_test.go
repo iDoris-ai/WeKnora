@@ -258,3 +258,20 @@ func TestAgent24WriteCapabilitiesAcceptedAtIssuance(t *testing.T) {
 	bad := tenantAPIKeyCreateRequest{Name: "n", Capabilities: []string{"retrieve", "kb_candidate_publish"}}
 	assert.NotNil(t, validateTenantAPIKeyRequest(context.Background(), nil, 1, bad))
 }
+
+type agent24OtherKBResolver struct{} // answers with a knowledge base other than the one asked for
+
+func (agent24OtherKBResolver) Resolve(context.Context, []string) ([]*types.KnowledgeBase, error) {
+	return []*types.KnowledgeBase{nil, {ID: "kbB", TenantID: 1}}, nil
+}
+
+// InScope counts only the knowledge base it asked for, whatever else a resolver returns.
+func TestAgent24WriteInScopeMatchesTheAskedKB(t *testing.T) {
+	auth := agent24WriteAuthorizer{grants: agent24AllWriteGrants{}, scope: agent24OtherKBResolver{}}
+	ctx := agent24WriteCtx(types.TenantAPIKeyScope{
+		Capabilities: types.StringArray{"kb_candidate_propose"}, KnowledgeBaseIDs: types.StringArray{"kbA", "kbB"},
+	})
+	in, err := auth.InScope(ctx, "kbA")
+	require.NoError(t, err)
+	assert.False(t, in)
+}
