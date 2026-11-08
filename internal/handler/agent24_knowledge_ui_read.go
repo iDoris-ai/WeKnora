@@ -327,8 +327,8 @@ func agent24UIReadNoteOp(c *gin.Context, op, kbID, knowledgeID string) { // A24-
 }
 
 // agent24UIReadNoteSlug records wiki.get's slug on the resource map. An empty slug is left unset.
-// The value is cut to 255 bytes. A cut that would split a rune backs up to a valid UTF-8 prefix so the
-// audit JSON keeps that prefix (encoding/json would otherwise replace the partial rune).
+// Invalid UTF-8 is replaced with U+FFFD, then the value is cut to at most 255 bytes on a rune boundary,
+// so an invalid prefix cannot empty the recorded slug.
 func agent24UIReadNoteSlug(c *gin.Context, slug string) { // A24-KB-36
 	if slug == "" {
 		return
