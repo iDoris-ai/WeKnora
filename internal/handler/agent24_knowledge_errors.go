@@ -49,6 +49,7 @@ var (
 	agent24UnavailableReasons = map[string]bool{
 		"not_ready": true, "dependency": true, "overloaded": true,
 		"index_building": true, "index_pending": true, "unsupported_kb_type": false, "index_failed": false,
+		"credential_near_expiry": true, // A24-KB-32
 	}
 )
 

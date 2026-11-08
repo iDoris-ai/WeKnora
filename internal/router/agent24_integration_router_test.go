@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -921,4 +923,123 @@ func agent24RequireBearerInFlight(t *testing.T, revoke bool) {
 	require.Nil(t, details.Principal)
 	require.Nil(t, details.CredentialID)
 	require.Nil(t, details.TenantID)
+}
+
+// TestAgent24UIRoutesFollowSessionKey guards A24-KB-32: the constructors leave the UI routes off when the
+// session key is unset, and register them when it is set. An empty body then fails the shape check.
+func TestAgent24UIRoutesFollowSessionKey(t *testing.T) {
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+	paths := []string{
+		"/api/v1/agent24/knowledge/ui/tickets",
+		"/api/v1/agent24/knowledge/ui/revocations",
+	}
+
+	t.Setenv(agent24uisession.KeyEnv, "")
+	tickets, err := handler.NewAgent24KnowledgeUITicketsHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, tickets)
+	revocations, err := handler.NewAgent24KnowledgeUIRevocationsHandler(nil, nil, nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, revocations)
+	off := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		Agent24KnowledgeUITicketsHandler:     tickets,
+		Agent24KnowledgeUIRevocationsHandler: revocations,
+	})
+	for _, path := range paths {
+		w := httptest.NewRecorder()
+		off.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}")))
+		require.Equal(t, http.StatusNotFound, w.Code, path)
+		require.Empty(t, w.Body.String(), path)
+	}
+
+	t.Setenv(agent24uisession.KeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)))
+	tickets, err = handler.NewAgent24KnowledgeUITicketsHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, tickets)
+	revocations, err = handler.NewAgent24KnowledgeUIRevocationsHandler(nil, nil, nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, revocations)
+	tenantID := uint64(1)
+	on := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		TenantAPIKeyService: agent24FakeKeySvc{key: &types.TenantAPIKey{
+			ID: 2, ScopeType: types.APIKeyScopeTenant, TenantID: &tenantID, FullAccess: true,
+		}},
+		TenantService:                        agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}},
+		UserService:                          agent24FakeUserSvc{},
+		Agent24KnowledgeUITicketsHandler:     tickets,
+		Agent24KnowledgeUIRevocationsHandler: revocations,
+	})
+	for _, path := range paths {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", "sk-test")
+		req.Header.Set("X-Tenant-ID", "1")
+		w := httptest.NewRecorder()
+		on.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, "%s: %s", path, w.Body.String())
+		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "invalid_request", "", true)
+		require.Equal(t, "no-store", w.Header().Get("Cache-Control"), path)
+	}
+}
+
+// TestAgent24UISessionJWTRejected guards U1.3: a UI session JWT is not credential C. Auth treats the bearer
+// as a user JWT, the signature does not verify, and the envelope is credential_invalid.
+func TestAgent24UISessionJWTRejected(t *testing.T) {
+	tagKey := bytes.Repeat([]byte{1}, 32)
+	sessionKey := bytes.Repeat([]byte{2}, 32)
+	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(tagKey))
+	t.Setenv(agent24uisession.KeyEnv, base64.StdEncoding.EncodeToString(sessionKey))
+	gin.SetMode(gin.TestMode)
+	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
+	t.Setenv("AGENT24_KNOWLEDGE_MODE", "integration")
+
+	gen := int64(4)
+	token, err := agent24uisession.Issue(sessionKey, "weknora-agent24", agent24uisession.Claims{
+		RegisteredClaims:   jwt.RegisteredClaims{Subject: "principal-a"},
+		TenantID:           7,
+		Scope:              agent24uisession.Scope{KnowledgeBaseIDs: []string{"kb-1"}},
+		Ops:                []string{"search"},
+		TicketID:           "ticket-1",
+		ParentCredentialID: "cred-1",
+		BindingTag:         "bind",
+		PartitionTag:       "part",
+		Cnf:                agent24uisession.Confirmation{VPH: "vph-1"},
+		Gen:                &gen,
+	}, time.Now(), time.Minute)
+	require.NoError(t, err)
+
+	tenantID := uint64(1)
+	r := NewRouter(RouterParams{
+		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
+		TenantAPIKeyService: agent24FakeKeySvc{key: &types.TenantAPIKey{
+			ID: 1, ScopeType: types.APIKeyScopePlatform,
+		}},
+		TenantService:                        agent24FakeTenantSvc{tenant: &types.Tenant{ID: tenantID}},
+		UserService:                          agent24RejectTokenUserSvc{},
+		Agent24KnowledgeSearchHandler:        &handler.Agent24KnowledgeSearchHandler{},
+		Agent24KnowledgeUITicketsHandler:     &handler.Agent24KnowledgeUITicketsHandler{},
+		Agent24KnowledgeUIRevocationsHandler: &handler.Agent24KnowledgeUIRevocationsHandler{},
+	})
+	for _, path := range []string{
+		"/api/v1/agent24/knowledge/ui/tickets",
+		"/api/v1/agent24/knowledge/ui/revocations",
+		"/api/v1/agent24/knowledge/search",
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnauthorized, w.Code, "%s: %s", path, w.Body.String())
+		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
+		// Auth refuses before the handler runs; the UI prefix still gets no-store (U2.5).
+		if strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/") {
+			require.Equal(t, "no-store", w.Header().Get("Cache-Control"), path)
+		}
+	}
 }

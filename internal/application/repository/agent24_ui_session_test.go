@@ -352,6 +352,51 @@ func TestAgent24UISessionFamilyExpiryNeverShrinks(t *testing.T) {
 	require.True(t, family.ExpiresAt.Equal(later), "expires_at moved back to %s", family.ExpiresAt)
 }
 
+// PR #138 G1: between registration's unlocked read of an existing family and its update, a revoke or a
+// purge commits. Neither may end with a ticket inserted into that family. The hook stands in for the other
+// transaction, as in TestAgent24UISessionFamilyExpiryNeverShrinks.
+func TestAgent24UISessionCreateTicketFamilyChangedMidway(t *testing.T) {
+	cases := []struct {
+		name   string
+		change string
+		want   error
+	}{
+		{
+			"revoked", "UPDATE agent24_ui_families SET revoked_at = CURRENT_TIMESTAMP WHERE vph = ?",
+			interfaces.ErrAgent24UIFamilyRevoked,
+		},
+		{"purged", "DELETE FROM agent24_ui_families WHERE vph = ?", interfaces.ErrAgent24UIFamilyGone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := agent24UISessionDB(t)
+			store := NewAgent24UISessionStore(db)
+			ctx := context.Background()
+			now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+			first := newAgent24UITicket(t, "vph-m", "hash-1", "id-1", now.Add(time.Minute))
+			require.NoError(t, store.CreateTicket(ctx, first))
+
+			fired := false
+			name := "test:agent24_ui_family_changed_" + tc.name
+			require.NoError(t, db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+				if fired || tx.Statement.Table != "agent24_ui_families" {
+					return
+				}
+				fired = true
+				require.NoError(t, tx.Session(&gorm.Session{NewDB: true}).Exec(tc.change, "vph-m").Error)
+			}))
+			t.Cleanup(func() { _ = db.Callback().Update().Remove(name) })
+
+			second := newAgent24UITicket(t, "vph-m", "hash-2", "id-2", now.Add(2*time.Minute))
+			require.ErrorIs(t, store.CreateTicket(ctx, second), tc.want)
+			require.True(t, fired, "the family update ran")
+			var n int64
+			require.NoError(t, db.Model(&types.Agent24UITicket{}).Where("ticket_hash = ?", "hash-2").Count(&n).Error)
+			require.Zero(t, n, "no ticket was inserted")
+		})
+	}
+}
+
 func TestAgent24UISessionRevoke(t *testing.T) {
 	db := agent24UISessionDB(t)
 	store := NewAgent24UISessionStore(db)

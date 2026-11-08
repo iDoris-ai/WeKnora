@@ -279,6 +279,21 @@ func TestAgent24DefaultRechecker(t *testing.T) {
 			KnowledgeBaseIDs: types.StringArray{"kb-new"},
 		}).Normalize(), fresh)
 	})
+	t.Run("expiry shortened since Auth", func(t *testing.T) {
+		// A24-KB-32: the expiry the recheck finds replaces the one Auth wrote to the context.
+		later := time.Now().Add(time.Hour)
+		soon := time.Now().Add(30 * time.Second).Truncate(time.Second)
+		r := agent24DefaultRechecker{tenants: matching, keys: agent24RecheckKeyStub{key: &types.TenantAPIKey{
+			ID: 4, Name: "short", ScopeType: types.APIKeyScopeTenant, TenantID: &tid, ExpiresAt: &soon,
+			KnowledgeBaseIDs: types.StringArray{"kb-new"}, Capabilities: types.StringArray{"retrieve"},
+		}}}
+		got, reason, err := r.Recheck(types.WithAgent24CredentialExpiry(ctx, later), agent24RecheckHeader())
+		require.NoError(t, err)
+		require.Empty(t, reason)
+		exp, ok := types.Agent24CredentialExpiryFromContext(got)
+		require.True(t, ok)
+		require.True(t, exp.Equal(soon), "got %s", exp)
+	})
 	t.Run("signed_token entry", func(t *testing.T) {
 		// The entry's mode, principal and jti come from the context Auth left: a signed_token request
 		// passes only when all three are carried over.

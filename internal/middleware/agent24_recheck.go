@@ -30,6 +30,9 @@ type Agent24RecheckEntry struct {
 type Agent24RecheckResult struct {
 	Reason string
 	Scope  types.TenantAPIKeyScope
+	// ExpiresAt is when the credential expires as it is now (A24-KB-32): the earlier of the key's
+	// expires_at and the signed token's exp. nil means neither has one. Set only when Reason is "".
+	ExpiresAt *time.Time
 }
 
 // Agent24RecheckAPIKey runs again, before a Knowledge response is assembled (R7.6), the credential
@@ -98,12 +101,16 @@ func Agent24RecheckAPIKey(
 		if p, _ := platformAPIKeyIdentity(key); p.Normalize() != entry.Principal.Normalize() {
 			return invalid, nil
 		}
-		return Agent24RecheckResult{Scope: agent24KeyScope(key)}, nil
+		return Agent24RecheckResult{
+			Scope: agent24KeyScope(key), ExpiresAt: agent24EarliestExpiry(key.ExpiresAt, time.Time{}),
+		}, nil
 	}
 	if Agent24PrincipalMode(tenant) != entry.Mode {
 		return invalid, nil
 	}
-	principal, _, jti, err := resolveAPIPrincipal(ctx, tenant, header)
+	// A24-KB-32: the third result carries jti and exp. This check compares only the jti.
+	principal, _, tokenInfo, err := resolveAPIPrincipal(ctx, tenant, header)
+	jti := tokenInfo.JTI
 	same := principal.Normalize() == entry.Principal.Normalize() && jti == entry.JTI
 	if errors.Is(err, errExternalUserTokenExpired) {
 		if !same {
@@ -123,7 +130,24 @@ func Agent24RecheckAPIKey(
 			return Agent24RecheckResult{Reason: "credential_revoked"}, nil
 		}
 	}
-	return Agent24RecheckResult{Scope: agent24KeyScope(key)}, nil
+	return Agent24RecheckResult{
+		Scope: agent24KeyScope(key), ExpiresAt: agent24EarliestExpiry(key.ExpiresAt, tokenInfo.ExpiresAt),
+	}, nil
+}
+
+// agent24EarliestExpiry is the earlier of a key expiry (nil = none) and a token exp (zero = none), or nil
+// when there is neither (A24-KB-32). Auth computes the same value for the request context.
+func agent24EarliestExpiry(key *time.Time, token time.Time) *time.Time {
+	var out *time.Time
+	if key != nil {
+		k := *key
+		out = &k
+	}
+	if !token.IsZero() && (out == nil || token.Before(*out)) {
+		t := token
+		out = &t
+	}
+	return out
 }
 
 // agent24KeyScope is the scope attachAPIKeyAuthContext builds from a key row, before its full-access rule.

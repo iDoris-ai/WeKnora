@@ -1,7 +1,8 @@
 // Agent24 fork product patch A24-KB-16 (CONTRACT-READONLY-v1 r10 R10.1–R10.4, WeKnora#41).
 //
-// One audit row per POST /api/v1/agent24/knowledge/{ready,search,read}. The middleware sits outside Recovery
-// and Auth, so the row sees the status and size that were actually written, including a rejection the auth
+// One audit row per POST /api/v1/agent24/knowledge/{ready,search,read} and the UI ticket and revocation
+// endpoints (A24-KB-32). The middleware sits outside Recovery and Auth, so the row sees the status and size
+// that were actually written, including a rejection the auth
 // envelope rewrote and Recovery's 500.
 // Extra fields live in Details. ActorUserID stays empty (R10.4). The query, document text, snippets,
 // content_tag and raw credentials are not recorded (R10.3).
@@ -31,6 +32,9 @@ const (
 	agent24AuditActionSearch types.AuditAction = "knowledge.search"
 	agent24AuditActionRead   types.AuditAction = "knowledge.read"
 	agent24AuditActionReady  types.AuditAction = "knowledge.ready"
+	// A24-KB-32
+	agent24AuditActionUITicket types.AuditAction = "knowledge.ui.ticket"
+	agent24AuditActionUIRevoke types.AuditAction = "knowledge.ui.revoke"
 
 	agent24AuditScopeType = "agent24_knowledge"
 
@@ -41,6 +45,9 @@ const (
 	agent24AuditPathReady  = "/api/v1/agent24/knowledge/ready"
 	agent24AuditPathSearch = "/api/v1/agent24/knowledge/search"
 	agent24AuditPathRead   = "/api/v1/agent24/knowledge/read"
+	// A24-KB-32
+	agent24AuditPathUITickets     = "/api/v1/agent24/knowledge/ui/tickets"
+	agent24AuditPathUIRevocations = "/api/v1/agent24/knowledge/ui/revocations"
 
 	// agent24AuditWriteTimeout bounds the row write. The row is written after the response is flushed, on a
 	// context that ignores the client leaving, so a stalled store would otherwise hold the handler forever.
@@ -286,7 +293,7 @@ func agent24ReadAuditResource(knowledgeID string, rev agent24DocRevision, segs [
 	return resource, revision
 }
 
-// Agent24KnowledgeAudit writes one audit row for the three knowledge endpoints; anonymous rows go through a
+// Agent24KnowledgeAudit writes one audit row for the knowledge endpoints; anonymous rows go through a
 // token bucket (see agent24AuditAnonymousBurst), and a refused key's rows through that key's own (see
 // agent24AuditRefusedKeyBurst). A nil service, and every other request, is passed through.
 // Mount it outside Auth: the row is built after the handler chain, the response is flushed, and only then is
@@ -357,7 +364,8 @@ func agent24KnowledgeAuditPath(c *gin.Context) bool {
 		return false
 	}
 	switch c.Request.URL.Path {
-	case agent24AuditPathReady, agent24AuditPathSearch, agent24AuditPathRead:
+	case agent24AuditPathReady, agent24AuditPathSearch, agent24AuditPathRead,
+		agent24AuditPathUITickets, agent24AuditPathUIRevocations: // A24-KB-32
 		return true
 	default:
 		return false
@@ -370,6 +378,10 @@ func agent24AuditAction(path string) types.AuditAction {
 		return agent24AuditActionSearch
 	case agent24AuditPathRead:
 		return agent24AuditActionRead
+	case agent24AuditPathUITickets: // A24-KB-32
+		return agent24AuditActionUITicket
+	case agent24AuditPathUIRevocations: // A24-KB-32
+		return agent24AuditActionUIRevoke
 	default:
 		return agent24AuditActionReady
 	}

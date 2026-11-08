@@ -20,7 +20,8 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 	g := &rbacGuards{}
 	engine := gin.New()
 	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
-		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, g)
+		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{},
+		&handler.Agent24KnowledgeUITicketsHandler{}, &handler.Agent24KnowledgeUIRevocationsHandler{}, g)
 
 	for _, path := range agent24KnowledgeRoutePaths {
 		n := 0
@@ -44,13 +45,32 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 			t.Fatalf("%s PlatformOnly = true, want false", path)
 		}
 	}
+	if len(engine.Routes()) != 5 {
+		t.Fatalf("routes = %#v, want ready, search, read, ui tickets and ui revocations", engine.Routes())
+	}
+}
+
+func TestAgent24KnowledgeRoutesWithoutUIHandlers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
+		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, &rbacGuards{})
 	if len(engine.Routes()) != 3 {
 		t.Fatalf("routes = %#v, want exactly ready, search and read", engine.Routes())
+	}
+	for _, rt := range engine.Routes() {
+		if rt.Path == "/api/v1/agent24/knowledge/ui/tickets" || rt.Path == "/api/v1/agent24/knowledge/ui/revocations" {
+			t.Fatalf("nil UI handler registered %s", rt.Path)
+		}
 	}
 }
 
 var agent24KnowledgeRoutePaths = []string{
-	"/api/v1/agent24/knowledge/ready", "/api/v1/agent24/knowledge/search", "/api/v1/agent24/knowledge/read",
+	"/api/v1/agent24/knowledge/ready",
+	"/api/v1/agent24/knowledge/search",
+	"/api/v1/agent24/knowledge/read",
+	"/api/v1/agent24/knowledge/ui/tickets",
+	"/api/v1/agent24/knowledge/ui/revocations",
 }
 
 func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {
@@ -72,7 +92,7 @@ func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &rbacGuards{}
 			engine := gin.New()
-			RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), tc.ready, tc.srch, tc.read, g)
+			RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), tc.ready, tc.srch, tc.read, nil, nil, g)
 			var got []string
 			for _, rt := range engine.Routes() {
 				got = append(got, rt.Path)
@@ -100,7 +120,7 @@ func TestAgent24KnowledgeRouteHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
-		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, &rbacGuards{})
+		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, &rbacGuards{})
 	search := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 		`"scope":{"knowledge_base_ids":["a"]},"budget":{"deadline_ms":800,"max_results":5,"max_concurrency":1}}`
 	read := `{"protocol_version":1,"request_id":"r1","generation":7,"scope":{"knowledge_base_ids":["a"]},` +
