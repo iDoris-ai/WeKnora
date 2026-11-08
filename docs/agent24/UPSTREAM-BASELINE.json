@@ -871,6 +871,20 @@
           "added_on": "2026-11-09"
         },
         {
+          "id": "A24-KB-40",
+          "issue": "iDoris-ai/WeKnora#135",
+          "summary": "凭据契约 v2：Agent24 写操作类的凭据范围（kb_candidate_propose/review/approve、kb_entry_withdraw 四个能力值与判定入口 agent24AuthorizeWrite；不放行任何写路由）",
+          "upstream_commit": null,
+          "paths": [
+            "internal/types/tenant_api_key.go",
+            "internal/types/agent24_write_capabilities_test.go",
+            "internal/handler/agent24_knowledge_write_scope.go",
+            "internal/handler/agent24_knowledge_write_scope_test.go"
+          ],
+          "remove_when": "长期保留（Agent24 集成专用能力）；上游若提供可扩展的能力注册机制可改走它",
+          "added_on": "2026-11-09"
+        },
+        {
           "id": "A24-OBS-01",
           "issue": "iDoris-ai/WeKnora#40",
           "summary": "服务端默认不记正文与凭据（KB-OBS-01）：访问日志默认不记正文、查询值打码、能力令牌路径记模板；gorm 日志不带绑定值；Langfuse 的 http.query 打码",
