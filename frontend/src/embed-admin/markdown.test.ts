@@ -86,6 +86,8 @@ test('raw HTML is shown as text, links are text plus URL, images are placeholder
     assert.match(out, /<span class="ea-md-img">\[IMG: cap\]<\/span>/)
     assert.equal(out.includes(src), false, src)
   }
+  // The URL is shown exactly as written, escaped, so an entity in it is not decoded on screen.
+  assert.match(renderMarkdown('[t](http://a?x=1&lt;y)', LABELS), /\(http:\/\/a\?x=1&amp;lt;y\)/)
   assert.equal(renderMarkdown('- [x] a', LABELS).includes('<input'), false)
   assert.equal(renderMarkdown('```js\nx\n```', LABELS), '<pre><code>x\n</code></pre>\n')
   assert.equal(renderMarkdown('| a |\n|:-:|\n| b |', LABELS).includes('align'), false)
