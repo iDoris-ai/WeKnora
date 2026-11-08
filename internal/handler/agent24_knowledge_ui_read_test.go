@@ -609,7 +609,8 @@ func TestAgent24UIReadAudience(t *testing.T) {
 	}
 	for _, path := range paths {
 		rig.resetCalls()
-		w := rig.do(http.MethodGet, path, "", "", "sk-live-real")
+		// C plus a valid view proof: the entry reads only the session JWT, so C is never a credential here.
+		w := rig.do(http.MethodGet, path, "", rig.proof, "sk-live-real")
 		require.Equal(t, http.StatusUnauthorized, w.Code, path+" "+w.Body.String())
 		require.Equal(t, 0, *rig.calls, path)
 		agent24UIRequireNoStore(t, w)
@@ -621,8 +622,20 @@ func TestAgent24UIReadAudience(t *testing.T) {
 		require.NotContains(t, w.Body.String(), "invalid or expired token")
 		require.NotContains(t, w.Body.String(), "sk-live-real")
 
+		// A signed_token C (external user id and token headers) with a valid proof is refused the same way.
 		rig.resetCalls()
-		w = rig.do(http.MethodGet, path, "Bearer upstream-user-jwt", "", "")
+		sreq := httptest.NewRequest(http.MethodGet, path, nil)
+		sreq.Header.Set("X-External-User-ID", "user-1")
+		sreq.Header.Set("X-External-User-Token", "signed-token-c")
+		sreq.Header.Set(agent24UIViewProofHeader, rig.proof)
+		sw := httptest.NewRecorder()
+		rig.r.ServeHTTP(sw, sreq)
+		require.Equal(t, http.StatusUnauthorized, sw.Code, path+" "+sw.Body.String())
+		require.Equal(t, 0, *rig.calls, path)
+		require.Equal(t, w.Body.Bytes(), sw.Body.Bytes(), path)
+
+		rig.resetCalls()
+		w = rig.do(http.MethodGet, path, "Bearer upstream-user-jwt", rig.proof, "")
 		require.Equal(t, http.StatusUnauthorized, w.Code, path+" "+w.Body.String())
 		require.Equal(t, 0, *rig.calls, path)
 		errObj = agent24UIJSONMap(t, w.Body.Bytes())["error"].(map[string]any)
@@ -886,4 +899,52 @@ func TestAgent24UIReadHandlerKeyGate(t *testing.T) {
 	h, err = NewAgent24KnowledgeUIReadHandler(nil, nil, nil, nil, nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, h)
+}
+
+// Codex review of c1 (Medium) and #140 PR-Daemon gate: E uses C_now, not only the JWT scope. The JWT still
+// names kb-b and kb-a; the key's allow-list has since shrunk. The real resolver must apply the shrunk list.
+func TestAgent24UIReadNarrowedCredential(t *testing.T) {
+	t.Run("partial", func(t *testing.T) {
+		rig, _ := agent24UIReadFixture(t, []*types.TenantAPIKey{
+			agent24UILiveKey([]string{"kb-a"}, false, nil, nil),
+		}, nil)
+		w := rig.authed("/api/v1/agent24/knowledge/ui/knowledge-bases")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		items := agent24UIJSONMap(t, w.Body.Bytes())["knowledge_bases"].([]any)
+		require.Len(t, items, 1)
+		require.Equal(t, "kb-a", items[0].(map[string]any)["id"])
+		require.NotContains(t, w.Body.String(), "kb-b")
+
+		missing := rig.authed("/api/v1/agent24/knowledge/ui/knowledge-bases/missing-kb")
+		require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
+		for _, path := range []string{
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-b",
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-b/tags",
+		} {
+			rig.resetCalls()
+			got := rig.authed(path)
+			require.Equal(t, http.StatusNotFound, got.Code, path+" "+got.Body.String())
+			require.Equal(t, missing.Body.Bytes(), got.Body.Bytes(), path)
+		}
+		ok := rig.authed("/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a")
+		require.Equal(t, http.StatusOK, ok.Code, ok.Body.String())
+	})
+
+	t.Run("disjoint", func(t *testing.T) {
+		rig, _ := agent24UIReadFixture(t, []*types.TenantAPIKey{
+			agent24UILiveKey([]string{"kb-nope"}, false, nil, nil),
+		}, nil)
+		for _, path := range []string{
+			"/api/v1/agent24/knowledge/ui/knowledge-bases",
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a",
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/tags",
+		} {
+			rig.resetCalls()
+			w := rig.authed(path)
+			require.Equal(t, http.StatusForbidden, w.Code, path+" "+w.Body.String())
+			require.Equal(t, 0, *rig.calls, path)
+			details := agent24UIJSONMap(t, w.Body.Bytes())["error"].(map[string]any)["details"].(map[string]any)
+			require.Equal(t, "empty_scope", details["reason"])
+		}
+	})
 }
