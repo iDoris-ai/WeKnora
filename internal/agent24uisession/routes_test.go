@@ -39,7 +39,7 @@ func TestUIReadRoutes(t *testing.T) {
 	if IsUIReadRoute(http.MethodGet, UIReadRoutes[0].Path+"/extra") {
 		t.Fatal("a longer path matched")
 	}
-	want := []string{"kb.list", "kb.get", "tag.list"}
+	want := []string{"kb.list", "kb.get", "doc.list", "doc.get", "chunk.list", "tag.list"} // A24-KB-35
 	if !slices.Equal(UIRouteOps(), want) {
 		t.Fatalf("UIRouteOps = %v, want %v", UIRouteOps(), want)
 	}

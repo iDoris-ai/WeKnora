@@ -26,7 +26,21 @@ const (
 	agent24UITagPageDefault     = 1
 	agent24UITagPageSizeDefault = 50
 	agent24UITagPageSizeMax     = 200
+	// A24-KB-35: doc.list and chunk.list page bounds. doc.get takes no query parameters.
+	agent24UIDocPageDefault       = 1
+	agent24UIDocPageSizeDefault   = 20
+	agent24UIDocPageSizeMax       = 100
+	agent24UIChunkPageDefault     = 1
+	agent24UIChunkPageSizeDefault = 25
+	agent24UIChunkPageSizeMax     = 100
 )
+
+// agent24UIPageSpec is the page and page_size an entry recognizes. sizeMax is the inclusive upper bound.
+type agent24UIPageSpec struct {
+	pageDefault int
+	sizeDefault int
+	sizeMax     int
+}
 
 // agent24UIReadStateKey is the request-context key for *agent24UIReadState. Handlers behind Guard read it.
 type agent24UIReadStateKey struct{}
@@ -41,11 +55,13 @@ type agent24UIReadState struct {
 	pageSize  int
 }
 
-// Agent24KnowledgeUIReadHandler serves the UI read entries (kb.list, kb.get, tag.list).
+// Agent24KnowledgeUIReadHandler serves the UI read entries (kb.list, kb.get, tag.list, and A24-KB-35
+// doc.list, doc.get, chunk.list). key is the revision key, read once; nil disables doc.get and chunk.list.
 type Agent24KnowledgeUIReadHandler struct {
 	deps  agent24UISessionDeps
 	scope agent24ScopeResolver
 	db    *gorm.DB
+	key   []byte // A24-KB-35: nil when the revision key is unset, same as read
 }
 
 // NewAgent24KnowledgeUIReadHandler builds the UI read handler.
@@ -83,26 +99,32 @@ func NewAgent24KnowledgeUIReadHandler(
 		},
 		scope: agent24DefaultScopeResolver{kbs: kbService},
 		db:    db,
+		key:   agent24SearchTagKey(), // A24-KB-35
 	}, nil
 }
 
 // Guard is the per-entry check (R6.4): session, shape, operation, then E. A failure does not call Next.
 // op is the route's operation, not a client field. Query keys other than the ones that entry lists are ignored,
-// including agent_id and agent_source_tenant_id. page and page_size are recognized only on tag.list.
+// including agent_id and agent_source_tenant_id.
+// A24-KB-35: page and page_size apply to tag.list, doc.list and chunk.list. doc.get and chunk.list also
+// require the revision key; a missing key is operation_disabled after the JWT op check and before E.
 func (h *Agent24KnowledgeUIReadHandler) Guard(op string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
-		kbID := ""
-		if op == "kb.get" || op == "tag.list" {
+		kbID, knowledgeID := "", ""
+		switch op {
+		case "kb.get", "tag.list", "doc.list": // A24-KB-35: doc.list records kb_id
 			kbID = c.Param("kb_id")
+		case "doc.get", "chunk.list": // A24-KB-35: these record knowledge_id
+			knowledgeID = c.Param("knowledge_id")
 		}
 		claims, ticket, scope, kerr := agent24UIVerifySession(
 			c.Request.Context(), h.deps, c.Request.Header, time.Now())
 		if ticket != nil {
 			agent24UINoteTicket(c, ticket, "", false)
 		}
-		// NoteTicket replaces the resource map, so op and kb_id are merged after it.
-		agent24UIReadNoteOp(c, op, kbID)
+		// NoteTicket replaces the resource map, so op and the resource id are merged after it.
+		agent24UIReadNoteOp(c, op, kbID, knowledgeID) // A24-KB-35
 		if kerr != nil {
 			writeAgent24KnowledgeError(c, kerr, agent24KnowledgeEcho{})
 			return
@@ -117,6 +139,11 @@ func (h *Agent24KnowledgeUIReadHandler) Guard(op string) gin.HandlerFunc {
 			return
 		}
 		if !agent24UIOpEnabled(claims.Ops, op) {
+			writeAgent24KnowledgeError(c, agent24Forbidden("operation_disabled"), agent24KnowledgeEcho{})
+			return
+		}
+		// A24-KB-35: same refusal as read when the revision key is missing, before E is recomputed.
+		if (op == "doc.get" || op == "chunk.list") && h.key == nil {
 			writeAgent24KnowledgeError(c, agent24Forbidden("operation_disabled"), agent24KnowledgeEcho{})
 			return
 		}
@@ -137,24 +164,41 @@ func (h *Agent24KnowledgeUIReadHandler) Guard(op string) gin.HandlerFunc {
 	}
 }
 
+// agent24UIReadPageSpec is the page query an entry recognizes. doc.get and kb.list/kb.get have none.
+func agent24UIReadPageSpec(op string) (agent24UIPageSpec, bool) {
+	switch op {
+	case "tag.list":
+		return agent24UIPageSpec{agent24UITagPageDefault, agent24UITagPageSizeDefault, agent24UITagPageSizeMax}, true
+	case "doc.list": // A24-KB-35
+		return agent24UIPageSpec{agent24UIDocPageDefault, agent24UIDocPageSizeDefault, agent24UIDocPageSizeMax}, true
+	case "chunk.list": // A24-KB-35
+		return agent24UIPageSpec{
+			agent24UIChunkPageDefault, agent24UIChunkPageSizeDefault, agent24UIChunkPageSizeMax,
+		}, true
+	default:
+		return agent24UIPageSpec{}, false
+	}
+}
+
 // agent24UIReadShape checks the query keys this entry recognizes. Anything else is ignored.
-// page and page_size apply only to tag.list. A missing key takes the default. A present key must be one
-// canonical positive integer, and page_size must be at most 200. (page-1)*page_size must fit in an int.
+// A missing key takes the default. A present key must be one canonical positive integer, and page_size
+// must be at most that entry's maximum. (page-1)*page_size must fit in an int.
 func agent24UIReadShape(c *gin.Context, op string) (page, pageSize int, err *agent24KnowledgeError) {
-	if op != "tag.list" {
+	spec, ok := agent24UIReadPageSpec(op) // A24-KB-35
+	if !ok {
 		return 0, 0, nil
 	}
 	q := c.Request.URL.Query()
-	page, pageSize = agent24UITagPageDefault, agent24UITagPageSizeDefault
-	if vs, ok := q["page"]; ok {
+	page, pageSize = spec.pageDefault, spec.sizeDefault
+	if vs, present := q["page"]; present {
 		n, good := agent24UIOnePositive(vs, 0)
 		if !good {
 			return 0, 0, agent24InvalidRequest()
 		}
 		page = n
 	}
-	if vs, ok := q["page_size"]; ok {
-		n, good := agent24UIOnePositive(vs, agent24UITagPageSizeMax)
+	if vs, present := q["page_size"]; present {
+		n, good := agent24UIOnePositive(vs, spec.sizeMax)
 		if !good {
 			return 0, 0, agent24InvalidRequest()
 		}
@@ -239,21 +283,26 @@ func agent24UIReadFrom(c *gin.Context) (*agent24UIReadState, bool) {
 	return st, st != nil
 }
 
-// agent24UIReadNoteOp records the operation name and, for a :kb_id route, that id. Nothing else from the
-// path or the query is recorded.
-func agent24UIReadNoteOp(c *gin.Context, op, kbID string) {
+// agent24UIReadNoteOp records the operation name and, when the route has one, kb_id or knowledge_id.
+// Nothing else from the path or the query is recorded. An id that is empty is left unset.
+func agent24UIReadNoteOp(c *gin.Context, op, kbID, knowledgeID string) { // A24-KB-35
 	agent24NoteAudit(c, func(f *agent24AuditFacts) {
 		if op != "" {
 			f.Op = op
 		}
-		if kbID == "" {
+		if kbID == "" && knowledgeID == "" {
 			return
 		}
 		resource, _ := f.Resource.(map[string]any)
 		if resource == nil {
 			resource = map[string]any{}
 		}
-		resource["kb_id"] = kbID
+		if kbID != "" {
+			resource["kb_id"] = kbID
+		}
+		if knowledgeID != "" {
+			resource["knowledge_id"] = knowledgeID
+		}
 		f.Resource = resource
 	})
 }

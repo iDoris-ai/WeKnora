@@ -249,6 +249,18 @@ func TestAgent24UIReadCredentialGate(t *testing.T) {
 			"/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/tags",
 			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/tags",
 		},
+		{ // A24-KB-35
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents",
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/documents",
+		},
+		{
+			"/api/v1/agent24/knowledge/ui/documents/:knowledge_id",
+			"/api/v1/agent24/knowledge/ui/documents/doc1",
+		},
+		{
+			"/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks",
+			"/api/v1/agent24/knowledge/ui/documents/doc1/chunks",
+		},
 	} {
 		code, called, body := serve(http.MethodGet, tc.route, tc.urlPath)
 		require.Equal(t, http.StatusNoContent, code, body)

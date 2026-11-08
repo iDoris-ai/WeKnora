@@ -101,9 +101,9 @@ type agent24UIReadRig struct {
 func agent24UIReadMigrate(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.AutoMigrate(
-		&agent24UIReadKBRow{}, &types.Knowledge{}, &types.KnowledgeTag{},
+		&agent24UIReadKBRow{}, &types.Knowledge{}, &types.Chunk{}, &types.KnowledgeTag{},
 		&types.KnowledgeTagRelation{}, &types.KnowledgeBaseShare{},
-	))
+	)) // A24-KB-35: chunks back doc.get and chunk.list
 }
 
 func agent24UIReadHandler(
@@ -126,6 +126,7 @@ func agent24UIReadHandler(
 		},
 		scope: scope,
 		db:    db,
+		key:   append([]byte(nil), agent24TestKey...), // A24-KB-35
 	}
 }
 
@@ -154,9 +155,22 @@ func agent24UIReadMount(t *testing.T, h *Agent24KnowledgeUIReadHandler) agent24U
 		calls++
 		c.Next()
 	}
-	r.GET(agent24uisession.UIReadRoutes[0].Path, h.Guard("kb.list"), bump, h.ListKnowledgeBases)
-	r.GET(agent24uisession.UIReadRoutes[1].Path, h.Guard("kb.get"), bump, h.GetKnowledgeBase)
-	r.GET(agent24uisession.UIReadRoutes[2].Path, h.Guard("tag.list"), bump, h.ListTags)
+	// A24-KB-35: every UI read route, so a new table row is mounted with the fixture.
+	nextByOp := map[string]gin.HandlerFunc{
+		"kb.list":    h.ListKnowledgeBases,
+		"kb.get":     h.GetKnowledgeBase,
+		"tag.list":   h.ListTags,
+		"doc.list":   h.ListDocuments,
+		"doc.get":    h.GetDocument,
+		"chunk.list": h.ListChunks,
+	}
+	for _, rt := range agent24uisession.UIReadRoutes {
+		next := nextByOp[rt.Op]
+		if next == nil {
+			t.Fatalf("no test handler for %s", rt.Op)
+		}
+		r.GET(rt.Path, h.Guard(rt.Op), bump, next)
+	}
 	r.GET("/api/v1/knowledge-bases", func(c *gin.Context) {
 		calls++
 		c.Status(http.StatusNoContent)
@@ -224,12 +238,29 @@ func agent24UIReadSeed(t *testing.T, db *gorm.DB) {
 	}
 	require.NoError(t, db.Delete(&agent24UIReadKBRow{}, "id = ?", "kb-gone").Error)
 
+	// A24-KB-35: leak sentinels must not appear in any UI body or audit row.
 	doc := func(id string, tenant uint64, kb, status string) *types.Knowledge {
-		return &types.Knowledge{ID: id, TenantID: tenant, KnowledgeBaseID: kb, ParseStatus: status, Type: "file"}
+		return &types.Knowledge{
+			ID: id, TenantID: tenant, KnowledgeBaseID: kb, ParseStatus: status, Type: "file",
+			Title: id, FileName: id + ".bin",
+			FilePath: "secret-file-path-" + id, FileHash: "secret-file-hash-" + id,
+			Source: "secret-source-" + id, ErrorMessage: "secret-error-" + id,
+			Metadata: types.JSON(`{"leak":"secret-metadata"}`),
+		}
 	}
+	sameClock := time.Date(2024, 6, 2, 3, 4, 5, 0, time.UTC)
+	earlier := time.Date(2024, 6, 1, 3, 4, 5, 0, time.UTC)
+	completed := doc("doc-completed", 9, "kb-a", types.ParseStatusCompleted)
+	completed.Title, completed.FileName = "Completed", "completed.pdf"
+	completed.CreatedAt, completed.UpdatedAt = sameClock, sameClock
+	finalizing := doc("doc-finalizing", 9, "kb-a", types.ParseStatusFinalizing)
+	finalizing.Title, finalizing.FileName = "Finalizing", "finalizing.pdf"
+	finalizing.CreatedAt, finalizing.UpdatedAt = sameClock, sameClock
+	pending := doc("doc-pending", 9, "kb-a", types.ParseStatusPending)
+	pending.Title, pending.FileName = "Pending", "pending.txt"
+	pending.CreatedAt, pending.UpdatedAt = earlier, earlier
 	docs := []*types.Knowledge{
-		doc("doc-completed", 9, "kb-a", types.ParseStatusCompleted),
-		doc("doc-finalizing", 9, "kb-a", types.ParseStatusFinalizing),
+		completed, finalizing, pending,
 		doc("doc-draft", 9, "kb-a", types.ManualKnowledgeStatusDraft),
 		doc("doc-deleting", 9, "kb-a", types.ParseStatusDeleting),
 		doc("doc-unknown", 9, "kb-a", "not-a-status"),
@@ -237,11 +268,38 @@ func agent24UIReadSeed(t *testing.T, db *gorm.DB) {
 		doc("doc-foreign", 8, "kb-a", types.ParseStatusCompleted),
 		doc("doc-kb-b", 9, "kb-b", types.ParseStatusCompleted),
 		doc("doc-out", 9, "kb-local-out", types.ParseStatusCompleted),
+		doc("doc-on-gone", 9, "kb-gone", types.ParseStatusCompleted),
 	}
 	for _, row := range docs {
 		require.NoError(t, db.Create(row).Error)
 	}
 	require.NoError(t, db.Delete(&types.Knowledge{}, "id = ?", "doc-deleted").Error)
+
+	// A24-KB-35: servable set of doc-completed is chk-a then chk-b. The rest must not be served or counted.
+	text := string(types.ChunkTypeText)
+	chunk := func(id, docID, content string, index, rev int) *types.Chunk {
+		return &types.Chunk{
+			ID: id, TenantID: 9, KnowledgeBaseID: "kb-a", KnowledgeID: docID, ChunkType: text,
+			IsEnabled: true, ChunkIndex: index, Content: content, ContentRevision: rev,
+		}
+	}
+	chkB := chunk("chk-b", "doc-completed", "servable-bravo\xff", 3, 7)
+	chunks := []*types.Chunk{
+		chunk("chk-a", "doc-completed", "servable-alpha", 1, 3),
+		chkB,
+		chunk("chk-off", "doc-completed", "disabled-chunk-text", 0, 1),
+		chunk("chk-img", "doc-completed", "image-chunk-text", 2, 1),
+		chunk("chk-del", "doc-completed", "deleted-chunk-text", 4, 1),
+		chunk("chk-foreign", "doc-completed", "foreign-chunk-text", 2, 1),
+		chunk("chk-pending", "doc-pending", "pending-chunk-text", 0, 1),
+	}
+	chunks[3].ChunkType = types.ChunkTypeSummary
+	chunks[5].TenantID = 8
+	for _, row := range chunks {
+		require.NoError(t, db.Create(row).Error)
+	}
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", "chk-off").Update("is_enabled", false).Error)
+	require.NoError(t, db.Delete(&types.Chunk{}, "id = ?", "chk-del").Error)
 
 	older := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	newer := time.Date(2020, 1, 3, 0, 0, 0, 0, time.UTC)
@@ -445,7 +503,7 @@ func TestAgent24UIReadEntries(t *testing.T) {
 		require.Equal(t, "kb-a", second["id"])
 		require.Equal(t, "Base A", second["name"])
 		require.Equal(t, "document", second["type"])
-		require.Equal(t, float64(2), second["document_count"])
+		require.Equal(t, float64(3), second["document_count"]) // A24-KB-35: pending counts
 		require.Equal(t, false, second["wiki_enabled"])
 		for _, id := range []string{"kb-other", "kb-gone", "kb-local-out"} {
 			require.NotContains(t, w.Body.String(), id)
@@ -481,7 +539,7 @@ func TestAgent24UIReadEntries(t *testing.T) {
 		agent24UIKeySet(t, kb, kbFields...)
 		agent24UIForbidKeys(t, body)
 		require.Equal(t, "kb-a", kb["id"])
-		require.Equal(t, float64(2), kb["document_count"])
+		require.Equal(t, float64(3), kb["document_count"]) // A24-KB-35: pending counts
 		require.Equal(t, false, kb["wiki_enabled"])
 		op, outcome, _, resource := agent24UIReadOp(t, rig.stub, before+1)
 		require.Equal(t, "kb.get", op)
@@ -606,6 +664,9 @@ func TestAgent24UIReadAudience(t *testing.T) {
 		"/api/v1/agent24/knowledge/ui/knowledge-bases",
 		"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a",
 		"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/tags",
+		"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/documents", // A24-KB-35
+		"/api/v1/agent24/knowledge/ui/documents/doc-completed",
+		"/api/v1/agent24/knowledge/ui/documents/doc-completed/chunks",
 	}
 	for _, path := range paths {
 		rig.resetCalls()
@@ -702,6 +763,9 @@ func TestAgent24UIReadEmptyScope(t *testing.T) {
 			"/api/v1/agent24/knowledge/ui/knowledge-bases",
 			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a",
 			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/tags",
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/documents", // A24-KB-35
+			"/api/v1/agent24/knowledge/ui/documents/doc-completed",
+			"/api/v1/agent24/knowledge/ui/documents/doc-completed/chunks",
 		} {
 			rig.resetCalls()
 			w := rig.authed(path)
@@ -837,6 +901,26 @@ func TestAgent24UIReadRefusals(t *testing.T) {
 		require.Equal(t, "invalid_request", errObj["code"])
 		require.NotContains(t, errObj["details"].(map[string]any), "reason")
 	})
+
+	// A24-KB-35: a bad page is invalid_request even when the JWT does not grant the operation.
+	t.Run("document shape before operation", func(t *testing.T) {
+		_, store := agent24UIHandlerDB(t)
+		h, token := issue(t, store, []string{"kb.list"}, time.Now())
+		rig := agent24UIReadMount(t, h)
+		rig.token = token
+		rig.proof = proof
+		for _, path := range []string{
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/documents?page=0",
+			"/api/v1/agent24/knowledge/ui/documents/doc-completed/chunks?page_size=101",
+		} {
+			rig.resetCalls()
+			w := rig.authed(path)
+			require.Equal(t, http.StatusBadRequest, w.Code, path+" "+w.Body.String())
+			require.Equal(t, 0, *rig.calls, path)
+			errObj := agent24UIJSONMap(t, w.Body.Bytes())["error"].(map[string]any)
+			require.Equal(t, "invalid_request", errObj["code"])
+		}
+	})
 }
 
 func TestAgent24UIReadTagQuery(t *testing.T) {
@@ -930,6 +1014,28 @@ func TestAgent24UIReadNarrowedCredential(t *testing.T) {
 		require.Equal(t, http.StatusOK, ok.Code, ok.Body.String())
 	})
 
+	// A24-KB-35: the key still names kb-b, so E is not empty, but the document's KB has left the allow-list.
+	t.Run("document kb dropped", func(t *testing.T) {
+		rig, _ := agent24UIReadFixture(t, []*types.TenantAPIKey{
+			agent24UILiveKey([]string{"kb-b"}, false, nil, nil),
+		}, nil)
+		missing := rig.authed("/api/v1/agent24/knowledge/ui/documents/missing-doc")
+		require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
+		for _, path := range []string{
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/documents",
+			"/api/v1/agent24/knowledge/ui/documents/doc-completed",
+			"/api/v1/agent24/knowledge/ui/documents/doc-completed/chunks",
+		} {
+			rig.resetCalls()
+			got := rig.authed(path)
+			require.Equal(t, http.StatusNotFound, got.Code, path+" "+got.Body.String())
+			require.Equal(t, 1, *rig.calls, path)
+			require.Equal(t, missing.Body.Bytes(), got.Body.Bytes(), path)
+		}
+		listed := rig.authed("/api/v1/agent24/knowledge/ui/knowledge-bases/kb-b/documents")
+		require.Equal(t, http.StatusOK, listed.Code, listed.Body.String())
+	})
+
 	t.Run("disjoint", func(t *testing.T) {
 		rig, _ := agent24UIReadFixture(t, []*types.TenantAPIKey{
 			agent24UILiveKey([]string{"kb-nope"}, false, nil, nil),
@@ -938,6 +1044,9 @@ func TestAgent24UIReadNarrowedCredential(t *testing.T) {
 			"/api/v1/agent24/knowledge/ui/knowledge-bases",
 			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a",
 			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/tags",
+			"/api/v1/agent24/knowledge/ui/knowledge-bases/kb-a/documents", // A24-KB-35
+			"/api/v1/agent24/knowledge/ui/documents/doc-completed",
+			"/api/v1/agent24/knowledge/ui/documents/doc-completed/chunks",
 		} {
 			rig.resetCalls()
 			w := rig.authed(path)
