@@ -20,9 +20,11 @@ func (f *fakeAuditSvc) Log(_ context.Context, e *types.AuditLog) error {
 	f.logged = append(f.logged, e)
 	return f.err
 }
+
 func (f *fakeAuditSvc) LogDenied(context.Context, *gin.Context, uint64, string, string, types.TenantRole) error {
 	return nil
 }
+
 func (f *fakeAuditSvc) List(context.Context, uint64, *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
 	return nil, nil
 }

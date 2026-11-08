@@ -27,6 +27,7 @@ func (stubBackend) TearDown(context.Context) error    { return nil }
 func (stubBackend) Prepare(context.Context, localsandbox.Policy) (localsandbox.Prepared, error) {
 	return nil, errors.New("unused")
 }
+
 func (stubBackend) Spawn(context.Context, localsandbox.Prepared, localsandbox.Command) (localsandbox.Process, error) {
 	return nil, errors.New("unused")
 }
