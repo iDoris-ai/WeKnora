@@ -156,6 +156,31 @@ test('code and raw HTML in wiki content keep the bar as written', () => {
   assert.equal(renderMarkdown('`[[a|b]]`', LABELS), '<p><code>[[a|b]]</code></p>\n')
 })
 
+test('table cells: an escaped bar, several bars, and an unknown slug (Codex c-r2 C1, C2)', () => {
+  const set = new Set(['a'])
+  const row = (cell: string) => renderMarkdown(`| h | i |\n| - | - |\n| ${cell} | tail |\n`, LABELS, { wikiLinks: set })
+  assert.match(row('[[a\\|b]]'), /<td><span class="ea-md-wiki" data-slug="a">b<\/span><\/td>\n<td>tail<\/td>/)
+  assert.match(row('[[a|b|c]]'), /<td><span class="ea-md-wiki" data-slug="a">b\|c<\/span><\/td>\n<td>tail<\/td>/)
+  assert.match(row('`[[a|b]]`'), /<td><code>\[\[a\|b\]\]<\/code><\/td>\n<td>tail<\/td>/)
+  assert.match(row('x [[a|b]] y [[z|w]]'), /<td>x <span class="ea-md-wiki" data-slug="a">b<\/span> y <span class="ea-md-nolink">w<\/span><\/td>/)
+  assert.equal(row('[[a|b]]').includes('\uE000'), false)
+  // A row after the table and plain cells are untouched.
+  assert.match(renderMarkdown('| h |\n| - |\n| a|b |\n', LABELS, { wikiLinks: set }), /<td>a<\/td>/)
+})
+
+test('outside tables nothing is rewritten (Codex c-r2 C3, C4, C5)', () => {
+  const set = new Set(['a', 'x'])
+  const md = (t: string) => renderMarkdown(t, LABELS, { wikiLinks: set })
+  assert.match(md('<https://e.test/[[x|y]]>'), /\(https:\/\/e\.test\/\[\[x\|y\]\]\)/)
+  assert.equal(md('<https://e.test/[[x|y]]>').includes('\\'), false)
+  assert.equal(md('![`[[x|y]]`](i.png)').includes('\\'), false)
+  assert.equal(md('`[[a\n\\|b]]`'), '<p><code>[[a \\|b]]</code></p>\n')
+  const long = 'b'.repeat(510)
+  assert.equal(md(`[[a|${long}]]`), `<p><span class="ea-md-wiki" data-slug="a">${long}</span></p>\n`)
+  assert.equal(md('[[a\\|b]]'), '<p><span class="ea-md-wiki" data-slug="a">b</span></p>\n')
+  assert.equal(renderMarkdown('| h |\n| - |\n| \uE000 |\n', LABELS).includes('\uE000'), true)
+})
+
 test('hostile wiki content stays safe', () => {
   const set = new Set(['a', 'x y', '<b>'])
   for (const input of [...HOSTILE, '[[a|<img src=x onerror=1>]]', '[[nope|<img src=x onerror=1>]]', '[[<b>]]', '[[<b>|t]]', '**[[a]]** [l]([[a]])', '[[a]]]]', '[[[[a]]]]']) {

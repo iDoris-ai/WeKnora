@@ -8,7 +8,7 @@
 // knowledge base) becomes <span class="ea-md-wiki" data-slug="…">, which the view turns into an in-page move; any
 // other slug is plain text. Outside wiki content the brackets stay text.
 
-import { Marked, type Tokens } from 'marked'
+import { Marked, Tokenizer, type Tokens } from 'marked'
 
 /** Every tag the renderer can emit, and the only attributes: `class` with an ea-md- value, `start` on ol. */
 export const SAFE_TAGS = [
@@ -46,18 +46,15 @@ interface WikiLinkToken {
 let wikiLinks: ReadonlySet<string> | null = null
 
 // A GFM table splits its row on every unescaped `|` before inline extensions run, so `[[slug|text]]` in a cell would
-// be cut in two (Codex c-r1 C1). In wiki content the first bar inside `[[…]]` is escaped first: a table cell turns
-// `\|` back into `|`, other inline text reads it as an escape, and code and raw HTML (shown as text) get the bar back.
-const WIKI_BAR = /\[\[([^[\]\n|]{1,512})\|(?=[^[\]\n]{0,512}\]\])/g
-const WIKI_BAR_ESCAPED = /\[\[([^[\]\n|]{1,512})\\\|(?=[^[\]\n]{0,512}\]\])/g
+// be cut in two (Codex c-r1 C1). In wiki content only, and only for the table tokenizer, every `|` inside `[[…]]`
+// is replaced by BAR_MASK (one UTF-16 unit, so lengths and `raw` are unchanged) before the default table tokenizer
+// runs; the wikilink tokenizer accepts it as the separator and the final HTML turns any left over back into `|`.
+// Nothing outside tables is rewritten.
+const BAR_MASK = '\uE000'
+const WIKI_SPAN = /\[\[[^[\]\n]{1,512}\]\]/g
 
-function protectWikiBars(src: string): string {
-  return src.replace(WIKI_BAR, '[[$1\\|')
-}
-
-/** Undoes protectWikiBars where text is shown verbatim (code, raw HTML). Outside wiki content: unchanged. */
-function verbatim(s: string): string {
-  return wikiLinks ? s.replace(WIKI_BAR_ESCAPED, '[[$1|') : s
+function maskWikiBars(src: string): string {
+  return src.replace(WIKI_SPAN, (w) => w.replaceAll('|', BAR_MASK))
 }
 
 function build(labels: MarkdownLabels): Marked {
@@ -75,7 +72,7 @@ function build(labels: MarkdownLabels): Marked {
           const match = /^\[\[([^[\]\n]{1,512})\]\]/.exec(src)
           if (!match) return undefined
           const inner = match[1]
-          const bar = /\\?\|/.exec(inner)
+          const bar = /\\?[|\uE000]/.exec(inner)
           const slug = (bar && bar.index > 0 ? inner.slice(0, bar.index) : inner).trim()
           const text = (bar && bar.index > 0 ? inner.slice(bar.index + bar[0].length) : inner).trim() || slug
           return { type: 'wikilink', raw: match[0], slug, text }
@@ -90,9 +87,23 @@ function build(labels: MarkdownLabels): Marked {
         },
       },
     ],
+    tokenizer: {
+      table(this: Tokenizer, src: string): Tokens.Table | undefined | false {
+        if (!wikiLinks || !src.includes('[[')) return false
+        // A table ends at a blank line at the latest; only that much is masked.
+        const end = src.search(/\n[ \t]*\n/)
+        const head = end < 0 ? src : src.slice(0, end)
+        return Tokenizer.prototype.table.call(this, maskWikiBars(head) + src.slice(head.length))
+      },
+    },
+    hooks: {
+      postprocess(html: string): string {
+        return wikiLinks ? html.replaceAll(BAR_MASK, '|') : html
+      },
+    },
     renderer: {
       html(token: Tokens.HTML | Tokens.Tag): string {
-        return escapeHtml(verbatim(token.text))
+        return escapeHtml(token.text)
       },
       link(token: Tokens.Link): string {
         const inner = this.parser.parseInline(token.tokens)
@@ -112,10 +123,7 @@ function build(labels: MarkdownLabels): Marked {
         return escapeHtml(token.text)
       },
       code(token: Tokens.Code): string {
-        return `<pre><code>${escapeHtml(verbatim(token.text).replace(/\n$/, '') + '\n')}</code></pre>\n`
-      },
-      codespan(token: Tokens.Codespan): string {
-        return `<code>${escapeHtml(verbatim(token.text))}</code>`
+        return `<pre><code>${escapeHtml(token.text.replace(/\n$/, '') + '\n')}</code></pre>\n`
       },
       tablecell(token: Tokens.TableCell): string {
         const tag = token.header ? 'th' : 'td'
@@ -138,7 +146,7 @@ export function renderMarkdown(text: string, labels: MarkdownLabels, opts: Markd
   }
   wikiLinks = opts.wikiLinks ?? null
   try {
-    return m.parse(wikiLinks ? protectWikiBars(text) : text) as string
+    return m.parse(text) as string
   } catch {
     return `<p>${escapeHtml(text)}</p>`
   } finally {
