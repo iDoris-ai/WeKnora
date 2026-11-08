@@ -347,6 +347,13 @@ func agent24UIReadNoteSlug(c *gin.Context, slug string) { // A24-KB-36
 	})
 }
 
+// agent24UIPathTextUsable reports that a path value can be bound as a SQL text parameter. Postgres
+// rejects invalid UTF-8 and NUL in text, which would surface as a retryable storage error; such a value
+// cannot name any stored row, so callers answer not_found before querying.
+func agent24UIPathTextUsable(s string) bool { // A24-KB-36
+	return utf8.ValidString(s) && !strings.ContainsRune(s, 0)
+}
+
 // agent24UITruncateUTF8 replaces invalid UTF-8 and returns the leading prefix of at most n bytes, on a rune boundary.
 func agent24UITruncateUTF8(s string, n int) string { // A24-KB-36
 	if n < 0 {

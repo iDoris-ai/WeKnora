@@ -201,7 +201,7 @@ func (h *Agent24KnowledgeUIReadHandler) GetWikiPage(c *gin.Context) {
 		return
 	}
 	slug := agent24UIWikiSlugParam(c)
-	if slug == "" {
+	if slug == "" || !agent24UIPathTextUsable(slug) {
 		writeAgent24KnowledgeError(c, agent24NotFound(), agent24KnowledgeEcho{})
 		return
 	}

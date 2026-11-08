@@ -3,11 +3,13 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -399,4 +401,44 @@ func TestAgent24UIReadWikiInLinksCap(t *testing.T) {
 	require.Equal(t, "t-p000", got[0].Title)
 	require.Equal(t, "p199", got[199].Slug)
 	require.Equal(t, "t-p199", got[199].Title)
+}
+
+// TestAgent24UIReadPathTextUnusable stands in for Postgres, which rejects invalid UTF-8 and NUL in
+// a text parameter: a query that binds such a string fails. The path ids must be answered not_found
+// before any query, identical to a missing row, instead of a retryable storage error.
+func TestAgent24UIReadPathTextUnusable(t *testing.T) {
+	rig, _ := agent24UIReadFixture(t, nil, nil)
+	require.NoError(t, rig.h.db.Callback().Query().After("gorm:query").Register("agent24_pg_text",
+		func(tx *gorm.DB) {
+			for _, v := range tx.Statement.Vars {
+				if s, ok := v.(string); ok && (!utf8.ValidString(s) || strings.ContainsRune(s, 0)) {
+					_ = tx.AddError(errors.New(`invalid byte sequence for encoding "UTF8"`))
+				}
+			}
+		}))
+	ui := "/api/v1/agent24/knowledge/ui/"
+	wiki := ui + "knowledge-bases/kb-b/wiki/pages/"
+	missingPage := rig.authed(wiki + "missing-page")
+	require.Equal(t, http.StatusNotFound, missingPage.Code, missingPage.Body.String())
+	missingDoc := rig.authed(ui + "documents/missing-doc")
+	require.Equal(t, http.StatusNotFound, missingDoc.Code, missingDoc.Body.String())
+	missingChunks := rig.authed(ui + "documents/missing-doc/chunks")
+	require.Equal(t, http.StatusNotFound, missingChunks.Code, missingChunks.Body.String())
+	for _, bad := range []string{"%ffabc", "abc%00def"} {
+		for _, tc := range []struct {
+			path string
+			want []byte
+		}{
+			{wiki + bad, missingPage.Body.Bytes()},
+			{wiki + "entity/" + bad, missingPage.Body.Bytes()},
+			{ui + "documents/" + bad, missingDoc.Body.Bytes()},
+			{ui + "documents/" + bad + "/chunks", missingChunks.Body.Bytes()},
+		} {
+			rig.resetCalls()
+			w := rig.authed(tc.path)
+			require.Equal(t, http.StatusNotFound, w.Code, tc.path+" "+w.Body.String())
+			require.Equal(t, 1, *rig.calls, tc.path)
+			require.Equal(t, tc.want, w.Body.Bytes(), tc.path)
+		}
+	}
 }

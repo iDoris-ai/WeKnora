@@ -138,6 +138,10 @@ func (h *Agent24KnowledgeUIReadHandler) GetDocument(c *gin.Context) {
 		return
 	}
 	id := c.Param("knowledge_id")
+	if !agent24UIPathTextUsable(id) { // A24-KB-36
+		writeAgent24KnowledgeError(c, agent24NotFound(), agent24KnowledgeEcho{})
+		return
+	}
 	snap, err := (agent24DBReadReader{db: h.db}).Snapshot(c.Request.Context(), st.tenantID, st.e, id,
 		agent24ReadWindow{Position: -1})
 	if agent24UIReadFail(c, err) {
@@ -174,6 +178,10 @@ func (h *Agent24KnowledgeUIReadHandler) ListChunks(c *gin.Context) {
 		return
 	}
 	id := c.Param("knowledge_id")
+	if !agent24UIPathTextUsable(id) { // A24-KB-36
+		writeAgent24KnowledgeError(c, agent24NotFound(), agent24KnowledgeEcho{})
+		return
+	}
 	start := (st.page - 1) * st.pageSize
 	snap, err := (agent24DBReadReader{db: h.db}).Snapshot(c.Request.Context(), st.tenantID, st.e, id,
 		agent24ReadWindow{Position: start, Limit: st.pageSize})
