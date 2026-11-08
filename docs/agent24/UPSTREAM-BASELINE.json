@@ -778,6 +778,7 @@
             "internal/agent24uisession/routes.go",
             "internal/agent24uisession/routes_test.go",
             "internal/application/service/agent24_wiki_strip.go",
+            "internal/handler/agent24_knowledge_ui_documents.go",
             "internal/handler/agent24_knowledge_ui_read.go",
             "internal/handler/agent24_knowledge_ui_read_test.go",
             "internal/handler/agent24_knowledge_ui_wiki.go",
