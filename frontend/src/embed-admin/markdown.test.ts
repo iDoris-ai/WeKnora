@@ -138,6 +138,24 @@ test('the wiki link set does not leak into the next render', () => {
   assert.equal(renderMarkdown('[[a]]', LABELS), '<p>[[a]]</p>\n')
 })
 
+test('a wiki link with text inside a table cell stays one link (Codex c-r1 C1)', () => {
+  const set = new Set(['entity/acme-corp'])
+  const out = renderMarkdown('| 页面 | 说明 |\n| --- | --- |\n| [[entity/acme-corp|Acme]] | 重要说明 |\n| [[other|别处]] | x |\n', LABELS, {
+    wikiLinks: set,
+  })
+  assert.match(out, /<td><span class="ea-md-wiki" data-slug="entity\/acme-corp">Acme<\/span><\/td>\n<td>重要说明<\/td>/)
+  assert.match(out, /<td><span class="ea-md-nolink">别处<\/span><\/td>\n<td>x<\/td>/)
+  assertSafe(out, 'wiki table')
+})
+
+test('code and raw HTML in wiki content keep the bar as written', () => {
+  const set = new Set(['a'])
+  assert.equal(renderMarkdown('`[[a|b]]`', LABELS, { wikiLinks: set }), '<p><code>[[a|b]]</code></p>\n')
+  assert.equal(renderMarkdown('```\n[[a|b]]\n```', LABELS, { wikiLinks: set }), '<pre><code>[[a|b]]\n</code></pre>\n')
+  assert.equal(renderMarkdown('<div>[[a|b]]</div>', LABELS, { wikiLinks: set }), '&lt;div&gt;[[a|b]]&lt;/div&gt;')
+  assert.equal(renderMarkdown('`[[a|b]]`', LABELS), '<p><code>[[a|b]]</code></p>\n')
+})
+
 test('hostile wiki content stays safe', () => {
   const set = new Set(['a', 'x y', '<b>'])
   for (const input of [...HOSTILE, '[[a|<img src=x onerror=1>]]', '[[<b>|t]]', '**[[a]]** [l]([[a]])', '[[a]]]]', '[[[[a]]]]']) {

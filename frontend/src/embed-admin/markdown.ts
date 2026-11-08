@@ -45,6 +45,21 @@ interface WikiLinkToken {
 /** Set only for the duration of one synchronous parse. */
 let wikiLinks: ReadonlySet<string> | null = null
 
+// A GFM table splits its row on every unescaped `|` before inline extensions run, so `[[slug|text]]` in a cell would
+// be cut in two (Codex c-r1 C1). In wiki content the first bar inside `[[…]]` is escaped first: a table cell turns
+// `\|` back into `|`, other inline text reads it as an escape, and code and raw HTML (shown as text) get the bar back.
+const WIKI_BAR = /\[\[([^[\]\n|]{1,512})\|(?=[^[\]\n]{0,512}\]\])/g
+const WIKI_BAR_ESCAPED = /\[\[([^[\]\n|]{1,512})\\\|(?=[^[\]\n]{0,512}\]\])/g
+
+function protectWikiBars(src: string): string {
+  return src.replace(WIKI_BAR, '[[$1\\|')
+}
+
+/** Undoes protectWikiBars where text is shown verbatim (code, raw HTML). Outside wiki content: unchanged. */
+function verbatim(s: string): string {
+  return wikiLinks ? s.replace(WIKI_BAR_ESCAPED, '[[$1|') : s
+}
+
 function build(labels: MarkdownLabels): Marked {
   const m = new Marked({ gfm: true, breaks: false, async: false })
   m.use({
@@ -60,9 +75,9 @@ function build(labels: MarkdownLabels): Marked {
           const match = /^\[\[([^[\]\n]{1,512})\]\]/.exec(src)
           if (!match) return undefined
           const inner = match[1]
-          const bar = inner.indexOf('|')
-          const slug = (bar > 0 ? inner.slice(0, bar) : inner).trim()
-          const text = (bar > 0 ? inner.slice(bar + 1) : inner).trim() || slug
+          const bar = /\\?\|/.exec(inner)
+          const slug = (bar && bar.index > 0 ? inner.slice(0, bar.index) : inner).trim()
+          const text = (bar && bar.index > 0 ? inner.slice(bar.index + bar[0].length) : inner).trim() || slug
           return { type: 'wikilink', raw: match[0], slug, text }
         },
         renderer(token) {
@@ -77,7 +92,7 @@ function build(labels: MarkdownLabels): Marked {
     ],
     renderer: {
       html(token: Tokens.HTML | Tokens.Tag): string {
-        return escapeHtml(token.text)
+        return escapeHtml(verbatim(token.text))
       },
       link(token: Tokens.Link): string {
         const inner = this.parser.parseInline(token.tokens)
@@ -97,7 +112,10 @@ function build(labels: MarkdownLabels): Marked {
         return escapeHtml(token.text)
       },
       code(token: Tokens.Code): string {
-        return `<pre><code>${escapeHtml(token.text.replace(/\n$/, '') + '\n')}</code></pre>\n`
+        return `<pre><code>${escapeHtml(verbatim(token.text).replace(/\n$/, '') + '\n')}</code></pre>\n`
+      },
+      codespan(token: Tokens.Codespan): string {
+        return `<code>${escapeHtml(verbatim(token.text))}</code>`
       },
       tablecell(token: Tokens.TableCell): string {
         const tag = token.header ? 'th' : 'td'
@@ -120,7 +138,7 @@ export function renderMarkdown(text: string, labels: MarkdownLabels, opts: Markd
   }
   wikiLinks = opts.wikiLinks ?? null
   try {
-    return m.parse(text) as string
+    return m.parse(wikiLinks ? protectWikiBars(text) : text) as string
   } catch {
     return `<p>${escapeHtml(text)}</p>`
   } finally {

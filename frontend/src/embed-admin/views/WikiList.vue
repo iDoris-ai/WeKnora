@@ -4,6 +4,7 @@ import { ref, watch } from 'vue'
 import { listWikiPages, type Page, type WikiListItem } from '../api'
 import { formatDate, msg, type MessageKey } from '../i18n'
 import { loads } from '../page'
+import { emptyKind } from './docStatus'
 import PagerBar from './PagerBar.vue'
 
 const props = defineProps<{ kbId: string; page: number }>()
@@ -38,7 +39,7 @@ watch(() => [props.kbId, props.page] as const, ([kbId, page]) => void load(kbId,
   <div>
     <p v-if="loading" class="ea-muted">{{ msg('state.loading') }}</p>
     <p v-else-if="error" class="ea-error" role="alert">{{ msg(error) }}</p>
-    <p v-else-if="data && data.items.length === 0" class="ea-muted">{{ msg('wiki.empty') }}</p>
+    <p v-else-if="data && emptyKind(data) === 'none'" class="ea-muted">{{ msg('wiki.empty') }}</p>
     <template v-else-if="data">
       <ul class="ea-rows">
         <li v-for="w in data.items" :key="w.slug">
@@ -52,6 +53,7 @@ watch(() => [props.kbId, props.page] as const, ([kbId, page]) => void load(kbId,
           </button>
         </li>
       </ul>
+      <p v-if="emptyKind(data) === 'beyond'" class="ea-muted">{{ msg('pager.beyond') }}</p>
       <PagerBar :page="data.page" :page-size="data.pageSize" :total="data.total" @go="(p) => emit('page', p)" />
     </template>
   </div>
