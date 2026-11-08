@@ -3,20 +3,24 @@
 // scripts namespace, not part of the product image.
 //
 // It runs with the app's own environment (database, Redis, storage, tag key, policy), for example as a one-off
-// app container. It always runs in integration mode, so it starts no background work and never processes a task
-// itself: the standalone worker does.
+// app container; ENV_FILE is loaded first. It always runs in integration mode and never migrates (AUTO_MIGRATE is
+// forced off), so it consumes no task and runs no ingest work: the standalone worker does. Building the
+// integration-mode container still ensures the jti revocation and UI session tables and purges their expired rows,
+// as the integration instance does on the same database.
 //
 //	ingestprobe submit  --key-file FILE --kb KB_ID --file PATH [--name NAME] [--knowledge KNOWLEDGE_ID] [--sha256 HEX]
 //	ingestprobe status  --tenant TENANT_ID --job JOB_ID
 //	ingestprobe workers
 //
-// submit reads a tenant API key from FILE (mode 0600 or stricter; the key is never printed), checks it the way an
-// ingest route would (tenant key, not full access, ingest capability, the target knowledge base in its non-empty
-// allow-list), applies the W5.2 format and size checks, then runs Prepare, Stage and Dispatch. status and workers
-// are read-only and never read a key: status reconciles and prints one job with its knowledge's parse_status,
-// workers lists live asynq servers and the default queue.
+// submit reads a tenant API key from FILE (a regular file, mode 0600 or stricter; the key is never printed) and
+// answers in the order an ingest route would (CONTRACT-OPS-v2 W1.9): the credential, then its scope (tenant key, not
+// full access, ingest capability, the target knowledge base in its non-empty allow-list), then the W5.2 format and
+// size checks; a refusal writes nothing. It then runs Prepare, Stage and Dispatch. status and workers never read a
+// key: status reconciles one job first (the same write the standalone sweep makes) and prints it with its
+// knowledge's parse_status; workers lists live asynq servers and the default queue and writes nothing.
 //
-// Output is one JSON object on stdout. Exit status: 0 done, 2 refused (the JSON says why), 1 any other error.
+// Output is one JSON object on stdout; logs go to stderr. Exit status: 0 done, 2 refused (the JSON says why), 1 any
+// other error.
 package main
 
 import (
@@ -57,12 +61,20 @@ type refusal struct {
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	// the JSON goes to the real stdout; anything the app writes to os.Stdout (logs) goes to stderr
+	out := os.Stdout
+	os.Stdout = os.Stderr
+	os.Exit(run(os.Args[1:], out, os.Stderr))
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, "usage: ingestprobe submit|status|workers [flags]")
+		return 1
+	}
+	// before any environment read (tag key, REDIS_ADDR)
+	if err := envfile.Load(false); err != nil {
+		_, _ = fmt.Fprintln(stderr, "ingestprobe:", err)
 		return 1
 	}
 	var out any
@@ -97,13 +109,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 // buildContainer builds the app container in integration mode: the probe must not consume tasks or run any
 // background job (A24-KB-30).
 func buildContainer() (*dig.Container, error) {
-	if err := envfile.Load(false); err != nil {
-		return nil, err
-	}
 	if err := os.Setenv(handler.Agent24KnowledgeModeEnv, handler.Agent24KnowledgeModeIntegration); err != nil {
 		return nil, err
 	}
+	if err := os.Setenv("AUTO_MIGRATE", "false"); err != nil {
+		return nil, err
+	}
 	logger.ConfigureFromEnv()
+	logger.SetOutput(os.Stderr)
 	return container.BuildContainer(runtime.GetContainer()), nil
 }
 
@@ -134,14 +147,23 @@ func parseSubmit(args []string) (submitFlags, error) {
 
 // readKeyFile refuses a key file that group or others can read: the probe key must stay on the operator's side.
 func readKeyFile(path string) (string, error) {
-	st, err := os.Stat(path)
+	f, err := os.Open(path) //nolint:gosec // the operator names the key file
 	if err != nil {
 		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	// checked on the open file, so a file swapped after the check is not the one read
+	st, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("key file %s is not a regular file", path)
 	}
 	if st.Mode().Perm()&0o077 != 0 {
 		return "", fmt.Errorf("key file %s must not be readable by group or others (mode %o)", path, st.Mode().Perm())
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := io.ReadAll(io.LimitReader(f, 4096))
 	if err != nil {
 		return "", err
 	}
@@ -150,6 +172,25 @@ func readKeyFile(path string) (string, error) {
 		return "", errors.New("key file is empty")
 	}
 	return key, nil
+}
+
+// probeAdmission is the first refusal an ingest route would answer, in the W1.9 order: ① the credential
+// (authentication failed: unknown, revoked or expired), ③ its scope, ⑤ the W5.2 format and size checks. It is ""
+// when the submission may go on. Nothing has been written when it refuses.
+func probeAdmission(key *types.TenantAPIKey, authErr error, kb, name string, size int) string {
+	if authErr != nil {
+		return "unauthorized/credential_invalid"
+	}
+	if why := probeScopeRefusal(key, kb); why != "" {
+		return why
+	}
+	if !service.Agent24IngestFormatAllowed(name) {
+		return "invalid_request/unsupported_format"
+	}
+	if service.Agent24IngestTooLarge(size) {
+		return "invalid_request/too_large"
+	}
+	return ""
 }
 
 // probeScopeRefusal is what an ingest route would answer for this key and target before any write
@@ -192,13 +233,6 @@ func submit(args []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// W5.2: refused before anything is saved or a job exists
-	if !service.Agent24IngestFormatAllowed(f.name) {
-		return refusal{"invalid_request/unsupported_format"}, errRefused
-	}
-	if service.Agent24IngestTooLarge(len(content)) {
-		return refusal{"invalid_request/too_large"}, errRefused
-	}
 	declared := f.sha
 	if declared == "" {
 		sum := sha256.Sum256(content)
@@ -219,11 +253,7 @@ func submit(args []string) (any, error) {
 	) error {
 		ctx := context.Background()
 		key, kerr := keys.AuthenticateAPIKey(ctx, rawKey)
-		if kerr != nil {
-			out = refusal{"unauthorized/credential_invalid"}
-			return errRefused
-		}
-		if why := probeScopeRefusal(key, f.kb); why != "" {
+		if why := probeAdmission(key, kerr, f.kb, f.name, len(content)); why != "" {
 			out = refusal{why}
 			return errRefused
 		}
@@ -285,7 +315,12 @@ func runSubmit(
 	res := submitResult{
 		JobID: job.ID, KnowledgeID: k.ID, Status: string(job.Status), SourceRevision: job.SourceRevision,
 	}
-	if derr := ingest.Dispatch(ctx, job, k, prep); derr != nil {
+	switch derr := ingest.Dispatch(ctx, job, k, prep); {
+	case errors.Is(derr, service.ErrAgent24JobSuperseded):
+		// a newer revision of the same document was staged first; it owns the document now
+		res.Status = string(types.Agent24JobCancelled)
+		res.DispatchError = "superseded"
+	case derr != nil:
 		res.Status = string(types.Agent24JobFailed)
 		res.DispatchError = "enqueue_failed"
 	}

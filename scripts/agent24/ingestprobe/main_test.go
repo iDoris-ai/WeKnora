@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,20 +55,38 @@ func TestProbeScopeRefusal(t *testing.T) {
 	require.Equal(t, "unauthorized/credential_invalid", probeScopeRefusal(nil, "k2"))
 }
 
-func TestSubmitRefusesFormatAndSizeBeforeAnyWrite(t *testing.T) {
-	dir := t.TempDir()
-	keyFile := filepath.Join(dir, "key")
-	require.NoError(t, os.WriteFile(keyFile, []byte("sk-test"), 0o600))
-	doc := filepath.Join(dir, "a.pdf")
-	require.NoError(t, os.WriteFile(doc, []byte("%PDF"), 0o600))
-	big := filepath.Join(dir, "big.md")
-	require.NoError(t, os.WriteFile(big, bytes.Repeat([]byte("x"), 10<<20+1), 0o600))
-	for file, want := range map[string]string{doc: "unsupported_format", big: "too_large"} {
-		var out, errOut bytes.Buffer
-		code := run([]string{"submit", "--key-file", keyFile, "--kb", "k2", "--file", file}, &out, &errOut)
-		require.Equal(t, 2, code, errOut.String())
-		require.Contains(t, out.String(), "invalid_request/"+want)
+// The refusals come in the order an ingest route answers (W1.9): the credential, its scope, then format and size.
+func TestProbeAdmissionOrder(t *testing.T) {
+	tenant := uint64(7)
+	good := &types.TenantAPIKey{
+		ID: 1, TenantID: &tenant, ScopeType: types.APIKeyScopeTenant,
+		KnowledgeBaseIDs: types.StringArray{"k2"}, Capabilities: types.StringArray{"ingest"},
 	}
+	noIngest := *good
+	noIngest.Capabilities = types.StringArray{"retrieve"}
+	big := 10<<20 + 1
+	for _, tc := range []struct {
+		key     *types.TenantAPIKey
+		authErr error
+		name    string
+		size    int
+		want    string
+	}{
+		{nil, errors.New("revoked"), "a.pdf", 1, "unauthorized/credential_invalid"},
+		{&noIngest, nil, "a.md", big, "forbidden/operation_not_allowed"},
+		{good, nil, "a.pdf", big, "invalid_request/unsupported_format"},
+		{good, nil, "a.md", big, "invalid_request/too_large"},
+		{good, nil, "a.md", 10 << 20, ""},
+	} {
+		require.Equal(t, tc.want, probeAdmission(tc.key, tc.authErr, "k2", tc.name, tc.size), tc)
+	}
+}
+
+func TestReadKeyFileRefusesANonRegularFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keydir")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	_, err := readKeyFile(dir)
+	require.ErrorContains(t, err, "not a regular file")
 }
 
 func TestUsageAndReadOnlyCommandsTakeNoKey(t *testing.T) {
