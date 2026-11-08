@@ -213,3 +213,26 @@ func TestAgent24IngestJobListAndPurge(t *testing.T) {
 		require.NotNil(t, got, id)
 	}
 }
+
+// A job a worker or the sweep moved between the supersede's read and its conditional write fails the supersede, so
+// the caller's transaction rolls back instead of leaving two occupying jobs.
+func TestAgent24IngestJobSupersedeLosesARaceAndRollsBack(t *testing.T) {
+	db, store := agent24IngestJobDB(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(agent24TestJob("saved", "k", types.Agent24JobSaved, t0)).Error)
+	raced := false
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("agent24_race", func(d *gorm.DB) {
+		if raced || d.Statement.Table != "agent24_ingest_jobs" {
+			return
+		}
+		raced = true
+		d.Session(&gorm.Session{NewDB: true}).Exec(
+			"UPDATE agent24_ingest_jobs SET status = ? WHERE id = ?", types.Agent24JobProcessing, "saved")
+	}))
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return store.SupersedeForKnowledge(ctx, tx, 1, "k", t0.Add(time.Minute))
+	})
+	require.ErrorIs(t, err, ErrAgent24JobChanged)
+	require.True(t, raced)
+}

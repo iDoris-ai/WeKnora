@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 type agent24FakePolicy struct {
@@ -366,6 +367,46 @@ func TestAgent24StageGateRunsBeforePostProcessFinalizes(t *testing.T) {
 	require.Equal(t, types.ParseStatusCancelled, h.knowledge(t).ParseStatus)
 	require.Equal(t, types.Agent24JobCancelRevoked, h.jobRow(t).CancelReason)
 	require.Empty(t, events, "no subtask enqueued")
+}
+
+type agent24ChunkProbe struct {
+	interfaces.ChunkRepository
+	listed bool
+}
+
+var errAgent24ChunkProbe = errors.New("chunk listing reached")
+
+func (c *agent24ChunkProbe) ListChunksByKnowledgeIDAndTypes(
+	context.Context, uint64, string, []types.ChunkType,
+) ([]*types.Chunk, error) {
+	c.listed = true
+	return nil, errAgent24ChunkProbe
+}
+
+// The post-process hook takes an activated build with no occupying job on to its enrichment (a retried
+// post-process); the worker-entry version of the gate would stop it.
+func TestAgent24PostProcessGoesOnForAnActivatedBuild(t *testing.T) {
+	h := newAgent24GateHarness(t)
+	h.job(t, types.Agent24JobIndexed, types.Agent24JobOpIngestSubmit)
+	require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
+		Update("parse_status", types.ParseStatusFinalizing).Error)
+	chunks := &agent24ChunkProbe{}
+	svc := &KnowledgePostProcessService{
+		knowledgeRepo: repository.NewKnowledgeRepository(h.db),
+		kbService: &agent24PostProcessKBs{
+			reparseFailureKBService{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}},
+		},
+		chunkRepo:    chunks,
+		taskEnqueuer: &replaceFileEnqueuer{events: &[]string{}},
+	}
+	payload, err := json.Marshal(types.KnowledgePostProcessPayload{
+		TenantID: 7, KnowledgeID: "k-1", KnowledgeBaseID: "kb-1",
+	})
+	require.NoError(t, err)
+	err = svc.Handle(h.ctx, asynq.NewTask(types.TypeKnowledgePostProcess, payload))
+	require.ErrorIs(t, err, errAgent24ChunkProbe)
+	require.True(t, chunks.listed, "the post-process went past the gate")
+	require.Equal(t, types.ParseStatusFinalizing, h.knowledge(t).ParseStatus)
 }
 
 type agent24CtxTracker struct {

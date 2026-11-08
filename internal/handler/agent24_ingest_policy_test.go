@@ -83,6 +83,16 @@ func TestAgent24IngestPolicy(t *testing.T) {
 	require.NoError(t, p.AllowIngest(ctx, &keyword), "the listed destination allows a keyword KB")
 	require.ErrorIs(t, p.AllowIngest(ctx, &noModel), service.ErrAgent24PolicyDenied)
 
+	// the embedding guard is the loaded policy; an unreadable policy refuses everything
+	set(`{"version":`)
+	g := p.EmbeddingGuard()
+	require.NotNil(t, g)
+	require.ErrorIs(t, g.Allow(ctx, types.ProcessingDestination{}), types.ErrProcessingDenied)
+	set(`{"version":"v","destinations":[{"category":"embedding",` +
+		`"endpoint":"https://agent24-unresolvable.invalid:443",` +
+		`"model":"text-embedding-3-small"}],"budget":{"max_external_calls":4,"max_input_bytes":65536,` +
+		`"max_inflight_external":8}}`)
+
 	// a model row that cannot be read is retried, not a denial
 	failing := NewAgent24IngestPolicy(agent24FailingModels{})
 	err := failing.AllowIngest(ctx, kb)
