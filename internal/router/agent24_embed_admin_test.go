@@ -30,6 +30,7 @@ func agent24EmbedAdminFixture(t *testing.T) string {
 	base := t.TempDir()
 	dir := filepath.Join(base, "dist")
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "assets", "sub"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "assets", "d.js"), 0o755)) // a directory with a served extension
 	write := func(name, body string) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
 	}
@@ -165,6 +166,7 @@ func TestAgent24EmbedAdminAssets(t *testing.T) {
 		"/embed-admin/assets/",
 		"/embed-admin/assets/missing.js",
 		"/embed-admin/assets/sub",                // a directory
+		"/embed-admin/assets/d.js",               // a directory named like a served file
 		"/embed-admin/assets/sub/y.js",           // not directly under assets/
 		"/embed-admin/assets/sub%2Fy.js",         // encoded separator
 		"/embed-admin/assets/sub%5Cy.js",         // encoded backslash
@@ -225,7 +227,12 @@ func TestInstallAgent24IntegrationModeRejectsInvalidEmbedAdminDir(t *testing.T) 
 		err := installAgent24IntegrationMode(gin.New(), cfg)
 		require.ErrorContains(t, err, handler.Agent24KnowledgeEmbedAdminDirEnv, v)
 	}
-	agent24EmbedAdminFixture(t)
+	// A relative path is refused even when it names a valid directory.
+	dir := agent24EmbedAdminFixture(t)
+	t.Chdir(filepath.Dir(dir))
+	t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, filepath.Base(dir))
+	require.ErrorContains(t, installAgent24IntegrationMode(gin.New(), cfg), handler.Agent24KnowledgeEmbedAdminDirEnv)
+	t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, dir)
 	require.NoError(t, installAgent24IntegrationMode(gin.New(), cfg))
 	t.Setenv(handler.Agent24KnowledgeEmbedAdminDirEnv, "")
 	require.NoError(t, installAgent24IntegrationMode(gin.New(), cfg))
