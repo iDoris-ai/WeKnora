@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// Agent24 fork A24-KB-39 (KB-C2-02a/b, WeKnora#134). kb.get, then one tab: documents (list or one document with
-// its chunks) or tags. What is shown lives in the query (tab, doc, page): the server answers only
+// Agent24 fork A24-KB-39 (KB-C2-02a/b/c, WeKnora#134). kb.get, then one tab: documents (list or one document with
+// its chunks), tags, or wiki (list or one page; only when the base has wiki). What is shown lives in the query
+// (tab, doc, slug, page): the server answers only
 // /embed-admin/knowledge-bases[/:kb_id], so a reload must stay on that path. The tab loads after the knowledge
 // base, so one load reports to the bridge at a time.
 import { computed, ref, watch } from 'vue'
@@ -13,6 +14,8 @@ import DocumentList from './DocumentList.vue'
 import { pageParam } from './docStatus'
 import { typeKey } from './kbType'
 import TagList from './TagList.vue'
+import WikiList from './WikiList.vue'
+import WikiPageView from './WikiPageView.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,7 +24,12 @@ const kb = ref<KnowledgeBase | null>(null)
 const error = ref<MessageKey | null>(null)
 
 const kbId = computed(() => (typeof route.params.kbId === 'string' ? route.params.kbId : ''))
-const tab = computed(() => (route.query.tab === 'tags' ? 'tags' : 'documents'))
+const tab = computed(() => {
+  if (route.query.tab === 'tags') return 'tags'
+  if (route.query.tab === 'wiki' && kb.value?.wiki_enabled) return 'wiki'
+  return 'documents'
+})
+const slug = computed(() => (typeof route.query.slug === 'string' ? route.query.slug : ''))
 const docId = computed(() => (typeof route.query.doc === 'string' && route.query.doc !== '' ? route.query.doc : ''))
 const page = computed(() => pageParam(route.query.page))
 
@@ -80,8 +88,28 @@ watch(
         <button type="button" role="tab" :aria-selected="tab === 'tags'" @click="show({ tab: 'tags' })">
           {{ msg('tab.tags') }}
         </button>
+        <button v-if="kb.wiki_enabled" type="button" role="tab" :aria-selected="tab === 'wiki'" @click="show({ tab: 'wiki' })">
+          {{ msg('tab.wiki') }}
+        </button>
       </nav>
-      <TagList v-if="tab === 'tags'" :kb-id="kb.id" :page="page" @page="(p) => show({ tab: 'tags', page: String(p) })" />
+      <template v-if="tab === 'wiki'">
+        <WikiPageView
+          v-if="slug"
+          :kb-id="kb.id"
+          :slug="slug"
+          @back="show({ tab: 'wiki' })"
+          @wiki="(s) => show({ tab: 'wiki', slug: s })"
+          @doc="(id) => show({ doc: id })"
+        />
+        <WikiList
+          v-else
+          :kb-id="kb.id"
+          :page="page"
+          @open="(s) => show({ tab: 'wiki', slug: s })"
+          @page="(p) => show({ tab: 'wiki', page: String(p) })"
+        />
+      </template>
+      <TagList v-else-if="tab === 'tags'" :kb-id="kb.id" :page="page" @page="(p) => show({ tab: 'tags', page: String(p) })" />
       <DocumentDetail
         v-else-if="docId"
         :kb-id="kb.id"

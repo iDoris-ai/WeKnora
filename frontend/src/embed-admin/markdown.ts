@@ -4,15 +4,18 @@
 // An image is a text placeholder: nothing is fetched (no file proxy, no resource scheme, no remote URL, no data:).
 // Code blocks carry no language class. Mermaid, KaTeX and highlighting are not in this version.
 // The view still passes the result through DOMPurify with the same allowlist (MarkdownBlock.vue).
+// KB-C2-02c: `[[slug]]` and `[[slug|text]]` in wiki content. A slug in the page's own out_links (published in this
+// knowledge base) becomes <span class="ea-md-wiki" data-slug="…">, which the view turns into an in-page move; any
+// other slug is plain text. Outside wiki content the brackets stay text.
 
-import { Marked, type Tokens } from 'marked'
+import { Marked, Tokenizer, type Tokens } from 'marked'
 
 /** Every tag the renderer can emit, and the only attributes: `class` with an ea-md- value, `start` on ol. */
 export const SAFE_TAGS = [
   'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'strong', 'em', 'del', 'code', 'pre',
   'blockquote', 'hr', 'br', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span',
 ] as const
-export const SAFE_ATTRS = ['class', 'start'] as const
+export const SAFE_ATTRS = ['class', 'start', 'data-slug'] as const
 
 export function escapeHtml(s: string): string {
   return s
@@ -27,9 +30,79 @@ export interface MarkdownLabels {
   image: string
 }
 
+export interface MarkdownOptions {
+  /** Wiki content: the slugs that may become links. Absent: `[[…]]` stays text. */
+  wikiLinks?: ReadonlySet<string>
+}
+
+interface WikiLinkToken {
+  type: 'wikilink'
+  raw: string
+  slug: string
+  text: string
+}
+
+/** Set only for the duration of one synchronous parse. */
+let wikiLinks: ReadonlySet<string> | null = null
+
+// A GFM table splits its row on every unescaped `|` before inline extensions run, so `[[slug|text]]` in a cell would
+// be cut in two (Codex c-r1 C1). In wiki content only, and only for the table tokenizer, every `|` inside `[[…]]`
+// is replaced by BAR_MASK (one UTF-16 unit, so lengths and `raw` are unchanged) before the default table tokenizer
+// runs; the wikilink tokenizer accepts it as the separator and the final HTML turns any left over back into `|`.
+// Nothing outside tables is rewritten.
+const BAR_MASK = '\uE000'
+const WIKI_SPAN = /\[\[[^[\]\n]{1,512}\]\]/g
+
+function maskWikiBars(src: string): string {
+  return src.replace(WIKI_SPAN, (w) => w.replaceAll('|', BAR_MASK))
+}
+
 function build(labels: MarkdownLabels): Marked {
   const m = new Marked({ gfm: true, breaks: false, async: false })
   m.use({
+    extensions: [
+      {
+        name: 'wikilink',
+        level: 'inline',
+        start(src: string) {
+          const i = src.indexOf('[[')
+          return i < 0 ? undefined : i
+        },
+        tokenizer(src: string): WikiLinkToken | undefined {
+          const match = /^\[\[([^[\]\n]{1,512})\]\]/.exec(src)
+          if (!match) return undefined
+          const inner = match[1]
+          const bar = /\\?[|\uE000]/.exec(inner)
+          const slug = (bar && bar.index > 0 ? inner.slice(0, bar.index) : inner).trim()
+          const text = (bar && bar.index > 0 ? inner.slice(bar.index + bar[0].length) : inner).trim() || slug
+          return { type: 'wikilink', raw: match[0], slug, text }
+        },
+        renderer(token) {
+          const t = token as unknown as WikiLinkToken
+          if (!wikiLinks) return escapeHtml(t.raw)
+          if (t.slug !== '' && wikiLinks.has(t.slug)) {
+            return `<span class="ea-md-wiki" data-slug="${escapeHtml(t.slug)}">${escapeHtml(t.text)}</span>`
+          }
+          return `<span class="ea-md-nolink">${escapeHtml(t.text)}</span>`
+        },
+      },
+    ],
+    tokenizer: {
+      table(this: Tokenizer, src: string): Tokens.Table | undefined | false {
+        if (!wikiLinks) return false
+        // Only the table marked's own rule matches here is looked at and masked, so each block position costs what
+        // the default tokenizer costs (Codex c-r3 C1: scanning the rest of the input made long wiki pages quadratic).
+        // Masking never adds a line or a bar, so the masked table is no longer than this match.
+        const cap = this.rules.block.table.exec(src)
+        if (!cap || !cap[0].includes('[[')) return false
+        return Tokenizer.prototype.table.call(this, maskWikiBars(cap[0]) + src.slice(cap[0].length))
+      },
+    },
+    hooks: {
+      postprocess(html: string): string {
+        return wikiLinks ? html.replaceAll(BAR_MASK, '|') : html
+      },
+    },
     renderer: {
       html(token: Tokens.HTML | Tokens.Tag): string {
         return escapeHtml(token.text)
@@ -66,16 +139,19 @@ function build(labels: MarkdownLabels): Marked {
 const cache = new Map<string, Marked>()
 
 /** HTML for one piece of markdown. Never throws: on a parser error the text is shown escaped. */
-export function renderMarkdown(text: string, labels: MarkdownLabels): string {
+export function renderMarkdown(text: string, labels: MarkdownLabels, opts: MarkdownOptions = {}): string {
   const key = labels.image
   let m = cache.get(key)
   if (!m) {
     m = build(labels)
     cache.set(key, m)
   }
+  wikiLinks = opts.wikiLinks ?? null
   try {
     return m.parse(text) as string
   } catch {
     return `<p>${escapeHtml(text)}</p>`
+  } finally {
+    wikiLinks = null
   }
 }

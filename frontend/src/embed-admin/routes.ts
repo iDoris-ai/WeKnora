@@ -9,15 +9,30 @@ export const UI_ROUTES = {
   docList: '/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/documents',
   docGet: '/api/v1/agent24/knowledge/ui/documents/:knowledge_id',
   chunkList: '/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks',
+  wikiList: '/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/wiki/pages',
+  wikiGet: '/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/wiki/pages/*slug',
 } as const
 
 export type UIRouteTemplate = (typeof UI_ROUTES)[keyof typeof UI_ROUTES]
 
-/** Fills `:name` segments, each value encoded as one segment. A missing or empty value throws. */
+export class RouteParamError extends Error {}
+
+/** A dot segment would be removed by URL parsing (`%2E` too), so the request would reach another entry. */
+function segment(v: string, name: string): string {
+  if (v === '' || v === '.' || v === '..') throw new RouteParamError(`bad route parameter ${name}`)
+  return encodeURIComponent(v)
+}
+
+/**
+ * Fills `:name` with one encoded segment and a final `*name` with a slash-separated value, each part encoded on its
+ * own and the slashes kept (design §9: the host injects no session for `%2F`, the wiki root or an empty slug).
+ * An empty value, an empty part, and a `.` or `..` part throw RouteParamError: nothing is requested.
+ */
 export function uiPath(template: UIRouteTemplate, params: Record<string, string> = {}): string {
-  return template.replace(/:([a-z_]+)/g, (_m, name: string) => {
+  return template.replace(/([:*])([a-z_]+)/g, (_m, kind: string, name: string) => {
     const v = params[name]
-    if (typeof v !== 'string' || v === '') throw new Error(`missing route parameter ${name}`)
-    return encodeURIComponent(v)
+    if (typeof v !== 'string') throw new RouteParamError(`missing route parameter ${name}`)
+    if (kind === ':') return segment(v, name)
+    return v.split('/').map((part) => segment(part, name)).join('/')
   })
 }

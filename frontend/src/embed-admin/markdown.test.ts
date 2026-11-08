@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { escapeHtml, renderMarkdown, SAFE_ATTRS, SAFE_TAGS } from './markdown.ts'
+import { escapeHtml, type MarkdownOptions, renderMarkdown, SAFE_ATTRS, SAFE_TAGS } from './markdown.ts'
 
 const LABELS = { image: 'IMG' }
 const TAGS = new Set<string>(SAFE_TAGS)
@@ -21,6 +21,7 @@ function assertSafe(html: string, input: string): void {
       const [, name, value] = a
       assert.ok(ATTRS.has(name), `${where}: attribute ${name} in ${html}`)
       if (name === 'class') assert.match(value ?? '', /^ea-md-[a-z]+$/, where)
+      if (name === 'data-slug') assert.match(m[0], /^<span class="ea-md-wiki" data-slug="[^"]*">$/, where)
       if (name === 'start') {
         assert.equal(tag, 'ol', where)
         assert.match(value ?? '', /^\d{1,9}$/, where)
@@ -115,4 +116,90 @@ test('random mixes of hostile fragments stay safe', () => {
 
 test('escapeHtml escapes the five characters', () => {
   assert.equal(escapeHtml(`<a href="x" title='y'>&</a>`), '&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;&amp;&lt;/a&gt;')
+})
+
+// KB-C2-02c: wiki links.
+test('wiki links: only slugs in the set become links, everything else is text', () => {
+  const set = new Set(['entity/acme-corp', 'b"><script>'])
+  const out = renderMarkdown('see [[entity/acme-corp|Acme]] and [[missing]] and [[b"><script>]] [[ |x]]', LABELS, { wikiLinks: set })
+  assert.match(out, /<span class="ea-md-wiki" data-slug="entity\/acme-corp">Acme<\/span>/)
+  assert.match(out, /<span class="ea-md-nolink">missing<\/span>/)
+  assert.match(out, /<span class="ea-md-wiki" data-slug="b&quot;&gt;&lt;script&gt;">b&quot;&gt;&lt;script&gt;<\/span>/)
+  assert.match(out, /<span class="ea-md-nolink">x<\/span>/)
+  assertSafe(out, 'wiki links')
+})
+
+test('outside wiki content the brackets stay text', () => {
+  assert.equal(renderMarkdown('[[a|b]]', LABELS), '<p>[[a|b]]</p>\n')
+})
+
+test('the wiki link set does not leak into the next render', () => {
+  renderMarkdown('[[a]]', LABELS, { wikiLinks: new Set(['a']) })
+  assert.equal(renderMarkdown('[[a]]', LABELS), '<p>[[a]]</p>\n')
+})
+
+test('a wiki link with text inside a table cell stays one link (Codex c-r1 C1)', () => {
+  const set = new Set(['entity/acme-corp'])
+  const out = renderMarkdown('| 页面 | 说明 |\n| --- | --- |\n| [[entity/acme-corp|Acme]] | 重要说明 |\n| [[other|别处]] | x |\n', LABELS, {
+    wikiLinks: set,
+  })
+  assert.match(out, /<td><span class="ea-md-wiki" data-slug="entity\/acme-corp">Acme<\/span><\/td>\n<td>重要说明<\/td>/)
+  assert.match(out, /<td><span class="ea-md-nolink">别处<\/span><\/td>\n<td>x<\/td>/)
+  assertSafe(out, 'wiki table')
+})
+
+test('code and raw HTML in wiki content keep the bar as written', () => {
+  const set = new Set(['a'])
+  assert.equal(renderMarkdown('`[[a|b]]`', LABELS, { wikiLinks: set }), '<p><code>[[a|b]]</code></p>\n')
+  assert.equal(renderMarkdown('```\n[[a|b]]\n```', LABELS, { wikiLinks: set }), '<pre><code>[[a|b]]\n</code></pre>\n')
+  assert.equal(renderMarkdown('<div>[[a|b]]</div>', LABELS, { wikiLinks: set }), '&lt;div&gt;[[a|b]]&lt;/div&gt;')
+  assert.equal(renderMarkdown('`[[a|b]]`', LABELS), '<p><code>[[a|b]]</code></p>\n')
+})
+
+test('table cells: an escaped bar, several bars, and an unknown slug (Codex c-r2 C1, C2)', () => {
+  const set = new Set(['a'])
+  const row = (cell: string) => renderMarkdown(`| h | i |\n| - | - |\n| ${cell} | tail |\n`, LABELS, { wikiLinks: set })
+  assert.match(row('[[a\\|b]]'), /<td><span class="ea-md-wiki" data-slug="a">b<\/span><\/td>\n<td>tail<\/td>/)
+  assert.match(row('[[a|b|c]]'), /<td><span class="ea-md-wiki" data-slug="a">b\|c<\/span><\/td>\n<td>tail<\/td>/)
+  assert.match(row('`[[a|b]]`'), /<td><code>\[\[a\|b\]\]<\/code><\/td>\n<td>tail<\/td>/)
+  assert.match(row('x [[a|b]] y [[z|w]]'), /<td>x <span class="ea-md-wiki" data-slug="a">b<\/span> y <span class="ea-md-nolink">w<\/span><\/td>/)
+  assert.equal(row('[[a|b]]').includes('\uE000'), false)
+  // A row after the table and plain cells are untouched.
+  assert.match(renderMarkdown('| h |\n| - |\n| a|b |\n', LABELS, { wikiLinks: set }), /<td>a<\/td>/)
+})
+
+test('outside tables nothing is rewritten (Codex c-r2 C3, C4, C5)', () => {
+  const set = new Set(['a', 'x'])
+  const md = (t: string) => renderMarkdown(t, LABELS, { wikiLinks: set })
+  assert.match(md('<https://e.test/[[x|y]]>'), /\(https:\/\/e\.test\/\[\[x\|y\]\]\)/)
+  assert.equal(md('<https://e.test/[[x|y]]>').includes('\\'), false)
+  assert.equal(md('![`[[x|y]]`](i.png)').includes('\\'), false)
+  assert.equal(md('`[[a\n\\|b]]`'), '<p><code>[[a \\|b]]</code></p>\n')
+  const long = 'b'.repeat(510)
+  assert.equal(md(`[[a|${long}]]`), `<p><span class="ea-md-wiki" data-slug="a">${long}</span></p>\n`)
+  assert.equal(md('[[a\\|b]]'), '<p><span class="ea-md-wiki" data-slug="a">b</span></p>\n')
+  assert.equal(renderMarkdown('| h |\n| - |\n| \uE000 |\n', LABELS).includes('\uE000'), true)
+  // Outside wiki content a table is plain GFM: the bar splits the cell as written.
+  assert.match(renderMarkdown('| h | i |\n| - | - |\n| [[a|b]] | tail |\n', LABELS), /<td>\[\[a<\/td>\n<td>b\]\]<\/td>/)
+})
+
+test('long wiki content without blank lines costs about what plain content costs (Codex c-r3 C1)', () => {
+  const text = 'p\n# h\n'.repeat(32000) + '[[a]]\n'
+  const time = (opts: MarkdownOptions) => {
+    const t0 = performance.now()
+    renderMarkdown(text, LABELS, opts)
+    return performance.now() - t0
+  }
+  time({})
+  const plain = time({})
+  const wiki = time({ wikiLinks: new Set(['a']) })
+  // Measured on 192 KB: about 1x here; the version that scanned the rest of the input was about 40x.
+  assert.ok(wiki < plain * 5 + 100, `plain ${plain}ms, wiki ${wiki}ms`)
+})
+
+test('hostile wiki content stays safe', () => {
+  const set = new Set(['a', 'x y', '<b>'])
+  for (const input of [...HOSTILE, '[[a|<img src=x onerror=1>]]', '[[nope|<img src=x onerror=1>]]', '[[<b>]]', '[[<b>|t]]', '**[[a]]** [l]([[a]])', '[[a]]]]', '[[[[a]]]]']) {
+    assertSafe(renderMarkdown(input, LABELS, { wikiLinks: set }), input)
+  }
 })
