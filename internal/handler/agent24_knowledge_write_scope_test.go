@@ -275,3 +275,12 @@ func TestAgent24WriteInScopeMatchesTheAskedKB(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, in)
 }
+
+// The capability document does not change either: with the tag key set it still lists exactly search and read
+// (design §4; a write operation name appears only once KB-SOP-02 enables it and Agent24#1675 has shipped).
+func TestAgent24WriteCapabilitiesLeaveSupportedOperationsUnchanged(t *testing.T) {
+	t.Setenv(Agent24KnowledgeTagKeyEnv, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	ResetAgent24KnowledgeTagKeyForTest()
+	t.Cleanup(ResetAgent24KnowledgeTagKeyForTest)
+	assert.Equal(t, []string{"search", "read"}, BuildAgent24KnowledgeCapability().SupportedOperations)
+}

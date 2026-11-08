@@ -136,6 +136,24 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 			},
 			`"kb-a"`, http.StatusForbidden, nil, nil, "API key scope does not allow this operation",
 		},
+		// A24-KB-40: write capabilities on the key change nothing for search; without retrieve they read nothing.
+		{
+			"write capabilities ride along",
+			types.TenantAPIKeyScope{
+				KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: agent24WriteKeyCaps(retrieve),
+			},
+			`"kb-a","kb-b"`, http.StatusOK,
+			[]string{"kb-a"},
+			[][]string{{"kb-a"}},
+			"",
+		},
+		{
+			"write capabilities only",
+			types.TenantAPIKeyScope{
+				KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: agent24WriteKeyCaps(nil),
+			},
+			`"kb-a"`, http.StatusForbidden, nil, nil, "API key scope does not allow this operation",
+		},
 		{
 			"unrestricted",
 			types.TenantAPIKeyScope{Capabilities: retrieve},
@@ -210,10 +228,23 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 func TestAgent24KnowledgeReadRouteKBAllowList(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	agent24SetTagKey(t, base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	scope := types.TenantAPIKeyScope{
-		KnowledgeBaseIDs: types.StringArray{"kb-a"},
-		Capabilities:     types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+	retrieve := types.StringArray{string(types.APIKeyCapabilityRetrieve)}
+	// A24-KB-40: the same key with every write capability added reads the same, byte for byte.
+	for _, caps := range []types.StringArray{retrieve, agent24WriteKeyCaps(retrieve)} {
+		agent24ReadRouteKBAllowList(t, types.TenantAPIKeyScope{
+			KnowledgeBaseIDs: types.StringArray{"kb-a"}, Capabilities: caps,
+		})
 	}
+}
+
+// agent24WriteKeyCaps is base plus the four A24-KB-40 write capabilities.
+func agent24WriteKeyCaps(base types.StringArray) types.StringArray {
+	return append(append(types.StringArray{}, base...), "kb_candidate_propose", "kb_candidate_review",
+		"kb_candidate_approve", "kb_entry_withdraw")
+}
+
+func agent24ReadRouteKBAllowList(t *testing.T, scope types.TenantAPIKeyScope) {
+	t.Helper()
 	for _, tc := range []struct {
 		name, kbs, knowledge string
 		status               int
