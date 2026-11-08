@@ -7,25 +7,36 @@ import { computed } from 'vue'
 import { msg } from '../i18n'
 import { renderMarkdown, SAFE_ATTRS, SAFE_TAGS } from '../markdown'
 
-const props = defineProps<{ text: string }>()
+const props = defineProps<{ text: string; wikiLinks?: ReadonlySet<string> }>()
+const emit = defineEmits<{ wiki: [slug: string] }>()
 
 const purify = DOMPurify(window)
-purify.addHook('uponSanitizeAttribute', (_node, data) => {
+purify.addHook('uponSanitizeAttribute', (node, data) => {
   if (data.attrName === 'class' && !/^ea-md-[a-z]+$/.test(data.attrValue)) data.keepAttr = false
-  if (data.attrName === 'start' && !/^\d{1,9}$/.test(data.attrValue)) data.keepAttr = false
+  if (data.attrName === 'start' && (node.nodeName !== 'OL' || !/^\d{1,9}$/.test(data.attrValue))) data.keepAttr = false
+  if (data.attrName === 'data-slug' && (node.nodeName !== 'SPAN' || node.getAttribute('class') !== 'ea-md-wiki')) {
+    data.keepAttr = false
+  }
 })
 
 const html = computed(() =>
-  purify.sanitize(renderMarkdown(props.text, { image: msg('md.image') }), {
+  purify.sanitize(renderMarkdown(props.text, { image: msg('md.image') }, { wikiLinks: props.wikiLinks }), {
     ALLOWED_TAGS: [...SAFE_TAGS],
     ALLOWED_ATTR: [...SAFE_ATTRS],
     ALLOW_DATA_ATTR: false,
     ALLOW_ARIA_ATTR: false,
   }),
 )
+
+/** A click on an in-knowledge-base wiki link. The slug is read back from the sanitized DOM, never evaluated. */
+function onClick(e: MouseEvent) {
+  const el = e.target instanceof Element ? e.target.closest('span.ea-md-wiki') : null
+  const slug = el?.getAttribute('data-slug')
+  if (slug && props.wikiLinks?.has(slug)) emit('wiki', slug)
+}
 </script>
 
 <template>
   <!-- eslint-disable-next-line vue/no-v-html -->
-  <div class="ea-md" v-html="html" />
+  <div class="ea-md" v-html="html" @click="onClick" />
 </template>

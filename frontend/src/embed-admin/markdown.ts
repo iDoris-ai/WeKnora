@@ -4,6 +4,9 @@
 // An image is a text placeholder: nothing is fetched (no file proxy, no resource scheme, no remote URL, no data:).
 // Code blocks carry no language class. Mermaid, KaTeX and highlighting are not in this version.
 // The view still passes the result through DOMPurify with the same allowlist (MarkdownBlock.vue).
+// KB-C2-02c: `[[slug]]` and `[[slug|text]]` in wiki content. A slug in the page's own out_links (published in this
+// knowledge base) becomes <span class="ea-md-wiki" data-slug="…">, which the view turns into an in-page move; any
+// other slug is plain text. Outside wiki content the brackets stay text.
 
 import { Marked, type Tokens } from 'marked'
 
@@ -12,7 +15,7 @@ export const SAFE_TAGS = [
   'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'strong', 'em', 'del', 'code', 'pre',
   'blockquote', 'hr', 'br', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span',
 ] as const
-export const SAFE_ATTRS = ['class', 'start'] as const
+export const SAFE_ATTRS = ['class', 'start', 'data-slug'] as const
 
 export function escapeHtml(s: string): string {
   return s
@@ -27,9 +30,51 @@ export interface MarkdownLabels {
   image: string
 }
 
+export interface MarkdownOptions {
+  /** Wiki content: the slugs that may become links. Absent: `[[…]]` stays text. */
+  wikiLinks?: ReadonlySet<string>
+}
+
+interface WikiLinkToken {
+  type: 'wikilink'
+  raw: string
+  slug: string
+  text: string
+}
+
+/** Set only for the duration of one synchronous parse. */
+let wikiLinks: ReadonlySet<string> | null = null
+
 function build(labels: MarkdownLabels): Marked {
   const m = new Marked({ gfm: true, breaks: false, async: false })
   m.use({
+    extensions: [
+      {
+        name: 'wikilink',
+        level: 'inline',
+        start(src: string) {
+          const i = src.indexOf('[[')
+          return i < 0 ? undefined : i
+        },
+        tokenizer(src: string): WikiLinkToken | undefined {
+          const match = /^\[\[([^[\]\n]{1,512})\]\]/.exec(src)
+          if (!match) return undefined
+          const inner = match[1]
+          const bar = inner.indexOf('|')
+          const slug = (bar > 0 ? inner.slice(0, bar) : inner).trim()
+          const text = (bar > 0 ? inner.slice(bar + 1) : inner).trim() || slug
+          return { type: 'wikilink', raw: match[0], slug, text }
+        },
+        renderer(token) {
+          const t = token as unknown as WikiLinkToken
+          if (!wikiLinks) return escapeHtml(t.raw)
+          if (t.slug !== '' && wikiLinks.has(t.slug)) {
+            return `<span class="ea-md-wiki" data-slug="${escapeHtml(t.slug)}">${escapeHtml(t.text)}</span>`
+          }
+          return `<span class="ea-md-nolink">${escapeHtml(t.text)}</span>`
+        },
+      },
+    ],
     renderer: {
       html(token: Tokens.HTML | Tokens.Tag): string {
         return escapeHtml(token.text)
@@ -66,16 +111,19 @@ function build(labels: MarkdownLabels): Marked {
 const cache = new Map<string, Marked>()
 
 /** HTML for one piece of markdown. Never throws: on a parser error the text is shown escaped. */
-export function renderMarkdown(text: string, labels: MarkdownLabels): string {
+export function renderMarkdown(text: string, labels: MarkdownLabels, opts: MarkdownOptions = {}): string {
   const key = labels.image
   let m = cache.get(key)
   if (!m) {
     m = build(labels)
     cache.set(key, m)
   }
+  wikiLinks = opts.wikiLinks ?? null
   try {
     return m.parse(text) as string
   } catch {
     return `<p>${escapeHtml(text)}</p>`
+  } finally {
+    wikiLinks = null
   }
 }

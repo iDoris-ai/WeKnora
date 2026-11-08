@@ -21,6 +21,7 @@ function assertSafe(html: string, input: string): void {
       const [, name, value] = a
       assert.ok(ATTRS.has(name), `${where}: attribute ${name} in ${html}`)
       if (name === 'class') assert.match(value ?? '', /^ea-md-[a-z]+$/, where)
+      if (name === 'data-slug') assert.match(m[0], /^<span class="ea-md-wiki" data-slug="[^"]*">$/, where)
       if (name === 'start') {
         assert.equal(tag, 'ol', where)
         assert.match(value ?? '', /^\d{1,9}$/, where)
@@ -115,4 +116,31 @@ test('random mixes of hostile fragments stay safe', () => {
 
 test('escapeHtml escapes the five characters', () => {
   assert.equal(escapeHtml(`<a href="x" title='y'>&</a>`), '&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;&amp;&lt;/a&gt;')
+})
+
+// KB-C2-02c: wiki links.
+test('wiki links: only slugs in the set become links, everything else is text', () => {
+  const set = new Set(['entity/acme-corp', 'b"><script>'])
+  const out = renderMarkdown('see [[entity/acme-corp|Acme]] and [[missing]] and [[b"><script>]] [[ |x]]', LABELS, { wikiLinks: set })
+  assert.match(out, /<span class="ea-md-wiki" data-slug="entity\/acme-corp">Acme<\/span>/)
+  assert.match(out, /<span class="ea-md-nolink">missing<\/span>/)
+  assert.match(out, /<span class="ea-md-wiki" data-slug="b&quot;&gt;&lt;script&gt;">b&quot;&gt;&lt;script&gt;<\/span>/)
+  assert.match(out, /<span class="ea-md-nolink">x<\/span>/)
+  assertSafe(out, 'wiki links')
+})
+
+test('outside wiki content the brackets stay text', () => {
+  assert.equal(renderMarkdown('[[a|b]]', LABELS), '<p>[[a|b]]</p>\n')
+})
+
+test('the wiki link set does not leak into the next render', () => {
+  renderMarkdown('[[a]]', LABELS, { wikiLinks: new Set(['a']) })
+  assert.equal(renderMarkdown('[[a]]', LABELS), '<p>[[a]]</p>\n')
+})
+
+test('hostile wiki content stays safe', () => {
+  const set = new Set(['a', 'x y', '<b>'])
+  for (const input of [...HOSTILE, '[[a|<img src=x onerror=1>]]', '[[<b>|t]]', '**[[a]]** [l]([[a]])', '[[a]]]]', '[[[[a]]]]']) {
+    assertSafe(renderMarkdown(input, LABELS, { wikiLinks: set }), input)
+  }
 })

@@ -198,6 +198,30 @@ button.ea-back {
 .ea-md-img {
   color: var(--ea-muted);
 }
+.ea-row-summary {
+  display: block;
+  font-size: 12px;
+}
+.ea-md-wiki,
+.ea-link {
+  color: var(--ea-accent);
+  cursor: pointer;
+}
+.ea-link {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+}
+.ea-wiki-rel h3 {
+  font-size: 14px;
+  margin: 16px 0 4px;
+}
+.ea-wiki-rel ul {
+  margin: 0;
+  padding-left: 18px;
+}
 .ea-tag-item {
   display: flex;
   align-items: center;

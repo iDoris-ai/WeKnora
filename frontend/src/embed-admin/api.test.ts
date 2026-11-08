@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
-  ApiError, getDocument, getDocumentIn, getKnowledgeBase, listChunks, listDocuments, listKnowledgeBases, listTags, setFetch,
+  ApiError, getDocument, getDocumentIn, getKnowledgeBase, getWikiPage, listChunks, listDocuments, listKnowledgeBases,
+  listTags, listWikiPages, setFetch,
 } from './api.ts'
 import { UI_ROUTES, uiPath } from './routes.ts'
 
@@ -114,4 +115,36 @@ test('a document of another knowledge base is not_found under this one (Codex b-
   await assert.rejects(getDocumentIn('kbA', 'k1'), (e: unknown) => e instanceof ApiError && e.code === 'not_found')
   fake(200, { document: { knowledge_id: 'k1', knowledge_base_id: 'kbA' } }, seen)
   assert.equal((await getDocumentIn('kbA', 'k1')).knowledge_id, 'k1')
+})
+
+// KB-C2-02c: wiki.
+test('wiki.get keeps the slashes of a slug and encodes each part (no %2F); dot and empty parts request nothing', async () => {
+  const seen: Seen[] = []
+  fake(200, { page: { slug: 'entity/acme-corp', out_links: ['a', 3], in_links: null, aliases: 'x' } }, seen)
+  const p = await getWikiPage('kb1', 'entity/acme corp?')
+  assert.deepEqual([p.out_links, p.in_links, p.aliases, p.source_documents], [['a'], [], [], []])
+  fake(200, { pages: [{ slug: 's' }], total: 1, page: 1, page_size: 20 }, seen)
+  assert.equal((await listWikiPages('kb1', 1)).items.length, 1)
+  assert.deepEqual(seen.map((s) => s.url), [
+    '/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/wiki/pages/entity/acme%20corp%3F',
+    '/api/v1/agent24/knowledge/ui/knowledge-bases/kb1/wiki/pages?page=1',
+  ])
+  assert.equal(seen[0].url.includes('%2F'), false)
+
+  for (const bad of ['', '/a', 'a/', 'a//b', '.', '..', 'a/../b', 'a/./b', '../../tags']) {
+    const before = seen.length
+    await assert.rejects(getWikiPage('kb1', bad), (e: unknown) => e instanceof ApiError && e.code === 'not_found', bad)
+    assert.equal(seen.length, before, bad)
+  }
+  for (const bad of ['.', '..']) {
+    const before = seen.length
+    await assert.rejects(getKnowledgeBase(bad), (e: unknown) => e instanceof ApiError && e.code === 'not_found', bad)
+    assert.equal(seen.length, before, bad)
+  }
+})
+
+test('uiPath: one segment per :param, slash-kept parts for *slug', () => {
+  assert.equal(uiPath(UI_ROUTES.wikiGet, { kb_id: 'k', slug: 'a/b c/%2F' }),
+    '/api/v1/agent24/knowledge/ui/knowledge-bases/k/wiki/pages/a/b%20c/%252F')
+  assert.equal(uiPath(UI_ROUTES.wikiGet, { kb_id: 'k/x', slug: 'a' }), '/api/v1/agent24/knowledge/ui/knowledge-bases/k%2Fx/wiki/pages/a')
 })
