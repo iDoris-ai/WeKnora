@@ -17,9 +17,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-type agent24FakePolicy struct{ err error }
+type agent24FakePolicy struct {
+	err   error
+	guard types.ProcessingGuard
+}
 
 func (p *agent24FakePolicy) AllowIngest(context.Context, *types.KnowledgeBase) error { return p.err }
+
+func (p *agent24FakePolicy) EmbeddingGuard() types.ProcessingGuard { return p.guard }
+
+func (p *agent24FakePolicy) Allow(context.Context, types.ProcessingDestination) error { return p.err }
 
 type agent24GateHarness struct {
 	db     *gorm.DB
@@ -62,7 +69,7 @@ func (h *agent24GateHarness) job(t *testing.T, status types.Agent24JobStatus, op
 	now := time.Now().UTC()
 	j := &types.Agent24IngestJob{
 		ID: "j-1", TenantID: 7, KnowledgeBaseID: "kb-1", KnowledgeID: "k-1", OpClass: op, CredentialID: 45,
-		Status: status, Enrichment: types.Agent24EnrichmentNone, SavedAt: now, UpdatedAt: now,
+		Status: status, Enrichment: types.Agent24EnrichmentNone, Attempt: 1, SavedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, h.db.Create(j).Error)
 	return j.ID
@@ -138,7 +145,8 @@ func TestAgent24StageGateWithoutOccupyingJobStops(t *testing.T) {
 	}
 }
 
-// A build already servable is upstream's: a retried post-process of an activated build finishes its enrichment.
+// A build already servable is upstream's at the post-process boundary (a retried post-process finishes its
+// enrichment); at the worker entry a redelivered document task stops without rebuilding it.
 func TestAgent24StageGateLeavesAnActivatedBuild(t *testing.T) {
 	for _, row := range []string{types.ParseStatusFinalizing, types.ParseStatusCompleted} {
 		h := newAgent24GateHarness(t)
@@ -146,10 +154,43 @@ func TestAgent24StageGateLeavesAnActivatedBuild(t *testing.T) {
 		require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
 			Update("parse_status", row).Error)
 		h.policy.err = ErrAgent24PolicyDenied // not consulted: no job is in flight
-		aborted, _ := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		aborted, _ := agent24PostProcessGateAborts(h.ctx, h.knowledge(t))
 		require.False(t, aborted, row)
-		require.Equal(t, row, h.knowledge(t).ParseStatus)
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted, row)
+		require.Equal(t, types.ParseStatusCancelled, status)
+		require.Equal(t, row, h.knowledge(t).ParseStatus, "nothing is written")
 	}
+}
+
+// A worker that meets a saved job whose attempt is not recorded runs an older attempt (the job's task is not
+// enqueued yet): it stops, and the job stays saved for its own Dispatch.
+func TestAgent24StageGateStaleWorkerLeavesAnUndispatchedJob(t *testing.T) {
+	h := newAgent24GateHarness(t)
+	h.job(t, types.Agent24JobSaved, types.Agent24JobOpIngestSubmit)
+	require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Where("id = ?", "j-1").Update("attempt", 0).Error)
+	aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+	require.True(t, aborted)
+	require.Equal(t, types.ParseStatusCancelled, status)
+	j := h.jobRow(t)
+	require.Equal(t, types.Agent24JobSaved, j.Status)
+	require.Equal(t, types.ParseStatusPending, h.knowledge(t).ParseStatus)
+}
+
+// An Agent24 ingest's task context carries the policy's embedding guard; without the gate it refuses everything.
+func TestAgent24IngestEmbeddingContext(t *testing.T) {
+	h := newAgent24GateHarness(t)
+	h.policy.guard = &agent24FakePolicy{}
+	k := h.knowledge(t)
+	require.Nil(t, types.ProcessingEmbeddingGuardFromContext(
+		agent24IngestEmbeddingContext(h.ctx, &types.Knowledge{ID: "u"})), "upstream documents get no guard")
+	require.Same(t, h.policy.guard, types.ProcessingEmbeddingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, k)))
+	require.Nil(t, types.ProcessingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, k)),
+		"other model calls of the task see no processing guard")
+
+	agent24Gate.Store(nil)
+	g := types.ProcessingEmbeddingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, k))
+	require.ErrorIs(t, g.Allow(h.ctx, types.ProcessingDestination{}), types.ErrProcessingDenied)
 }
 
 // A gate that read an older job does not stop the knowledge of the revision that superseded it.
@@ -325,4 +366,37 @@ func TestAgent24StageGateRunsBeforePostProcessFinalizes(t *testing.T) {
 	require.Equal(t, types.ParseStatusCancelled, h.knowledge(t).ParseStatus)
 	require.Equal(t, types.Agent24JobCancelRevoked, h.jobRow(t).CancelReason)
 	require.Empty(t, events, "no subtask enqueued")
+}
+
+type agent24CtxTracker struct {
+	noopSpanTracker
+	ctx context.Context
+}
+
+func (t *agent24CtxTracker) LatestAttempt(ctx context.Context, _ string) int {
+	t.ctx = ctx
+	return 3 // the task (attempt 2) is superseded, so ProcessDocument stops right after
+}
+
+// The hook in ProcessDocument: an Agent24 ingest's task context carries the embedding guard from the start of the
+// task; an upstream document's does not.
+func TestAgent24ProcessDocumentCarriesTheEmbeddingGuard(t *testing.T) {
+	h := newAgent24GateHarness(t)
+	h.policy.guard = &agent24FakePolicy{}
+	for _, tc := range []struct {
+		meta  string
+		guard bool
+	}{{agent24GateOrigin, true}, {"", false}} {
+		k := processingKnowledge()
+		k.Metadata = types.JSON(tc.meta)
+		tr := &agent24CtxTracker{}
+		svc := &knowledgeService{
+			repo:        &embedFailureKnowledgeRepo{knowledge: k},
+			tenantRepo:  &summaryRefreshTenantRepo{tenant: &types.Tenant{ID: 1}},
+			spanTracker: tr,
+		}
+		require.NoError(t, svc.ProcessDocument(context.Background(), newDocumentProcessTask(t, 2)))
+		require.NotNil(t, tr.ctx)
+		require.Equal(t, tc.guard, types.ProcessingEmbeddingGuardFromContext(tr.ctx) != nil, tc.meta)
+	}
 }

@@ -20,7 +20,12 @@
 // An Agent24 ingest that no job occupies any more (its job ended, or an upstream reparse restarted it) does not
 // run: a late or retried task stops, and a row still pending or processing is failed (W5.8: a settled job's
 // knowledge does not become servable afterwards). A build already servable (finalizing, completed) is left to
-// upstream, so a retried post-process of an activated build still finishes its enrichment.
+// upstream at the post-process boundary, so a retried post-process of an activated build still finishes its
+// enrichment; at the worker entry and processChunks it stops without a write (a redelivered document task must not
+// rebuild an activated build).
+//
+// A saved job whose attempt Dispatch has not recorded yet has no task: a worker that meets it runs an older
+// attempt and stops without touching the job, so the job's own Dispatch still finds it saved.
 // A gate that cannot read what it needs aborts with the upstream "unreadable" status, so the task is retried
 // rather than run unchecked; so does a process where the gate was never installed.
 
@@ -45,6 +50,9 @@ import (
 // destination. The integration handlers implement it over the A24-KB-27/29 policy.
 type Agent24IngestPolicy interface {
 	AllowIngest(ctx context.Context, kb *types.KnowledgeBase) error
+	// EmbeddingGuard is the guard an Agent24 ingest's embedding calls run under (refuses everything when the
+	// policy cannot be read).
+	EmbeddingGuard() types.ProcessingGuard
 }
 
 // ErrAgent24PolicyDenied is what an Agent24IngestPolicy returns for a destination the policy does not allow.
@@ -65,6 +73,30 @@ func SetAgent24StageGate(db *gorm.DB, jobs *repository.Agent24IngestJobStore, po
 	agent24Gate.Store(&agent24StageGate{db: db, jobs: jobs, policy: policy, now: time.Now})
 }
 
+// agent24IngestEmbeddingContext puts the policy's embedding guard on an Agent24 ingest's task context, so each
+// embedding call is checked at call time and cannot follow a redirect away from the approved endpoint (W1.3 ③,
+// same as the search path). Without the gate installed the guard refuses every destination. Other documents get
+// ctx back unchanged.
+func agent24IngestEmbeddingContext(ctx context.Context, k *types.Knowledge) context.Context {
+	if !agent24IsIngest(k) {
+		return ctx
+	}
+	var guard types.ProcessingGuard = agent24DenyAllGuard{}
+	if g := agent24Gate.Load(); g != nil && g.policy != nil {
+		if pg := g.policy.EmbeddingGuard(); pg != nil {
+			guard = pg
+		}
+	}
+	return types.WithProcessingEmbeddingGuard(ctx, guard)
+}
+
+// agent24DenyAllGuard refuses every destination.
+type agent24DenyAllGuard struct{}
+
+func (agent24DenyAllGuard) Allow(context.Context, types.ProcessingDestination) error {
+	return types.ErrProcessingDenied
+}
+
 // agent24IsIngest reports whether the knowledge was created or revised by the Agent24 ingest entry.
 func agent24IsIngest(k *types.Knowledge) bool {
 	if k == nil || len(k.Metadata) == 0 {
@@ -81,6 +113,16 @@ func agent24IsIngest(k *types.Knowledge) bool {
 // agent24StageGateAborts runs the gate for k. aborted reports that the caller must stop; status is the
 // isKnowledgeAborted status to stop with (cancelled once the gate settled the job, unreadable to retry).
 func agent24StageGateAborts(ctx context.Context, k *types.Knowledge) (aborted bool, status string) {
+	return agent24RunStageGate(ctx, k, false)
+}
+
+// agent24PostProcessGateAborts is agent24StageGateAborts at the post-process boundary, where an activated build
+// (finalizing, completed) with no occupying job goes on to its enrichment.
+func agent24PostProcessGateAborts(ctx context.Context, k *types.Knowledge) (aborted bool, status string) {
+	return agent24RunStageGate(ctx, k, true)
+}
+
+func agent24RunStageGate(ctx context.Context, k *types.Knowledge, postProcess bool) (bool, string) {
 	if !agent24IsIngest(k) {
 		return false, ""
 	}
@@ -89,16 +131,20 @@ func agent24StageGateAborts(ctx context.Context, k *types.Knowledge) (aborted bo
 		logger.Warnf(ctx, "[agent24] stage gate is not installed; an Agent24 ingest does not run unchecked")
 		return true, abortStatusUnreadable
 	}
-	return g.check(ctx, k)
+	return g.check(ctx, k, postProcess)
 }
 
-func (g *agent24StageGate) check(ctx context.Context, k *types.Knowledge) (bool, string) {
+func (g *agent24StageGate) check(ctx context.Context, k *types.Knowledge, postProcess bool) (bool, string) {
 	job, err := g.jobs.Occupying(ctx, k.TenantID, k.ID)
 	if err != nil {
 		return true, abortStatusUnreadable
 	}
 	if job == nil {
-		return g.orphan(ctx, k)
+		return g.orphan(ctx, k, postProcess)
+	}
+	if job.Status == types.Agent24JobSaved && job.Attempt == 0 {
+		// the job's task is not enqueued yet (Dispatch records the attempt first): this worker is an older one
+		return true, types.ParseStatusCancelled
 	}
 	held, err := g.holds(ctx, job)
 	if err != nil {
@@ -213,10 +259,13 @@ func (g *agent24StageGate) settle(
 var agent24InFlight = []string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}
 
 // orphan stops an Agent24 ingest that no job occupies (see the file comment).
-func (g *agent24StageGate) orphan(ctx context.Context, k *types.Knowledge) (bool, string) {
+func (g *agent24StageGate) orphan(ctx context.Context, k *types.Knowledge, postProcess bool) (bool, string) {
 	switch k.ParseStatus {
 	case types.ParseStatusFinalizing, types.ParseStatusCompleted:
-		return false, ""
+		if postProcess {
+			return false, ""
+		}
+		return true, types.ParseStatusCancelled
 	}
 	err := g.jobs.Transaction(ctx, func(tx *repository.Agent24IngestJobStore) error {
 		row, err := tx.LockKnowledge(ctx, k.TenantID, k.ID)

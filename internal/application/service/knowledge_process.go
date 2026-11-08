@@ -3805,6 +3805,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		payload.KnowledgeID); err != nil {
 		return err
 	}
+	ctx = agent24IngestEmbeddingContext(ctx, knowledge) // Agent24 fork A24-KB-41 (W1.3 ③ at call time)
 
 	// A reparse opened a newer attempt after this task was queued (or while
 	// an earlier delivery of it was running). Its row, chunks and counter

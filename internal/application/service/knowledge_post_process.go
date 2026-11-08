@@ -167,7 +167,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		return nil
 	}
 	// Agent24 fork A24-KB-41 (W1.3): the stage gate before the build becomes servable.
-	if aborted, status := agent24StageGateAborts(ctx, knowledge); aborted {
+	if aborted, status := agent24PostProcessGateAborts(ctx, knowledge); aborted {
 		s.tracker().SkipSpan(ctx, postSpan, "agent24 stage gate stopped the knowledge before postprocess")
 		return abortRetryErr(ctx, payload.KnowledgeID, status)
 	}

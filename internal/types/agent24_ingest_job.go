@@ -161,6 +161,9 @@ const (
 	Agent24FailureHintEnqueue   Agent24FailureHint = "enqueue"
 	Agent24FailureHintStalled   Agent24FailureHint = "stalled"
 	Agent24FailureHintStorage   Agent24FailureHint = "storage"
+	// Agent24FailureHintPolicy: an embedding call was refused at call time (a destination or a redirect the
+	// processing policy does not allow).
+	Agent24FailureHintPolicy Agent24FailureHint = "policy"
 )
 
 // Agent24KnowledgeView is the part of the upstream knowledge row that reconciliation reads.
@@ -274,6 +277,8 @@ func agent24FailureReason(h Agent24FailureHint) string {
 		return Agent24JobFailTimeout
 	case Agent24FailureHintStorage:
 		return Agent24JobFailStorage
+	case Agent24FailureHintPolicy:
+		return Agent24JobFailPolicy
 	default:
 		return Agent24JobFailInternal
 	}

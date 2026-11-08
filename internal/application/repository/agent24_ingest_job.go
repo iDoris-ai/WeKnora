@@ -54,6 +54,9 @@ func EnsureAgent24IngestJobTable(db *gorm.DB) error {
 	return nil
 }
 
+// ErrAgent24JobChanged is returned when a job moved between the read and the conditional write of a supersede.
+var ErrAgent24JobChanged = errors.New("agent24 ingest job: a job changed during supersede")
+
 var agent24OccupyingStatuses = []types.Agent24JobStatus{types.Agent24JobSaved, types.Agent24JobProcessing}
 
 // Create inserts job inside tx.
@@ -94,8 +97,14 @@ func (s *Agent24IngestJobStore) SupersedeForKnowledge(
 				StopReason: types.Agent24JobCancelSuperseded,
 			}
 		}
-		if _, err := store.Apply(ctx, job, change, now); err != nil {
+		applied, err := store.Apply(ctx, job, change, now)
+		if err != nil {
 			return err
+		}
+		if !applied {
+			// a worker or the sweep moved the job after the read: the caller's transaction rolls back and the
+			// submission can be retried, rather than leave two occupying jobs
+			return ErrAgent24JobChanged
 		}
 	}
 	return nil
@@ -251,6 +260,9 @@ func (s *Agent24IngestJobStore) KnowledgeView(
 // messages are fixed upstream strings) and the failed stage span.
 func agent24FailureHint(message, stage string) types.Agent24FailureHint {
 	switch {
+	case strings.Contains(message, types.ErrProcessingDenied.Error()):
+		// upstream records the embedding error text; the call-time guard refused the destination or a redirect
+		return types.Agent24FailureHintPolicy
 	case message == "Failed to enqueue processing task":
 		return types.Agent24FailureHintEnqueue
 	case strings.Contains(message, "recovered by housekeeping"):

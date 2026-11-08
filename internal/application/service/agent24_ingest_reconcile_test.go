@@ -87,8 +87,13 @@ func TestAgent24ReconcileGetMapsUpstreamFailures(t *testing.T) {
 		"task stuck in processing at embedding stage: no progress for > 1h10m0s, recovered by housekeeping",
 		types.Agent24JobProcessing, 1)
 	h.add(t, "unknown", "k-unknown", types.ParseStatusFailed, "boom", types.Agent24JobProcessing, 1)
+	// the call-time embedding guard refused a destination or a redirect; upstream records the error text
+	h.add(t, "denied", "k-denied", types.ParseStatusFailed,
+		"failed to write vectors: "+types.ErrProcessingDenied.Error(), types.Agent24JobProcessing, 1)
+	h.span(t, "k-denied", 1, types.StageEmbedding, types.SpanStatusFailed)
 	for id, want := range map[string]string{
-		"emb": "embedding_failed", "parse": "parse_failed", "enq": "enqueue_failed", "stall": "timeout",
+		"denied": "policy_denied",
+		"emb":    "embedding_failed", "parse": "parse_failed", "enq": "enqueue_failed", "stall": "timeout",
 		"unknown": "internal",
 	} {
 		j := h.get(t, id)

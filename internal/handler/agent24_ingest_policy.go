@@ -28,6 +28,22 @@ func NewAgent24IngestPolicy(models interfaces.ModelRepository) service.Agent24In
 	}
 }
 
+// EmbeddingGuard is the loaded policy as a processing guard (no budget: the ingest worker is not a request);
+// a policy that cannot be read refuses everything.
+func (p agent24IngestPolicy) EmbeddingGuard() types.ProcessingGuard {
+	policy, err := p.policy()
+	if err != nil || policy == nil {
+		return agent24DenyIngestGuard{}
+	}
+	return policy
+}
+
+type agent24DenyIngestGuard struct{}
+
+func (agent24DenyIngestGuard) Allow(context.Context, types.ProcessingDestination) error {
+	return types.ErrProcessingDenied
+}
+
 // AllowIngest refuses a knowledge base bound to a tenant vector store (A24-KB-29: only the deployment's own
 // engine), an unreadable policy, and an embedding destination the policy does not list. A model row that
 // cannot be read is an error the caller retries, not a refusal.
