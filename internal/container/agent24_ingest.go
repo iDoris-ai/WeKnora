@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-41 (KB-C4-04, WeKnora#136).
+// Agent24 fork product patch A24-KB-41 (KB-C4-04, WeKnora#136) and A24-KB-42 (KB-SOP-02, WeKnora#146).
 
 package container
 
@@ -26,13 +26,18 @@ const agent24IngestReconcileTimeout = time.Minute
 // standalone worker advances them. A failure is returned; must panics, so the process does not start. It starts
 // no background work.
 func ensureAgent24IngestJobs(db *gorm.DB) error {
-	return repository.EnsureAgent24IngestJobTable(db)
+	if err := repository.EnsureAgent24IngestJobTable(db); err != nil {
+		return err
+	}
+	// A24-KB-42: the knowledge-entry tables; after the job table, whose principal column it widens
+	return repository.EnsureAgent24CandidateTables(db)
 }
 
 // provideAgent24Ingest registers the internal ingest entry. The executor check goes through the asynq inspector
 // when Redis is present, and is inline (standalone) or absent (integration) without it.
 func provideAgent24Ingest(c *dig.Container, redisAvailable bool) {
 	must(c.Provide(repository.NewAgent24IngestJobStore))
+	must(c.Provide(repository.NewAgent24CandidateStore)) // A24-KB-42
 	if redisAvailable {
 		must(c.Provide(router.NewAgent24AsynqIngestExecutor))
 	} else {
@@ -52,8 +57,14 @@ func installAgent24StageGate(
 
 // startAgent24IngestReconcile sweeps Agent24 ingest jobs once a minute in the process that runs the pipeline
 // (standalone); integration mode skips it through invokeBackground, like every other background job.
-func startAgent24IngestReconcile(jobs *repository.Agent24IngestJobStore, cleaner interfaces.ResourceCleaner) {
+// A24-KB-42: the same loop applies the retention of the knowledge-entry records (W8.9), which must run without
+// any request.
+func startAgent24IngestReconcile(
+	jobs *repository.Agent24IngestJobStore, candidates *repository.Agent24CandidateStore,
+	cleaner interfaces.ResourceCleaner,
+) {
 	r := service.NewAgent24JobReconciler(jobs)
+	retention := service.NewAgent24CandidateRetention(candidates)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -63,6 +74,10 @@ func startAgent24IngestReconcile(jobs *repository.Agent24IngestJobStore, cleaner
 			defer cancel()
 			if _, err := r.Sweep(ctx); err != nil {
 				logger.Warnf(ctx, "[agent24] ingest job sweep failed: error_len=%d error_type=%T",
+					len(fmt.Sprint(err)), err)
+			}
+			if _, err := retention.Sweep(ctx); err != nil {
+				logger.Warnf(ctx, "[agent24] candidate retention sweep failed: error_len=%d error_type=%T",
 					len(fmt.Sprint(err)), err)
 			}
 		}
