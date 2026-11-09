@@ -296,20 +296,37 @@ func TestAgent24CandidateRequestNUL(t *testing.T) {
 		assert.Equal(t, "invalid_request", agent24Outcome(kerr), name)
 		if name == "request_id" {
 			assert.Nil(t, req.echo.RequestID, "a request_id with U+0000 is never echoed")
+			continue
 		}
+		// READONLY R6.1: only the item that is itself invalid is echoed as null
+		require.NotNil(t, req.echo.RequestID, name)
+		assert.Equal(t, "req-1", *req.echo.RequestID, name)
+		require.NotNil(t, req.echo.Generation, name)
 	}
-	_, req, kerr := parseAgent24CandidateSubmit(agent24SubmitDoc(func(m map[string]any) { m["author"] = "a\x00" }))
+	_, req, kerr := parseAgent24CandidateSubmit([]byte(strings.Replace(string(agent24SubmitDoc(nil)),
+		`"title":"`, `"title":"\ud800`, 1)))
+	assert.Equal(t, "invalid_request", agent24Outcome(kerr))
+	require.NotNil(t, req.echo.RequestID, "a lone surrogate elsewhere leaves the echo")
+	assert.Equal(t, "req-1", *req.echo.RequestID)
+	_, req, kerr = parseAgent24CandidateSubmit([]byte(strings.Replace(string(agent24SubmitDoc(nil)),
+		`"request_id":"req-1"`, `"request_id":"req-1\udc00"`, 1)))
+	assert.Equal(t, "invalid_request", agent24Outcome(kerr))
+	assert.Nil(t, req.echo.RequestID, "a request_id with a lone surrogate is never echoed")
+	_, req, kerr = parseAgent24CandidateSubmit(agent24SubmitDoc(func(m map[string]any) { m["author"] = "a\x00" }))
 	assert.Nil(t, kerr, "a stripped field may hold U+0000 (W1.6)")
 	assert.Equal(t, []string{"author"}, req.stripped)
 	sub, _, kerr := parseAgent24CandidateSubmit(agent24SubmitDoc(func(m map[string]any) { m["title"] = `a\u0000` }))
 	require.Nil(t, kerr, "an escaped backslash before u0000 is text")
 	assert.Equal(t, `a\u0000`, sub.Title)
-	for _, body := range []string{
-		`{"request_id":"r","generation":0,"candidate_id":"c1\u0000"}`,
-		`{"request_id":"r\u0000","generation":0,"candidate_id":"c1"}`,
+	for body, echoed := range map[string]bool{
+		`{"request_id":"r","generation":0,"candidate_id":"c1\u0000"}`:            true,
+		`{"request_id":"r","generation":0,"candidate_id":"c1","note":"x\u0000"}`: true,
+		`{"request_id":"r\u0000","generation":0,"candidate_id":"c1"}`:            false,
 	} {
-		_, _, kerr := parseAgent24CandidateRef([]byte(body))
+		_, req, kerr := parseAgent24CandidateRef([]byte(body))
 		assert.Equal(t, "invalid_request", agent24Outcome(kerr), body)
+		assert.Equal(t, echoed, req.echo.RequestID != nil, body)
+		assert.NotNil(t, req.echo.Generation, body)
 	}
 	_, _, kerr = parseAgent24CandidateRef([]byte("{\"request_id\":\"r\",\"generation\":0,\"candidate_id\":\"c\x001\"}"))
 	assert.Equal(t, "invalid_request", agent24Outcome(kerr), "a raw NUL is no JSON")

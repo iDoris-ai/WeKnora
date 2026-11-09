@@ -46,11 +46,12 @@ type agent24WriteRequest struct {
 // parseAgent24WriteCommon decodes a write request body (one JSON object, nothing after it), strips the W1.6 host
 // approval fields, refuses any field not in allowed (and not stripped), and reads request_id and, for a Provider
 // request, generation. A field (other than a stripped one) carrying a lone surrogate escape is invalid (W8.13): Go
-// would decode it to U+FFFD, and the hash the client computed could not be reproduced; so is one carrying \u0000,
-// before request_id is read, so it is never echoed or stored (PR-Daemon #157 B2). Invalid UTF-8 is refused for
-// the same reason (it is not JSON, RFC 8259, and the decoder would replace it). The stripped fields are reported
-// even when the request is then refused, so the refusal's audit row records them too (F2); what they hold, lone
-// surrogates included, never fails the request (W1.6).
+// would decode it to U+FFFD, and the hash the client computed could not be reproduced; so is one carrying \u0000
+// (PR-Daemon #157 B2). Invalid UTF-8 is refused for the same reason (it is not JSON, RFC 8259, and the decoder would
+// replace it). The echo is read before that scan: a request_id carrying either is not echoed (nor stored), a valid
+// one is echoed even when another field is refused (READONLY R6.1, OPS-v2 r3 W8.13). The stripped fields are
+// reported even when the request is then refused, so the refusal's audit row records them too (F2); what they hold,
+// lone surrogates included, never fails the request (W1.6).
 func parseAgent24WriteCommon(
 	body []byte, provider bool, allowed ...string,
 ) (agent24WriteRequest, *agent24KnowledgeError) {
@@ -72,12 +73,8 @@ func parseAgent24WriteCommon(
 			req.stripped = append(req.stripped, name)
 		}
 	}
-	for _, raw := range req.fields {
-		if agent24JSONHasUnusableEscape(raw) {
-			return req, agent24InvalidRequest()
-		}
-	}
-	if raw, ok := req.fields["request_id"]; ok {
+	// the echo first (READONLY R6.1: only an item that is itself missing or invalid is echoed as null), then the scan
+	if raw, ok := req.fields["request_id"]; ok && !agent24JSONHasUnusableEscape(raw) {
 		var s string
 		if json.Unmarshal(raw, &s) == nil && s != "" && utf8.RuneCountInString(s) <= agent24RequestIDMaxRunes {
 			req.echo.RequestID = &s
@@ -88,6 +85,11 @@ func parseAgent24WriteCommon(
 			if g, ok := agent24JSONInt64(raw); ok && g >= 0 {
 				req.echo.Generation = &g
 			}
+		}
+	}
+	for _, raw := range req.fields {
+		if agent24JSONHasUnusableEscape(raw) {
+			return req, agent24InvalidRequest()
 		}
 	}
 	known := map[string]bool{"request_id": true}
