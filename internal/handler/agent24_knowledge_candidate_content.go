@@ -27,14 +27,19 @@ const (
 //   - a link whose destination is not a plain https:// URL, inline "](dest)" or a reference definition
 //     "[label]: dest" anywhere on a line (CommonMark takes definitions inside quotes and list items too, for the
 //     whole document, and a label may span lines): no title, and no backtick, "<", ">", quote, backslash or
-//     parenthesis in it; so any "]:" outside code must be followed by such a destination and nothing else;
+//     parenthesis in it; so any "]:", even inside inline code, must be followed by such a destination and nothing
+//     else;
+//   - the label of a full reference "[text][label]" not closed on its line, or with a backtick in it;
 //   - a backtick run with no run of the same length after it on its line.
 //
 // Every rule errs on the side of refusing. What it skips as code must be code to CommonMark too, so a backtick never
 // pairs across lines (CommonMark would pair it across a paragraph's lines), never inside a link destination (which
 // CommonMark parses first), and a fence opens only at the start of a line with no indent (an indented fence can
 // belong to a list item, whose end closes it); a closing fence may be indented up to three spaces, and an unclosed
-// fence runs to the end. Anything else (fences in lists or quotes, indented code) is judged as prose.
+// fence runs to the end. Anything else (fences in lists or quotes, indented code) is judged as prose. CommonMark reads
+// a definition and the second label of a full reference as raw text, before any code span (Codex S2 r3:
+// "[x`]: http://a \"`\"" defines a link, and "[go][x`]<img>`" then uses it, ending the "code" at the label), so
+// agent24MarkdownRawViolation checks those on the raw line first.
 func agent24RestrictedMarkdownViolation(body string) bool {
 	fence := ""
 	for _, line := range strings.Split(body, "\n") {
@@ -48,7 +53,7 @@ func agent24RestrictedMarkdownViolation(body string) bool {
 			fence = f
 			continue
 		}
-		if agent24MarkdownLineViolation(line) {
+		if agent24MarkdownRawViolation(line) || agent24MarkdownLineViolation(line) {
 			return true
 		}
 	}
@@ -87,6 +92,28 @@ func agent24MarkdownClosesFence(line, fence string) bool {
 	return run >= len(fence) && strings.TrimRight(rest[run:], " \t") == ""
 }
 
+// agent24MarkdownRawViolation judges what CommonMark reads on a line before code spans: whatever follows any "]:"
+// must be a safe destination, and the label after any "][" must close on the line with no backtick in it.
+func agent24MarkdownRawViolation(line string) bool {
+	for i := 0; i+1 < len(line); i++ {
+		if line[i] != ']' {
+			continue
+		}
+		switch line[i+1] {
+		case ':':
+			if !agent24MarkdownSafeDestination(strings.TrimLeft(line[i+2:], " \t")) {
+				return true
+			}
+		case '[':
+			end := strings.IndexByte(line[i+2:], ']')
+			if end < 0 || strings.Contains(line[i+2:i+2+end], "`") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // agent24MarkdownLineViolation judges one line outside fenced code.
 func agent24MarkdownLineViolation(line string) bool {
 	for i := 0; i < len(line); i++ {
@@ -118,14 +145,8 @@ func agent24MarkdownLineViolation(line string) bool {
 				return true
 			}
 		case ']':
-			if i+1 < len(line) && line[i+1] == ':' {
-				// a reference definition, in any container (Codex S2 r2): the rest of the line is the destination. The
-				// scan goes on over it, since the line may be prose after all ("a [x]: https://e.org![y]")
-				if !agent24MarkdownSafeDestination(strings.TrimLeft(line[i+2:], " \t")) {
-					return true
-				}
-				continue
-			}
+			// "]:" is agent24MarkdownRawViolation's; the scan goes on over its destination, since the line may be
+			// prose after all ("a [x]: https://e.org![y]")
 			if i+1 < len(line) && line[i+1] == '(' {
 				rest := strings.TrimLeft(line[i+2:], " \t")
 				end := strings.IndexAny(rest, " \t)")

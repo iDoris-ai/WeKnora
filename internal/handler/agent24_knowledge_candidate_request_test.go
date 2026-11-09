@@ -346,6 +346,16 @@ func TestAgent24RestrictedMarkdown(t *testing.T) {
 		{"a [x]: https://e.org![y]\n\n[y]: https://e.org/i", true}, // the scan goes on after a "]:" destination
 		{"[x]: https://e.org[^1]", true},
 		{"[x]: https://e.org/a [y]: javascript:x", true},
+		// Codex S2 r3: CommonMark reads a definition and a full reference's label before code spans
+		{"[x`]: http://attacker.example/ \"`\"\n\n[go][x`]<img src=x>`", true},
+		{"> [x`]: http://a.example/ \"`\"", true},
+		{"[x`]: https://e.org/ok \"`\"", true},
+		{"`[x]: http://a.example/`", true}, // "]:" even inside inline code: refusing is the safe side
+		{"[go][x`]<img src=x>`", true},
+		{"[go][`x`] text", true},
+		{"[go][x\n`]<img src=x>`", true}, // a label left open on its line
+		{"[go][x] and [y][] and [z]", false},
+		{"[`code`](https://example.org/a) and [`x`]", false},
 		{"`a` and `b` and ``c`d``", false},
 		{"[ref]: http://example.org", true},
 		{"`code` then <b>", true},
