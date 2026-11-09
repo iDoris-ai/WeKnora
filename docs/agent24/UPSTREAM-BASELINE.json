@@ -928,6 +928,26 @@
           "added_on": "2026-11-09"
         },
         {
+          "id": "A24-KB-42",
+          "issue": "iDoris-ai/WeKnora#146",
+          "summary": "知识条目的服务端存储（KB-SOP-02 S1）：候选表与条件 UPDATE 的状态转移、写操作幂等记录、组织管理员授予表（W2.5 的 A 侧）、条目下架表、W8.9/W3.3 的保留清扫；agent24_ingest_jobs.principal_user_id 加宽；不加路由",
+          "upstream_commit": null,
+          "paths": [
+            "internal/types/agent24_knowledge_candidate.go",
+            "internal/types/agent24_ingest_job.go",
+            "internal/application/repository/agent24_knowledge_candidate.go",
+            "internal/application/repository/agent24_knowledge_candidate_test.go",
+            "internal/application/repository/agent24_knowledge_candidate_postgres_test.go",
+            "internal/application/service/agent24_candidate_retention.go",
+            "internal/application/service/agent24_candidate_retention_test.go",
+            "internal/container/agent24_ingest.go",
+            "internal/container/agent24_ingest_test.go",
+            "internal/container/agent24_background_test.go"
+          ],
+          "remove_when": "长期保留（Agent24 集成专用）；组织身份由 KB-ORG-01 / 公钥注册表定下后，只换 agent24_knowledge_admins 的写入方",
+          "added_on": "2026-11-09"
+        },
+        {
           "id": "A24-OBS-01",
           "issue": "iDoris-ai/WeKnora#40",
           "summary": "服务端默认不记正文与凭据（KB-OBS-01）：访问日志默认不记正文、查询值打码、能力令牌路径记模板；gorm 日志不带绑定值；Langfuse 的 http.query 打码",

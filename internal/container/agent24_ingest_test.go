@@ -40,4 +40,11 @@ func TestEnsureAgent24IngestJobsCreatesTheTable(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ensureAgent24IngestJobs(db))
 	require.True(t, db.Migrator().HasTable(&types.Agent24IngestJob{}))
+	// A24-KB-42
+	for _, model := range []any{
+		&types.Agent24KnowledgeCandidate{}, &types.Agent24WriteIdempotency{}, &types.Agent24KnowledgeAdmin{},
+		&types.Agent24EntryWithdrawal{},
+	} {
+		require.True(t, db.Migrator().HasTable(model), "%T", model)
+	}
 }

@@ -121,7 +121,7 @@ type Agent24IngestJob struct {
 	KnowledgeBaseID string           `gorm:"type:varchar(64);not null"`
 	KnowledgeID     string           `gorm:"type:varchar(64);not null;index:idx_agent24_ingest_jobs_knowledge,priority:2"` //nolint:lll // tag
 	OpClass         Agent24JobOp     `gorm:"type:varchar(32);not null"`
-	PrincipalUserID string           `gorm:"type:varchar(64);not null;default:''"`
+	PrincipalUserID string           `gorm:"type:varchar(255);not null;default:''"` // A24-KB-42: a StorageID
 	CredentialID    uint64           `gorm:"not null;default:0"`
 	AuthzVersion    string           `gorm:"type:varchar(128);not null;default:''"`
 	PolicyVersion   string           `gorm:"type:varchar(128);not null;default:''"`
