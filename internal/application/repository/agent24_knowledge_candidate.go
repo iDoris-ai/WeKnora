@@ -214,7 +214,7 @@ func (s *Agent24CandidateStore) CountSubmitted(ctx context.Context, tenantID uin
 // reports whether it did. A candidate that is not submitted any more is left as it is and the result is false.
 // t.To must be terminal. The write sets terminal_at to now and the fields of t that apply to t.To:
 //   - approved: approver, author_is_approver, source_revision, job_id, and knowledge_id when t.KnowledgeID is set;
-//   - returned: return_reason and note;
+//   - returned: return_reason, note, and approver when set (approver on approve, returner when returned/reviewer);
 //   - withdrawn: nothing more.
 func (s *Agent24CandidateStore) TransitionCandidate(
 	ctx context.Context, tenantID uint64, id string, t types.Agent24CandidateTransition, now time.Time,
@@ -238,6 +238,9 @@ func (s *Agent24CandidateStore) TransitionCandidate(
 	case types.Agent24CandidateReturned:
 		set["return_reason"] = t.ReturnReason
 		set["note"] = t.Note
+		if t.Approver != "" {
+			set["approver"] = t.Approver
+		}
 	}
 	res := s.db.WithContext(ctx).Model(&types.Agent24KnowledgeCandidate{}).
 		Where("tenant_id = ? AND id = ? AND status = ?", tenantID, id, types.Agent24CandidateSubmitted).
@@ -422,6 +425,21 @@ func (s *Agent24CandidateStore) AdminHoldsAnywhere(
 	return agent24RowExists(err)
 }
 
+// AdminGrants returns the knowledge bases (types.Agent24KnowledgeAdminAnyKB included) on which principal holds an
+// unrevoked organisation-administrator grant, sorted: the facts the W1.2 authz_version of a decision over the
+// grants digests.
+func (s *Agent24CandidateStore) AdminGrants(ctx context.Context, tenantID uint64, principal string) ([]string, error) {
+	var kbs []string
+	if principal == "" {
+		return kbs, nil
+	}
+	err := s.db.WithContext(ctx).Model(&types.Agent24KnowledgeAdmin{}).
+		Where("tenant_id = ? AND principal = ? AND revoked_at IS NULL AND knowledge_base_id <> ''",
+			tenantID, principal).
+		Order("knowledge_base_id ASC").Pluck("knowledge_base_id", &kbs).Error
+	return kbs, err
+}
+
 // ---- entry withdrawals (W8.10) ----
 
 // Withdraw records w and reports whether it did. A document already withdrawn keeps its first record and the
@@ -515,6 +533,13 @@ func agent24RowExists(err error) (bool, error) {
 func agent24EncodeCandidateCursor(submittedAt time.Time, id string) string {
 	raw := submittedAt.UTC().Format(time.RFC3339Nano) + "|" + id
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// CheckAgent24CandidateCursor reports whether after is a cursor ListSubmittedForReview could have returned, so
+// a caller can refuse a malformed one as a request shape error before it reads anything.
+func CheckAgent24CandidateCursor(after string) error {
+	_, _, err := agent24DecodeCandidateCursor(after)
+	return err
 }
 
 func agent24DecodeCandidateCursor(after string) (time.Time, string, error) {

@@ -87,7 +87,7 @@ type Agent24KnowledgeCandidate struct {
 	Status                Agent24CandidateStatus `gorm:"type:varchar(16);not null;index:idx_agent24_candidates_author,priority:3;index:idx_agent24_candidates_target,priority:3"` //nolint:lll // tag
 	ReturnReason          string                 `gorm:"type:varchar(32);not null;default:''"`
 	Note                  string                 `gorm:"type:text;not null;default:''"`
-	Approver              string                 `gorm:"type:varchar(255);not null;default:''"`
+	Approver              string                 `gorm:"type:varchar(255);not null;default:''"` // approver or returner
 	AuthorIsApprover      bool                   `gorm:"not null;default:false"`
 	SourceRevision        string                 `gorm:"type:varchar(128);not null;default:''"`
 	JobID                 string                 `gorm:"type:varchar(36);not null;default:''"`
