@@ -46,7 +46,8 @@ type agent24WriteRequest struct {
 // parseAgent24WriteCommon decodes a write request body (one JSON object, nothing after it), strips the W1.6 host
 // approval fields, refuses any field not in allowed (and not stripped), and reads request_id and, for a Provider
 // request, generation. A field (other than a stripped one) carrying a lone surrogate escape is invalid (W8.13): Go
-// would decode it to U+FFFD, and the hash the client computed could not be reproduced. Invalid UTF-8 is refused for
+// would decode it to U+FFFD, and the hash the client computed could not be reproduced; so is one carrying \u0000,
+// before request_id is read, so it is never echoed or stored (PR-Daemon #157 B2). Invalid UTF-8 is refused for
 // the same reason (it is not JSON, RFC 8259, and the decoder would replace it). The stripped fields are reported
 // even when the request is then refused, so the refusal's audit row records them too (F2); what they hold, lone
 // surrogates included, never fails the request (W1.6).
@@ -72,7 +73,7 @@ func parseAgent24WriteCommon(
 		}
 	}
 	for _, raw := range req.fields {
-		if agent24JSONHasLoneSurrogate(raw) {
+		if agent24JSONHasUnusableEscape(raw) {
 			return req, agent24InvalidRequest()
 		}
 	}
@@ -107,9 +108,11 @@ func parseAgent24WriteCommon(
 	return req, nil
 }
 
-// agent24JSONHasLoneSurrogate reports whether a JSON text has a \u escape of a UTF-16 surrogate that is not one
-// half of a high-low pair. Escapes are only read inside strings; a malformed escape is left to the decoder.
-func agent24JSONHasLoneSurrogate(body []byte) bool {
+// agent24JSONHasUnusableEscape reports whether a JSON text has a \u escape of a UTF-16 surrogate that is not one
+// half of a high-low pair (W8.13), or of U+0000, which no PostgreSQL text column stores (PR-Daemon #157 B2: it
+// would fail at insert as a retryable unavailable; a raw NUL is no JSON at all). Escapes are only read inside
+// strings; a malformed escape is left to the decoder.
+func agent24JSONHasUnusableEscape(body []byte) bool {
 	inString := false
 	pendingHigh := false
 	for i := 0; i < len(body); i++ {
@@ -151,7 +154,7 @@ func agent24JSONHasLoneSurrogate(body []byte) bool {
 				}
 				pendingHigh = false
 			default:
-				if pendingHigh {
+				if pendingHigh || u == 0 {
 					return true
 				}
 			}

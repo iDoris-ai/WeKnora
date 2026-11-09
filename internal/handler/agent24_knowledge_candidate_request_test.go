@@ -262,6 +262,59 @@ func TestAgent24CandidateRequestEncoding(t *testing.T) {
 	assert.Equal(t, "🌿", sub.Title)
 }
 
+// PR-Daemon #157 B2: U+0000 in any field is invalid at ② (no PostgreSQL text column stores it), before request_id
+// is read, so it is never echoed; a stripped field may still hold it, and an escaped backslash before u0000 is text.
+func TestAgent24CandidateRequestNUL(t *testing.T) {
+	revise := func(m map[string]any) {
+		m["mode"], m["knowledge_id"], m["expected_source_revision"] = "revise", "kn-1", "rev-1"
+	}
+	str := func(base func(map[string]any), name string) func(map[string]any) {
+		return func(m map[string]any) {
+			if base != nil {
+				base(m)
+			}
+			m[name] = m[name].(string) + "\x00"
+		}
+	}
+	prov := func(name string) func(map[string]any) {
+		return func(m map[string]any) {
+			p := m["provenance"].(map[string]any)
+			p[name] = p[name].(string) + "\x00"
+		}
+	}
+	for name, mut := range map[string]func(map[string]any){
+		"request_id": str(nil, "request_id"), "idempotency_key": str(nil, "idempotency_key"),
+		"target_knowledge_base_id": str(nil, "target_knowledge_base_id"), "mode": str(nil, "mode"),
+		"kind": str(nil, "kind"), "title": str(nil, "title"), "body": str(nil, "body"),
+		"content_sha256": str(nil, "content_sha256"), "knowledge_id": str(revise, "knowledge_id"),
+		"expected_source_revision": str(revise, "expected_source_revision"), "provenance.source": prov("source"),
+		"provenance.session_ref": prov("session_ref"), "provenance.skill_version": prov("skill_version"),
+	} {
+		raw := agent24SubmitDoc(mut)
+		require.Contains(t, string(raw), `\u0000`, name)
+		_, req, kerr := parseAgent24CandidateSubmit(raw)
+		assert.Equal(t, "invalid_request", agent24Outcome(kerr), name)
+		if name == "request_id" {
+			assert.Nil(t, req.echo.RequestID, "a request_id with U+0000 is never echoed")
+		}
+	}
+	_, req, kerr := parseAgent24CandidateSubmit(agent24SubmitDoc(func(m map[string]any) { m["author"] = "a\x00" }))
+	assert.Nil(t, kerr, "a stripped field may hold U+0000 (W1.6)")
+	assert.Equal(t, []string{"author"}, req.stripped)
+	sub, _, kerr := parseAgent24CandidateSubmit(agent24SubmitDoc(func(m map[string]any) { m["title"] = `a\u0000` }))
+	require.Nil(t, kerr, "an escaped backslash before u0000 is text")
+	assert.Equal(t, `a\u0000`, sub.Title)
+	for _, body := range []string{
+		`{"request_id":"r","generation":0,"candidate_id":"c1\u0000"}`,
+		`{"request_id":"r\u0000","generation":0,"candidate_id":"c1"}`,
+	} {
+		_, _, kerr := parseAgent24CandidateRef([]byte(body))
+		assert.Equal(t, "invalid_request", agent24Outcome(kerr), body)
+	}
+	_, _, kerr = parseAgent24CandidateRef([]byte("{\"request_id\":\"r\",\"generation\":0,\"candidate_id\":\"c\x001\"}"))
+	assert.Equal(t, "invalid_request", agent24Outcome(kerr), "a raw NUL is no JSON")
+}
+
 func TestAgent24CandidateRef(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
 		{`{"request_id":"r","generation":0,"candidate_id":"c1"}`, "ok"},
@@ -346,6 +399,14 @@ func TestAgent24RestrictedMarkdown(t *testing.T) {
 		{"a [x]: https://e.org![y]\n\n[y]: https://e.org/i", true}, // the scan goes on after a "]:" destination
 		{"[x]: https://e.org[^1]", true},
 		{"[x]: https://e.org/a [y]: javascript:x", true},
+		// PR-Daemon #157 B1: a "](" with no opener is prose, so what follows it is scanned too
+		{"](https://![x][y])\n\n[y]: https://evil.example/p.png", true},
+		{"](https://![y])\n\n[y]: https://evil.example/p.png", true},
+		{"[a](https://![x][y])", true}, // brackets in a destination
+		{"[a](https://e.org/[x])", true},
+		{"[a](https://e.org/[^1])", true},
+		{"[a](https://e.org/x]) ![y]", true},
+		{"](https://e.org/x) t", false},
 		// Codex S2 r3: CommonMark reads a definition and a full reference's label before code spans
 		{"[x`]: http://attacker.example/ \"`\"\n\n[go][x`]<img src=x>`", true},
 		{"> [x`]: http://a.example/ \"`\"", true},

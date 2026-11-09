@@ -26,19 +26,20 @@ const (
 //   - escape sequences other than HTML entities: a backslash before ASCII punctuation or at the end of a line;
 //   - a link whose destination is not a plain https:// URL, inline "](dest)" or a reference definition
 //     "[label]: dest" anywhere on a line (CommonMark takes definitions inside quotes and list items too, for the
-//     whole document, and a label may span lines): no title, and no backtick, "<", ">", quote, backslash or
-//     parenthesis in it; so any "]:", even inside inline code, must be followed by such a destination and nothing
-//     else;
+//     whole document, and a label may span lines): no title, and no backtick, "<", ">", quote, backslash,
+//     parenthesis or bracket in it; so any "]:", even inside inline code, must be followed by such a destination
+//     and nothing else;
 //   - the label of a full reference "[text][label]" not closed on its line, or with a backtick in it;
 //   - a backtick run with no run of the same length after it on its line.
 //
 // Every rule errs on the side of refusing. What it skips as code must be code to CommonMark too, so a backtick never
 // pairs across lines (CommonMark would pair it across a paragraph's lines), never inside a link destination (which
-// CommonMark parses first), and a fence opens only at the start of a line with no indent (an indented fence can
-// belong to a list item, whose end closes it); a closing fence may be indented up to three spaces, and an unclosed
-// fence runs to the end. Anything else (fences in lists or quotes, indented code) is judged as prose. CommonMark reads
-// a definition and the second label of a full reference as raw text, before any code span (Codex S2 r3:
-// "[x`]: http://a \"`\"" defines a link, and "[go][x`]<img>`" then uses it, ending the "code" at the label), so
+// CommonMark parses first; a safe one holds no backtick, and the scan goes on over it, since a "](" with no opener
+// is prose), and a fence opens only at the start of a line with no indent (an indented fence can belong to a list
+// item, whose end closes it); a closing fence may be indented up to three spaces, and an unclosed fence runs to the
+// end. Anything else (fences in lists or quotes, indented code) is judged as prose. CommonMark reads a definition and
+// the second label of a full reference as raw text, before any code span (Codex S2 r3: "[x`]: http://a \"`\""
+// defines a link, and "[go][x`]<img>`" then uses it, ending the "code" at the label), so
 // agent24MarkdownRawViolation checks those on the raw line first.
 func agent24RestrictedMarkdownViolation(body string) bool {
 	fence := ""
@@ -153,7 +154,8 @@ func agent24MarkdownLineViolation(line string) bool {
 				if end < 0 || rest[end] != ')' || !agent24MarkdownSafeDestination(rest[:end]) {
 					return true
 				}
-				i = len(line) - len(rest) + end // the destination is never scanned for code spans
+				// the scan goes on over the destination too: a "](" with no opener is prose to CommonMark (PR-Daemon
+				// #157 B1: "](https://![x][y])" renders an image), and a safe destination holds no backtick
 			}
 		}
 	}
@@ -187,10 +189,11 @@ func agent24MarkdownCodeSpanEnd(s string, from, n int) int {
 }
 
 // agent24MarkdownSafeDestination reports whether dest is a link destination the restricted Markdown keeps: an
-// https:// URL with something after the scheme and none of the characters that could start another construct.
+// https:// URL with something after the scheme and none of the characters that could start another construct
+// (brackets included, PR-Daemon #157 B1).
 func agent24MarkdownSafeDestination(dest string) bool {
 	return len(dest) > len("https://") && strings.EqualFold(dest[:len("https://")], "https://") &&
-		!strings.ContainsAny(dest, " \t`<>\"'\\()")
+		!strings.ContainsAny(dest, " \t`<>\"'\\()[]")
 }
 
 func agent24ASCIIPunct(b byte) bool {
