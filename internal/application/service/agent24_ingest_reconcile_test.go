@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -197,4 +198,62 @@ func TestAgent24ReconcileSweepDoesNotFailAPickedUpRow(t *testing.T) {
 	var row types.Knowledge
 	require.NoError(t, h.db.Where("id = ?", "k").Take(&row).Error)
 	require.Equal(t, types.ParseStatusProcessing, row.ParseStatus)
+}
+
+// J1 timed out in saved. Before the sweep, a newer revision occupies the same knowledge (the harness cannot
+// Stage, so the rows are the moment just before J1 would be superseded: J1 still saved, J2 the occupier, the
+// knowledge pending). The sweep settles J1 and leaves the new revision's knowledge pending.
+func TestAgent24ReconcileTimeoutDoesNotFailANewerRevision(t *testing.T) {
+	h := newAgent24ReconcileHarness(t)
+	h.add(t, "j1", "k", types.ParseStatusPending, "", types.Agent24JobSaved, 1)
+	h.add(t, "j2", "k", "", "", types.Agent24JobSaved, 0)
+	h.now = h.t0.Add(10*time.Minute + time.Second)
+	require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Where("id = ?", "j2").Update("saved_at", h.now).Error)
+
+	n, err := h.r.Sweep(h.ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+
+	j1, err := h.jobs.Get(h.ctx, 7, "j1")
+	require.NoError(t, err)
+	require.Equal(t, types.Agent24JobFailed, j1.Status)
+	require.Equal(t, types.Agent24JobFailTimeout, j1.FailureReason)
+	var row types.Knowledge
+	require.NoError(t, h.db.Where("id = ?", "k").Take(&row).Error)
+	require.Equal(t, types.ParseStatusPending, row.ParseStatus)
+	require.Empty(t, row.ErrorMessage)
+	j2, err := h.jobs.Get(h.ctx, 7, "j2")
+	require.NoError(t, err)
+	require.Equal(t, types.Agent24JobSaved, j2.Status)
+	require.Empty(t, j2.FailureReason)
+	require.Empty(t, j2.CancelReason)
+	require.Nil(t, j2.TerminalAt)
+	require.True(t, j2.SavedAt.Equal(h.now))
+}
+
+// Failing the pending knowledge and failing the timed-out job are one transaction: a knowledge update error
+// rolls the job write back too.
+func TestAgent24ReconcileTimeoutRollsBackWhenKnowledgeUpdateFails(t *testing.T) {
+	h := newAgent24ReconcileHarness(t)
+	h.add(t, "stuck", "k", types.ParseStatusPending, "", types.Agent24JobSaved, 1)
+	h.now = h.t0.Add(10*time.Minute + time.Second)
+	const name = "agent24_test_fail_knowledge"
+	require.NoError(t, h.db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "knowledges" {
+			_ = tx.AddError(errors.New("knowledge update refused"))
+		}
+	}))
+	t.Cleanup(func() { _ = h.db.Callback().Update().Remove(name) })
+
+	_, err := h.r.Sweep(h.ctx)
+	require.ErrorContains(t, err, "knowledge update refused")
+	job, err := h.jobs.Get(h.ctx, 7, "stuck")
+	require.NoError(t, err)
+	require.Equal(t, types.Agent24JobSaved, job.Status)
+	require.Empty(t, job.FailureReason)
+	require.Nil(t, job.TerminalAt)
+	var row types.Knowledge
+	require.NoError(t, h.db.Where("id = ?", "k").Take(&row).Error)
+	require.Equal(t, types.ParseStatusPending, row.ParseStatus)
+	require.Empty(t, row.ErrorMessage)
 }

@@ -66,17 +66,38 @@ func (r *Agent24JobReconciler) reconcile(ctx context.Context, job types.Agent24I
 	if !ok {
 		return nil
 	}
-	applied, err := r.jobs.Apply(ctx, job, change, r.now())
-	if err != nil || !applied {
-		return err
-	}
-	if change.FailKnowledge {
-		if err := r.jobs.FailPendingKnowledge(ctx, job.TenantID, job.KnowledgeID,
-			"Agent24: no worker picked the job up in time", r.now()); err != nil {
+	if !change.FailKnowledge {
+		applied, err := r.jobs.Apply(ctx, job, change, r.now())
+		if err != nil || !applied {
 			return err
 		}
+		return nil
 	}
-	return nil
+	// Stage takes this same knowledge row lock, so the occupier read after the lock is the last one. When this
+	// job is no longer that occupier, the knowledge belongs to the newer revision and must not be failed.
+	now := r.now()
+	return r.jobs.Transaction(ctx, func(tx *repository.Agent24IngestJobStore) error {
+		row, err := tx.LockKnowledge(ctx, job.TenantID, job.KnowledgeID)
+		if err != nil {
+			return err
+		}
+		cur, err := tx.Occupying(ctx, job.TenantID, job.KnowledgeID)
+		if err != nil {
+			return err
+		}
+		applied, err := tx.Apply(ctx, job, change, now)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			return nil
+		}
+		if row == nil || cur == nil || cur.ID != job.ID {
+			return nil
+		}
+		return tx.FailPendingKnowledge(ctx, job.TenantID, job.KnowledgeID,
+			"Agent24: no worker picked the job up in time", now)
+	})
 }
 
 // Sweep reconciles one batch of unsettled jobs and purges jobs settled longer ago than the retention. It returns

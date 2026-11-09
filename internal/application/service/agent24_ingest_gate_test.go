@@ -107,6 +107,75 @@ func TestAgent24StageGateLeavesUpstreamDocumentsAlone(t *testing.T) {
 	require.Equal(t, abortStatusUnreadable, status)
 }
 
+// The origin marker was wiped by an upstream whole-row save. An occupying job is still an Agent24 ingest: a
+// revoked authorization cancels it, and a held one passes and records processing.
+func TestAgent24StageGateMarkerLostStillChecks(t *testing.T) {
+	t.Run("revoked authorization", func(t *testing.T) {
+		h := newAgent24GateHarness(t)
+		h.job(t, types.Agent24JobProcessing, types.Agent24JobOpIngestSubmit)
+		require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").Updates(map[string]any{
+			"parse_status": types.ParseStatusProcessing, "metadata": "",
+		}).Error)
+		require.NoError(t, h.db.Model(&types.TenantAPIKey{}).Where("id = 45").
+			Update("revoked_at", time.Now()).Error)
+		k := h.knowledge(t)
+		require.Empty(t, k.Metadata)
+		aborted, status := agent24StageGateAborts(h.ctx, k)
+		require.True(t, aborted)
+		require.Equal(t, types.ParseStatusCancelled, status)
+		j := h.jobRow(t)
+		require.Equal(t, types.Agent24JobCancelled, j.Status)
+		require.Equal(t, types.Agent24JobCancelRevoked, j.CancelReason)
+	})
+	t.Run("authorization holds", func(t *testing.T) {
+		h := newAgent24GateHarness(t)
+		h.job(t, types.Agent24JobSaved, types.Agent24JobOpIngestSubmit)
+		require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").Update("metadata", "").Error)
+		k := h.knowledge(t)
+		require.Empty(t, k.Metadata)
+		aborted, _ := agent24StageGateAborts(h.ctx, k)
+		require.False(t, aborted)
+		j := h.jobRow(t)
+		require.Equal(t, types.Agent24JobProcessing, j.Status)
+		require.NotNil(t, j.ProcessingAt)
+	})
+}
+
+// No marker and no occupying job is an upstream document even with the gate installed: nothing is written. A
+// failure to read the occupying job retries, the way an unreadable key lookup does.
+func TestAgent24StageGateUnmarkedWithoutJobPasses(t *testing.T) {
+	h := newAgent24GateHarness(t)
+	require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").Update("metadata", "").Error)
+	before := *h.knowledge(t)
+	require.Empty(t, before.Metadata)
+	var jobs int64
+	require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Count(&jobs).Error)
+	require.Zero(t, jobs)
+	var kbBefore types.KnowledgeBase
+	require.NoError(t, h.db.Where("id = ?", "kb-1").Take(&kbBefore).Error)
+	var keyBefore types.TenantAPIKey
+	require.NoError(t, h.db.Where("id = ?", 45).Take(&keyBefore).Error)
+
+	aborted, status := agent24StageGateAborts(h.ctx, &before)
+	require.False(t, aborted)
+	require.Empty(t, status)
+	require.Equal(t, before, *h.knowledge(t))
+	require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Count(&jobs).Error)
+	require.Zero(t, jobs)
+	var kbAfter types.KnowledgeBase
+	require.NoError(t, h.db.Where("id = ?", "kb-1").Take(&kbAfter).Error)
+	require.Equal(t, kbBefore, kbAfter)
+	var keyAfter types.TenantAPIKey
+	require.NoError(t, h.db.Where("id = ?", 45).Take(&keyAfter).Error)
+	require.Equal(t, keyBefore, keyAfter)
+
+	require.NoError(t, h.db.Migrator().DropTable(&types.Agent24IngestJob{}))
+	aborted, status = agent24StageGateAborts(h.ctx, h.knowledge(t))
+	require.True(t, aborted)
+	require.Equal(t, abortStatusUnreadable, status)
+	require.Equal(t, before, *h.knowledge(t))
+}
+
 func TestAgent24StageGatePassesAndRecordsProcessing(t *testing.T) {
 	h := newAgent24GateHarness(t)
 	h.job(t, types.Agent24JobSaved, types.Agent24JobOpIngestSubmit)
@@ -204,6 +273,25 @@ func TestAgent24IngestEmbeddingContext(t *testing.T) {
 	require.Same(t, h.policy.guard, types.ProcessingEmbeddingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, k)))
 	require.Nil(t, types.ProcessingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, k)),
 		"other model calls of the task see no processing guard")
+
+	// The marker was wiped; an occupying job still installs the policy guard.
+	require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").Update("metadata", "").Error)
+	h.job(t, types.Agent24JobSaved, types.Agent24JobOpIngestSubmit)
+	wiped := h.knowledge(t)
+	require.Empty(t, wiped.Metadata)
+	require.Same(t, h.policy.guard, types.ProcessingEmbeddingGuardFromContext(
+		agent24IngestEmbeddingContext(h.ctx, wiped)))
+	// no marker and no occupying job
+	require.NoError(t, h.db.Create(&types.Knowledge{
+		ID: "k-plain", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "file", ParseStatus: types.ParseStatusPending,
+	}).Error)
+	var plain types.Knowledge
+	require.NoError(t, h.db.Where("id = ?", "k-plain").Take(&plain).Error)
+	require.Nil(t, types.ProcessingEmbeddingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, &plain)))
+	// the occupying-job read fails closed
+	require.NoError(t, h.db.Migrator().DropTable(&types.Agent24IngestJob{}))
+	denied := types.ProcessingEmbeddingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, &plain))
+	require.ErrorIs(t, denied.Allow(h.ctx, types.ProcessingDestination{}), types.ErrProcessingDenied)
 
 	agent24Gate.Store(nil)
 	g := types.ProcessingEmbeddingGuardFromContext(agent24IngestEmbeddingContext(h.ctx, k))
