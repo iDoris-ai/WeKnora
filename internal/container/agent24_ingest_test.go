@@ -2,7 +2,11 @@
 package container
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
@@ -46,5 +50,33 @@ func TestEnsureAgent24IngestJobsCreatesTheTable(t *testing.T) {
 		&types.Agent24EntryWithdrawal{},
 	} {
 		require.True(t, db.Migrator().HasTable(model), "%T", model)
+	}
+}
+
+// A24-KB-43 (PR-Daemon on #156): each background sweep has its own loop; a failing or panicking run is logged and
+// the loop goes on, and closing stop ends it.
+func TestAgent24EveryMinuteSurvivesPanics(t *testing.T) {
+	old := agent24SweepInterval
+	agent24SweepInterval = 5 * time.Millisecond
+	t.Cleanup(func() { agent24SweepInterval = old })
+	var runs atomic.Int32
+	stop := make(chan struct{})
+	done := agent24EveryMinute(stop, "test sweep", func(ctx context.Context) error {
+		_, hasDeadline := ctx.Deadline()
+		require.True(t, hasDeadline)
+		switch runs.Add(1) {
+		case 1:
+			panic("boom")
+		case 2:
+			return errors.New("failed")
+		}
+		return nil
+	})
+	require.Eventually(t, func() bool { return runs.Load() >= 3 }, 2*time.Second, time.Millisecond)
+	close(stop)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the loop did not end after stop")
 	}
 }

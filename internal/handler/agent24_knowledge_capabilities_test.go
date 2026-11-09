@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -134,6 +135,29 @@ func TestAgent24KnowledgeCapabilitySearchNeedsKey(t *testing.T) {
 			read := NewAgent24KnowledgeReadHandler(nil, nil, nil, nil, nil, nil, nil, nil)
 			assert.Equal(t, []bool{!declared, declared, declared},
 				[]bool{ready.keyMissing, search.key != nil, read.key != nil})
+		})
+	}
+}
+
+// A24-KB-43: candidate.propose is declared, ready's operations.candidate leaves disabled, and the handler exists,
+// exactly when the candidate routes are registered: integration mode with the revision key.
+func TestAgent24KnowledgeCapabilityCandidatePropose(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	for _, tc := range []struct {
+		name, mode, key string
+		want            []string
+	}{
+		{"integration", Agent24KnowledgeModeIntegration, key, []string{"search", "read", "candidate.propose"}},
+		{"integration without key", Agent24KnowledgeModeIntegration, "", []string{}},
+		{"standalone", "", key, []string{"search", "read"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(Agent24KnowledgeModeEnv, tc.mode)
+			agent24SetTagKey(t, tc.key)
+			assert.Equal(t, tc.want, BuildAgent24KnowledgeCapability().SupportedOperations)
+			declared := slices.Contains(tc.want, "candidate.propose")
+			assert.Equal(t, declared, NewAgent24KnowledgeReadyHandler(nil, nil, nil).candidates)
+			assert.Equal(t, declared, NewAgent24KnowledgeCandidatesHandler(nil, nil) != nil)
 		})
 	}
 }

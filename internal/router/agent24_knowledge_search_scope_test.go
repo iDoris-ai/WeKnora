@@ -178,7 +178,7 @@ func TestAgent24KnowledgeSearchRouteKBAllowList(t *testing.T) {
 			tenants, keys := agent24RecheckServices(tc.scope)
 			RegisterAgent24KnowledgeRoutes(v1, nil,
 				handler.NewAgent24KnowledgeSearchHandler(agent24SearchScopeDB(t), nil, kbs, tenants, keys, nil,
-					nil, nil, nil, nil), nil, nil, nil, nil, nil, nil, g) // A24-KB-34
+					nil, nil, nil, nil), nil, nil, nil, nil, nil, nil, nil, g) // A24-KB-34
 
 			body := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},` +
@@ -275,7 +275,7 @@ func agent24ReadRouteKBAllowList(t *testing.T, scope types.TenantAPIKeyScope) ma
 			RegisterAgent24KnowledgeRoutes(v1, nil, nil,
 				handler.NewAgent24KnowledgeReadHandler(
 					agent24SearchScopeDB(t), &agent24SearchScopeKBs{}, tenants, keys, nil, nil, nil, nil,
-				), nil, nil, nil, nil, nil, g) // A24-KB-34
+				), nil, nil, nil, nil, nil, nil, g) // A24-KB-34
 
 			body := `{"protocol_version":1,"request_id":"r1","generation":7,` +
 				`"scope":{"knowledge_base_ids":[` + tc.kbs + `]},"knowledge_id":"` + tc.knowledge + `"}`

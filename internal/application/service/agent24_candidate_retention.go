@@ -15,8 +15,9 @@ import (
 // The W8.9 and W3.3 retention periods.
 const (
 	// agent24CandidateContentRetention: title, body and note of a returned or withdrawn candidate go within an
-	// hour. The sweep runs every minute, so the content is gone at most a minute after the hour.
-	agent24CandidateContentRetention = 59 * time.Minute
+	// hour (W8.9). The sweep has its own loop, once a minute with a one-minute deadline (A24-KB-43,
+	// container.agent24EveryMinute), so the content is gone at most two minutes after this: 57 minutes.
+	agent24CandidateContentRetention = 55 * time.Minute
 	// agent24CandidateRecordRetention: a returned or withdrawn candidate's metadata stays 90 days after that state.
 	agent24CandidateRecordRetention = 90 * 24 * time.Hour
 )

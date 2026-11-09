@@ -31,6 +31,10 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	// A24-KB-33: exact method. The other method on each path stays off the list.
 	"POST /api/v1/agent24/knowledge/ui/exchange": {},
 	"GET /api/v1/agent24/knowledge/ui/session":   {},
+	// A24-KB-43: candidate.propose. Registered only in integration mode (handler.NewAgent24KnowledgeCandidatesHandler).
+	"POST /api/v1/agent24/knowledge/candidates":          {},
+	"POST /api/v1/agent24/knowledge/candidates/withdraw": {},
+	"POST /api/v1/agent24/knowledge/candidates/get":      {},
 	// A24-KB-39: the embed knowledge page. Registered only with the UI read routes and a page directory.
 	"GET " + agent24EmbedAdminListPath:   {},
 	"GET " + agent24EmbedAdminDetailPath: {},

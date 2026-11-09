@@ -96,6 +96,14 @@ func TestAgent24CandidateCreateGetAndDedup(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, found)
 	require.Equal(t, "c1", found.ID)
+	// A24-KB-43 (PR-Daemon on #156): a taken id with other content is not a duplicate
+	clash := agent24TestCandidate("c1", "api_external_user:1:a")
+	clash.ContentSHA256 = "h-other"
+	require.ErrorIs(t, s.CreateCandidate(ctx, clash), ErrAgent24CandidateIDTaken)
+	// IsWithdrawn on an empty id answers false without a query
+	withdrawn, err := s.IsWithdrawn(ctx, 1, "")
+	require.NoError(t, err)
+	require.False(t, withdrawn)
 
 	// any one field of the key differing is a different candidate
 	for _, mutate := range []func(*types.Agent24KnowledgeCandidate){
