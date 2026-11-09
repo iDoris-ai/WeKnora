@@ -25,7 +25,9 @@ const (
 //   - footnotes: "[^";
 //   - escape sequences other than HTML entities: a backslash before ASCII punctuation or at the end of a line;
 //   - a link whose destination is not a plain https:// URL, inline "](dest)" or a reference definition
-//     "[label]: dest": no title, and no backtick, "<", ">", quote, backslash or parenthesis in it;
+//     "[label]: dest" anywhere on a line (CommonMark takes definitions inside quotes and list items too, for the
+//     whole document, and a label may span lines): no title, and no backtick, "<", ">", quote, backslash or
+//     parenthesis in it; so any "]:" outside code must be followed by such a destination and nothing else;
 //   - a backtick run with no run of the same length after it on its line.
 //
 // Every rule errs on the side of refusing. What it skips as code must be code to CommonMark too, so a backtick never
@@ -87,9 +89,6 @@ func agent24MarkdownClosesFence(line, fence string) bool {
 
 // agent24MarkdownLineViolation judges one line outside fenced code.
 func agent24MarkdownLineViolation(line string) bool {
-	if dest, ok := agent24MarkdownReferenceDestination(line); ok && !agent24MarkdownSafeDestination(dest) {
-		return true
-	}
 	for i := 0; i < len(line); i++ {
 		switch b := line[i]; b {
 		case '`':
@@ -119,6 +118,14 @@ func agent24MarkdownLineViolation(line string) bool {
 				return true
 			}
 		case ']':
+			if i+1 < len(line) && line[i+1] == ':' {
+				// a reference definition, in any container (Codex S2 r2): the rest of the line is the destination. The
+				// scan goes on over it, since the line may be prose after all ("a [x]: https://e.org![y]")
+				if !agent24MarkdownSafeDestination(strings.TrimLeft(line[i+2:], " \t")) {
+					return true
+				}
+				continue
+			}
 			if i+1 < len(line) && line[i+1] == '(' {
 				rest := strings.TrimLeft(line[i+2:], " \t")
 				end := strings.IndexAny(rest, " \t)")
@@ -156,20 +163,6 @@ func agent24MarkdownCodeSpanEnd(s string, from, n int) int {
 		i += run
 	}
 	return -1
-}
-
-// agent24MarkdownReferenceDestination reads a link reference definition "[label]: dest" (at most three spaces of
-// indent, a label that is not a footnote).
-func agent24MarkdownReferenceDestination(line string) (string, bool) {
-	rest, ok := agent24MarkdownFenceIndent(line)
-	if !ok || !strings.HasPrefix(rest, "[") {
-		return "", false
-	}
-	end := strings.Index(rest, "]:")
-	if end < 2 {
-		return "", false
-	}
-	return strings.TrimLeft(rest[end+2:], " \t"), true
 }
 
 // agent24MarkdownSafeDestination reports whether dest is a link destination the restricted Markdown keeps: an

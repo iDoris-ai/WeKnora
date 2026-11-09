@@ -335,6 +335,17 @@ func TestAgent24RestrictedMarkdown(t *testing.T) {
 		{"`x\n` <img src=x> `y`", true},
 		{"- item\n  ```\n<img src=x>\n  ```", true},
 		{"[ref]: https://example.org \"t`\"", true},
+		// Codex S2 r2: a reference definition inside a container still defines the link for the whole document
+		{"[x]\n\n> [x]: javascript:alert(1)", true},
+		{"[x]\n\n- [x]: http://attacker.example/", true},
+		{"[x]\n\n1. > [x]: http://attacker.example/", true},
+		{"[x\ny]: http://attacker.example/", true},
+		{"[x]:\n  javascript:alert(1)", true},
+		{"> [x]: https://example.org/ok", false},
+		{"注意 [x]: 不是链接", true},                                     // any "]:" outside code needs a https destination
+		{"a [x]: https://e.org![y]\n\n[y]: https://e.org/i", true}, // the scan goes on after a "]:" destination
+		{"[x]: https://e.org[^1]", true},
+		{"[x]: https://e.org/a [y]: javascript:x", true},
 		{"`a` and `b` and ``c`d``", false},
 		{"[ref]: http://example.org", true},
 		{"`code` then <b>", true},
