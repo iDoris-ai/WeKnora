@@ -23,7 +23,7 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{},
 		&handler.Agent24KnowledgeUITicketsHandler{}, &handler.Agent24KnowledgeUIRevocationsHandler{},
 		&handler.Agent24KnowledgeUIExchangeHandler{}, &handler.Agent24KnowledgeUISessionHandler{},
-		&handler.Agent24KnowledgeUIReadHandler{}, g) // A24-KB-34
+		&handler.Agent24KnowledgeUIReadHandler{}, &handler.Agent24KnowledgeCandidatesHandler{}, g) // A24-KB-34, KB-43
 
 	for _, path := range agent24KnowledgeRoutePaths {
 		n := 0
@@ -74,9 +74,9 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 			}
 		}
 	}
-	if len(engine.Routes()) != 15 { // A24-KB-36: eight ui reads
+	if len(engine.Routes()) != 18 { // A24-KB-36: eight ui reads; A24-KB-43: three candidate routes
 		t.Fatalf("routes = %#v, want ready, search, read, ui tickets, "+
-			"ui revocations, exchange, session and eight ui reads",
+			"ui revocations, exchange, session, eight ui reads and three candidate routes",
 			engine.Routes())
 	}
 }
@@ -86,7 +86,7 @@ func TestAgent24KnowledgeRoutesWithoutUIHandlers(t *testing.T) {
 	engine := gin.New()
 	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
 		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, nil, nil, nil,
-		&rbacGuards{})
+		nil, &rbacGuards{})
 	if len(engine.Routes()) != 3 {
 		t.Fatalf("routes = %#v, want exactly ready, search and read", engine.Routes())
 	}
@@ -112,6 +112,9 @@ var agent24KnowledgeRoutePaths = []string{
 	"/api/v1/agent24/knowledge/read",
 	"/api/v1/agent24/knowledge/ui/tickets",
 	"/api/v1/agent24/knowledge/ui/revocations",
+	"/api/v1/agent24/knowledge/candidates",          // A24-KB-43
+	"/api/v1/agent24/knowledge/candidates/withdraw", // A24-KB-43
+	"/api/v1/agent24/knowledge/candidates/get",      // A24-KB-43
 }
 
 func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {
@@ -134,7 +137,7 @@ func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {
 			g := &rbacGuards{}
 			engine := gin.New()
 			RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), tc.ready, tc.srch, tc.read,
-				nil, nil, nil, nil, nil, g)
+				nil, nil, nil, nil, nil, nil, g)
 			var got []string
 			for _, rt := range engine.Routes() {
 				got = append(got, rt.Path)
@@ -163,7 +166,7 @@ func TestAgent24KnowledgeRouteHandlers(t *testing.T) {
 	engine := gin.New()
 	RegisterAgent24KnowledgeRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeReadyHandler{},
 		&handler.Agent24KnowledgeSearchHandler{}, &handler.Agent24KnowledgeReadHandler{}, nil, nil, nil, nil, nil,
-		&rbacGuards{})
+		nil, &rbacGuards{})
 	search := `{"protocol_version":1,"request_id":"r1","generation":7,"query":"q",` +
 		`"scope":{"knowledge_base_ids":["a"]},"budget":{"deadline_ms":800,"max_results":5,"max_concurrency":1}}`
 	read := `{"protocol_version":1,"request_id":"r1","generation":7,"scope":{"knowledge_base_ids":["a"]},` +

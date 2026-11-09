@@ -41,6 +41,11 @@ const (
 	agent24AuditActionUISession  types.AuditAction = "knowledge.ui.session"
 	// A24-KB-34: one action for every UI read entry. The operation name is details.op.
 	agent24AuditActionUIView types.AuditAction = "knowledge.ui.view"
+	// A24-KB-43: the candidate.propose routes (CONTRACT-OPS-v2 W8.12 names submit and withdraw; the author's own
+	// read changes nothing and is knowledge.candidate.read).
+	agent24AuditActionCandidateSubmit   types.AuditAction = "knowledge.candidate.submit"
+	agent24AuditActionCandidateWithdraw types.AuditAction = "knowledge.candidate.withdraw"
+	agent24AuditActionCandidateRead     types.AuditAction = "knowledge.candidate.read"
 
 	agent24AuditScopeType = "agent24_knowledge"
 
@@ -57,6 +62,10 @@ const (
 	// A24-KB-33
 	agent24AuditPathUIExchange = "/api/v1/agent24/knowledge/ui/exchange"
 	agent24AuditPathUISession  = "/api/v1/agent24/knowledge/ui/session"
+	// A24-KB-43
+	agent24AuditPathCandidates        = "/api/v1/agent24/knowledge/candidates"
+	agent24AuditPathCandidateWithdraw = "/api/v1/agent24/knowledge/candidates/withdraw"
+	agent24AuditPathCandidateGet      = "/api/v1/agent24/knowledge/candidates/get"
 
 	// agent24AuditWriteTimeout bounds the row write. The row is written after the response is flushed, on a
 	// context that ignores the client leaving, so a stalled store would otherwise hold the handler forever.
@@ -388,7 +397,8 @@ func agent24KnowledgeAuditPath(c *gin.Context) bool {
 		switch c.Request.URL.Path {
 		case agent24AuditPathReady, agent24AuditPathSearch, agent24AuditPathRead,
 			agent24AuditPathUITickets, agent24AuditPathUIRevocations, // A24-KB-32
-			agent24AuditPathUIExchange: // A24-KB-33
+			agent24AuditPathUIExchange,                                                                  // A24-KB-33
+			agent24AuditPathCandidates, agent24AuditPathCandidateWithdraw, agent24AuditPathCandidateGet: // A24-KB-43
 			return true
 		default:
 			return false
@@ -420,6 +430,12 @@ func agent24AuditAction(c *gin.Context) types.AuditAction {
 		return agent24AuditActionUIExchange
 	case agent24AuditPathUISession: // A24-KB-33
 		return agent24AuditActionUISession
+	case agent24AuditPathCandidates: // A24-KB-43
+		return agent24AuditActionCandidateSubmit
+	case agent24AuditPathCandidateWithdraw: // A24-KB-43
+		return agent24AuditActionCandidateWithdraw
+	case agent24AuditPathCandidateGet: // A24-KB-43
+		return agent24AuditActionCandidateRead
 	default:
 		return agent24AuditActionReady
 	}

@@ -67,6 +67,11 @@ func BuildAgent24KnowledgeCapability() Agent24KnowledgeCapability {
 	if agent24SearchTagKey() != nil {
 		ops = append(ops, "search", "read")
 	}
+	// A24-KB-43 (READONLY R9.2 r13): the write operation classes whose routes are registered. S2 serves only
+	// candidate.propose; review, approve and entry.withdraw join when their UI routes do.
+	if agent24CandidateRoutesEnabled() {
+		ops = append(ops, string(Agent24WriteCandidatePropose))
+	}
 	return Agent24KnowledgeCapability{
 		ProtocolVersions:    []int{agent24KnowledgeProtocolVersion},
 		Mode:                mode,

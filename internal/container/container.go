@@ -714,6 +714,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewAgent24KnowledgeUIExchangeHandler))    // A24-KB-33
 	must(container.Provide(handler.NewAgent24KnowledgeUISessionHandler))     // A24-KB-33
 	must(container.Provide(handler.NewAgent24KnowledgeUIReadHandler))        // A24-KB-34
+	must(container.Provide(handler.NewAgent24KnowledgeCandidatesHandler))    // A24-KB-43
 	// Dig resolves exact types; adapt the registered service to the handler's
 	// narrower SharedAgentLookup interface at the composition boundary.
 	must(container.Provide(func(

@@ -44,12 +44,22 @@ var (
 	agent24ForbiddenReasons = map[string]bool{
 		"empty_scope": true, "operation_not_allowed": true,
 		"operation_disabled": true, "policy_denied": true,
+		"quota_exceeded": true, // A24-KB-43 (CONTRACT-OPS-v2 §6, W8.2)
+	}
+	// A24-KB-43: the CONTRACT-OPS-v2 §6 reasons the write operations carry on invalid_request and stale.
+	agent24InvalidRequestWriteReasons = map[string]bool{
+		"idempotency_key_missing": true, "idempotency_key_reused": true, "content_hash_mismatch": true,
+		"unsupported_format": true, "too_large": true,
+	}
+	agent24StaleWriteReasons = map[string]bool{
+		"candidate_not_submitted": true, "base_revision_changed": true,
 	}
 	// Value: retryable.
 	agent24UnavailableReasons = map[string]bool{
 		"not_ready": true, "dependency": true, "overloaded": true,
 		"index_building": true, "index_pending": true, "unsupported_kb_type": false, "index_failed": false,
 		"credential_near_expiry": true, // A24-KB-32
+		"request_in_progress":    true, // A24-KB-43 (W3.2)
 	}
 )
 
@@ -70,6 +80,22 @@ func agent24UnsupportedProtocolVersion(supported []int) *agent24KnowledgeError {
 		Code: agent24CodeInvalidRequest, Reason: "unsupported_protocol_version",
 		Extra: map[string]any{"supported": append([]int{}, supported...)},
 	}
+}
+
+// agent24InvalidWrite is invalid_request with a CONTRACT-OPS-v2 §6 reason (A24-KB-43).
+func agent24InvalidWrite(reason string) *agent24KnowledgeError {
+	if !agent24InvalidRequestWriteReasons[reason] {
+		return agent24Internal()
+	}
+	return &agent24KnowledgeError{Code: agent24CodeInvalidRequest, Reason: reason}
+}
+
+// agent24StaleWrite is stale with a CONTRACT-OPS-v2 §6 reason (A24-KB-43); extra goes into details.
+func agent24StaleWrite(reason string, extra map[string]any) *agent24KnowledgeError {
+	if !agent24StaleWriteReasons[reason] {
+		return agent24Internal()
+	}
+	return &agent24KnowledgeError{Code: agent24CodeStale, Reason: reason, Extra: extra}
 }
 
 func agent24Unauthorized(reason string) *agent24KnowledgeError {

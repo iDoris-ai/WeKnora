@@ -40,19 +40,41 @@ func TestAgent24KnowledgeReady(t *testing.T) {
 	secret := errors.New("SECRET-dsn")
 	ready := map[string]any{"state": "ready"}
 	notReady := map[string]any{"state": "not_ready", "reason": "dependency"}
+	noRoutes := map[string]any{"state": "disabled", "reason": "routes_not_registered"}
 	allDown := fakeAgent24ReadyProbe{storage: secret, engine: secret}
 	engDown := fakeAgent24ReadyProbe{engine: secret}
 	const pv2 = `{"protocol_version":2,"request_id":"r1","generation":7}`
 	cases := []struct {
 		name, body       string
 		probe            fakeAgent24ReadyProbe
+		candidates       bool
 		status           int
 		search, read     map[string]any
+		candidate        map[string]any
 		reason, rid, gen any
 	}{
-		{name: "all ready", body: ok + `}`, status: 200, search: ready, read: ready},
-		{name: "storage down", body: ok + `}`, probe: allDown, status: 200, search: notReady, read: notReady},
-		{name: "engine down", body: ok + `}`, probe: engDown, status: 200, search: notReady, read: ready},
+		{name: "all ready", body: ok + `}`, status: 200, search: ready, read: ready, candidate: noRoutes},
+		{
+			name: "storage down", body: ok + `}`, probe: allDown, status: 200, search: notReady, read: notReady,
+			candidate: noRoutes,
+		},
+		{
+			name: "engine down", body: ok + `}`, probe: engDown, status: 200, search: notReady, read: ready,
+			candidate: noRoutes,
+		},
+		// A24-KB-43: with the candidate routes registered, the key follows the database only.
+		{
+			name: "candidates ready", body: ok + `}`, candidates: true, status: 200, search: ready, read: ready,
+			candidate: ready,
+		},
+		{
+			name: "candidates engine down", body: ok + `}`, probe: engDown, candidates: true, status: 200,
+			search: notReady, read: ready, candidate: ready,
+		},
+		{
+			name: "candidates storage down", body: ok + `}`, probe: allDown, candidates: true, status: 200,
+			search: notReady, read: notReady, candidate: notReady,
+		},
 		{name: "pv 2", body: pv2, status: 400, reason: "unsupported_protocol_version", rid: "r1", gen: 7.0},
 		{name: "extra key", body: ok + `,"x":1}`, status: 400, rid: "r1", gen: 7.0},
 		{name: "scope empty", body: ok + `,"scope":{}}`, status: 400, rid: "r1", gen: 7.0},
@@ -67,7 +89,7 @@ func TestAgent24KnowledgeReady(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
-			(&Agent24KnowledgeReadyHandler{probe: tc.probe}).Ready(c)
+			(&Agent24KnowledgeReadyHandler{probe: tc.probe, candidates: tc.candidates}).Ready(c)
 			require.Equal(t, tc.status, w.Code)
 			assert.NotContains(t, w.Body.String(), "SECRET")
 			var got map[string]any
@@ -86,7 +108,9 @@ func TestAgent24KnowledgeReady(t *testing.T) {
 			assert.Equal(t, []any{1.0, "r1", 7.0, true},
 				[]any{got["protocol_version"], got["request_id"], got["generation"], got["live"]})
 			ingest := map[string]any{"state": "disabled", "reason": "read_only_v1"}
-			assert.Equal(t, map[string]any{"search": tc.search, "read": tc.read, "ingest": ingest}, got["operations"])
+			assert.Equal(t, map[string]any{
+				"search": tc.search, "read": tc.read, "ingest": ingest, "candidate": tc.candidate,
+			}, got["operations"])
 		})
 	}
 }

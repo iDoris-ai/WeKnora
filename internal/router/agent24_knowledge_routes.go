@@ -13,13 +13,14 @@ import (
 )
 
 // RegisterAgent24KnowledgeRoutes registers the Agent24 knowledge integration
-// endpoints (fork patches A24-KB-02, A24-KB-10, A24-KB-15, A24-KB-32, A24-KB-33, A24-KB-34).
+// endpoints (fork patches A24-KB-02, A24-KB-10, A24-KB-15, A24-KB-32, A24-KB-33, A24-KB-34, A24-KB-43).
 // A nil handler skips its route.
 func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24KnowledgeReadyHandler,
 	s *handler.Agent24KnowledgeSearchHandler, rd *handler.Agent24KnowledgeReadHandler,
 	tickets *handler.Agent24KnowledgeUITicketsHandler, revocations *handler.Agent24KnowledgeUIRevocationsHandler,
 	exchange *handler.Agent24KnowledgeUIExchangeHandler, session *handler.Agent24KnowledgeUISessionHandler,
 	read *handler.Agent24KnowledgeUIReadHandler, // A24-KB-34
+	candidates *handler.Agent24KnowledgeCandidatesHandler, // A24-KB-43
 	g *rbacGuards,
 ) {
 	if h != nil {
@@ -31,6 +32,17 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 	}
 	if rd != nil {
 		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/read", apiKeyRetrieve(apiKeyAny()), g.Viewer(), rd.Read)
+	}
+	// A24-KB-43: candidate.propose with C. Registered only when the handler is non-nil, which is integration mode.
+	// The route asks for retrieve, as every Provider route does; the handler checks kb_candidate_propose (W1.9 ③,
+	// after the shape).
+	if candidates != nil {
+		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates", apiKeyRetrieve(apiKeyAny()), g.Viewer(),
+			candidates.Submit)
+		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates/withdraw", apiKeyRetrieve(apiKeyAny()),
+			g.Viewer(), candidates.Withdraw)
+		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates/get", apiKeyRetrieve(apiKeyAny()),
+			g.Viewer(), candidates.Get)
 	}
 	// A24-KB-32: registered only when the handler is non-nil, which is when the UI session key is configured.
 	if tickets != nil {

@@ -1,8 +1,8 @@
 # Agent24 Knowledge v1 schema 副本（就绪、search 与 read 端点的测试用）
 
-- 来源：iDoris-ai/Agent24 仓库 `protocol/knowledge/v1/` 下的 `ready.schema.json`、`search.schema.json`、`read.schema.json`、`error.schema.json`、`common.schema.json`，提交 9121a7b2（契约 CONTRACT-READONLY-v1 r10）。
+- 来源：iDoris-ai/Agent24 仓库 `protocol/knowledge/v1/` 下的 `ready.schema.json`、`search.schema.json`、`read.schema.json`、`error.schema.json`、`common.schema.json`，提交 9121a7b2（契约 CONTRACT-READONLY-v1 r10）；`ready.schema.json` 改取 f7291afd（schema r13，加了 `operations.candidate`，A24-KB-43）。
 - sha256：
-  - `ready.schema.json`  3670772188f2a0c84f6e7234006977bbf029764ad44e19f11c38791e524dbfdd
+  - `ready.schema.json`  937c39c6f6423e7d0299866dfe9a60d1e2b4f5e4c81ced282ddd2859ed607c4a
   - `search.schema.json` 6f714593bfaaeb1e3b3a5063b1610eaa19da74b3e37f28b1dd2b25c257fba16f
   - `error.schema.json`  02dea455203cf503f61e0995f62605fffbcd832af627a5fb4a210820cd81649e
   - `common.schema.json` 97de36a9af3a1315bdacda1243c9f8dd84a1f15993f9c757698b73c2bc345f52

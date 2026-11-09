@@ -75,7 +75,13 @@ type Agent24KnowledgeReadyHandler struct {
 	scope      agent24ScopeResolver
 	index      agent24IndexReader
 	keyMissing bool // no revision key: operations.search and operations.read are disabled (agent24SearchTagKey)
+	// candidates: the candidate.propose routes are registered (A24-KB-43, agent24CandidateRoutesEnabled).
+	candidates bool
 }
+
+// agent24CandidateRoutesMissingReason is operations.candidate's reason when the candidate routes are not registered
+// (A24-KB-43: outside integration mode).
+const agent24CandidateRoutesMissingReason = "routes_not_registered"
 
 // NewAgent24KnowledgeReadyHandler builds the handler with the default dependencies.
 func NewAgent24KnowledgeReadyHandler(
@@ -88,6 +94,7 @@ func NewAgent24KnowledgeReadyHandler(
 		index: agent24DBIndexReader{db: db},
 
 		keyMissing: agent24SearchTagKey() == nil,
+		candidates: agent24CandidateRoutesEnabled(),
 	}
 }
 
@@ -195,6 +202,11 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 		search = agent24OperationState{State: "disabled", Reason: agent24TagKeyMissingReason}
 		read = search
 	}
+	// A24-KB-43 (READONLY R8.2 r12, CONTRACT-OPS-v2 W1.4): the candidate routes depend only on the database.
+	candidate := agent24OperationState{State: "disabled", Reason: agent24CandidateRoutesMissingReason}
+	if h.candidates {
+		candidate = agent24State(storageErr == nil)
+	}
 	resp := gin.H{
 		"protocol_version": agent24KnowledgeProtocolVersion,
 		"request_id":       echo.RequestID,
@@ -202,7 +214,8 @@ func (h *Agent24KnowledgeReadyHandler) Ready(c *gin.Context) {
 		"live":             true,
 		"operations": gin.H{
 			"search": search, "read": read,
-			"ingest": agent24OperationState{State: "disabled", Reason: "read_only_v1"},
+			"ingest":    agent24OperationState{State: "disabled", Reason: "read_only_v1"},
+			"candidate": candidate,
 		},
 	}
 	var auditedScope []string

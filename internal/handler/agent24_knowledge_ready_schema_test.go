@@ -24,9 +24,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Copied verbatim from Agent24 9121a7b2 (CONTRACT-READONLY-v1 r10); see testdata/agent24_knowledge/README.md.
+// Copied verbatim from Agent24 9121a7b2 (CONTRACT-READONLY-v1 r10), ready.schema.json from f7291afd (schema r13,
+// operations.candidate); see testdata/agent24_knowledge/README.md.
 var agent24KnowledgeSchemaSHA256 = map[string]string{
-	"ready.schema.json":  "3670772188f2a0c84f6e7234006977bbf029764ad44e19f11c38791e524dbfdd",
+	"ready.schema.json":  "937c39c6f6423e7d0299866dfe9a60d1e2b4f5e4c81ced282ddd2859ed607c4a",
 	"search.schema.json": "6f714593bfaaeb1e3b3a5063b1610eaa19da74b3e37f28b1dd2b25c257fba16f",
 	"error.schema.json":  "02dea455203cf503f61e0995f62605fffbcd832af627a5fb4a210820cd81649e",
 	"common.schema.json": "97de36a9af3a1315bdacda1243c9f8dd84a1f15993f9c757698b73c2bc345f52",

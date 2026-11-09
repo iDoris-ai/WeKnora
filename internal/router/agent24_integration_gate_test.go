@@ -35,6 +35,11 @@ func TestAgent24IntegrationGate(t *testing.T) {
 		{"GET", "/api/v1/agent24/knowledge/ui/exchange"},
 		{"POST", "/api/v1/agent24/knowledge/ui/session"},
 		{"GET", "/api/v1/agent24/knowledge/read"},
+		{"POST", "/api/v1/agent24/knowledge/candidates"},          // A24-KB-43
+		{"POST", "/api/v1/agent24/knowledge/candidates/withdraw"}, // A24-KB-43
+		{"POST", "/api/v1/agent24/knowledge/candidates/get"},      // A24-KB-43
+		{"GET", "/api/v1/agent24/knowledge/candidates"},           // A24-KB-43: the other method stays off
+		{"POST", "/api/v1/agent24/knowledge/candidates/list"},     // A24-KB-43: not a route of the list
 		{"POST", "/api/v1/auth/register"},
 		{"POST", "/api/v1/auth/login"},
 		{"GET", "/swagger/*any"},
@@ -73,6 +78,11 @@ func TestAgent24IntegrationGate(t *testing.T) {
 		{"GET", "/api/v1/agent24/knowledge/ui/exchange", 404},
 		{"POST", "/api/v1/agent24/knowledge/ui/session", 404},
 		{"GET", "/api/v1/agent24/knowledge/read", 404},
+		{"POST", "/api/v1/agent24/knowledge/candidates", 200},          // A24-KB-43
+		{"POST", "/api/v1/agent24/knowledge/candidates/withdraw", 200}, // A24-KB-43
+		{"POST", "/api/v1/agent24/knowledge/candidates/get", 200},      // A24-KB-43
+		{"GET", "/api/v1/agent24/knowledge/candidates", 404},
+		{"POST", "/api/v1/agent24/knowledge/candidates/list", 404},
 		{"POST", "/api/v1/auth/register", 404},
 		{"POST", "/api/v1/auth/login", 404},
 		{"GET", "/swagger/index.html", 404},

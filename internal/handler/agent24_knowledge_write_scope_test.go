@@ -221,7 +221,8 @@ func TestAgent24WriteInScope(t *testing.T) {
 }
 
 // Reads are untouched: a key that also carries every write capability gets the same ready answer, byte for
-// byte, as a read-only key; the wire gains no key (Agent24 clients decode operations strictly, design §4).
+// byte, as a read-only key. operations.candidate (A24-KB-43, schema r13) says whether the routes are there, never
+// whether the credential holds kb_candidate_* (R8.2).
 func TestAgent24WriteCapabilitiesLeaveReadyUnchanged(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := `{"protocol_version":1,"request_id":"r1","generation":7,"scope":{"knowledge_base_ids":["kbA"]}}`
@@ -244,7 +245,7 @@ func TestAgent24WriteCapabilitiesLeaveReadyUnchanged(t *testing.T) {
 	assert.Equal(t, readOnly, ready("retrieve", "kb_candidate_propose", "kb_candidate_review", "kb_candidate_approve",
 		"kb_entry_withdraw"))
 	assert.Contains(t, readOnly, `"ingest":{"state":"disabled","reason":"read_only_v1"}`)
-	assert.NotContains(t, readOnly, "candidate")
+	assert.Contains(t, readOnly, `"candidate":{"state":"disabled","reason":"routes_not_registered"}`)
 }
 
 // Key issuance accepts the four write capabilities (the unknown-capability check uses the same switch), and
