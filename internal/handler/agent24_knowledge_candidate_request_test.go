@@ -303,6 +303,7 @@ func TestAgent24RestrictedMarkdown(t *testing.T) {
 		{"<https://example.org>", true},
 		{"![img](https://example.org/a.png)", true},
 		{"text[^1]\n\n[^1]: note", true},
+		{"text[^1] alone", true},
 		{"\\*not emphasis\\*", true},
 		{"hard break\\", true},
 		{"[x](http://example.org)", true},

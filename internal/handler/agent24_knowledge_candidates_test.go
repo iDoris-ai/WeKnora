@@ -858,3 +858,27 @@ func TestAgent24CandidateAuditActions(t *testing.T) {
 		assert.False(t, agent24KnowledgeAuditPath(c), "GET "+path)
 	}
 }
+
+// The conditional write lost to a concurrent withdrawal of the same candidate: the state is read again, so the
+// answer is already: true, not stale.
+func TestAgent24CandidateWithdrawRace(t *testing.T) {
+	e := newAgent24CandidateEnv(t)
+	alice := agent24Proposer(agent24Alice)
+	id := e.submit(t, alice, nil)
+	var once sync.Once
+	require.NoError(t, e.db.Callback().Update().Before("gorm:update").Register("agent24_test_withdraw_race",
+		func(db *gorm.DB) {
+			if db.Statement.Table != "agent24_knowledge_candidates" {
+				return
+			}
+			once.Do(func() {
+				tx := db.Session(&gorm.Session{NewDB: true})
+				tx.Error = nil
+				require.NoError(t, tx.Exec("UPDATE agent24_knowledge_candidates SET status = ? WHERE id = ?",
+					types.Agent24CandidateWithdrawn, id).Error)
+			})
+		}))
+	r := agent24CandidateCall(t, e.h.Withdraw, alice, agent24Ref(id))
+	require.Equal(t, http.StatusOK, r.code, r.raw)
+	assert.Equal(t, map[string]any{"already": true}, r.details())
+}
