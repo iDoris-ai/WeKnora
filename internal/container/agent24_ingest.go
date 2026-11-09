@@ -76,8 +76,11 @@ func startAgent24IngestReconcile(
 				logger.Warnf(ctx, "[agent24] ingest job sweep failed: error_len=%d error_type=%T",
 					len(fmt.Sprint(err)), err)
 			}
-			if _, err := retention.Sweep(ctx); err != nil {
-				logger.Warnf(ctx, "[agent24] candidate retention sweep failed: error_len=%d error_type=%T",
+			// its own deadline: a job sweep that used up the minute must not starve the W8.9 purge
+			rctx, rcancel := context.WithTimeout(context.Background(), agent24IngestReconcileTimeout)
+			defer rcancel()
+			if _, err := retention.Sweep(rctx); err != nil {
+				logger.Warnf(rctx, "[agent24] candidate retention sweep failed: error_len=%d error_type=%T",
 					len(fmt.Sprint(err)), err)
 			}
 		}

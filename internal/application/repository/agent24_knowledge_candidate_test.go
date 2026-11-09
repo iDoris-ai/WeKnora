@@ -69,6 +69,14 @@ func TestEnsureAgent24CandidateTablesKeepsAnExistingJobTable(t *testing.T) {
 func TestAgent24CandidateCreateGetAndDedup(t *testing.T) {
 	_, s := agent24CandidateDB(t)
 	ctx := context.Background()
+	// only a submitted candidate can be created
+	bad := agent24TestCandidate("c0", "api_external_user:1:a")
+	bad.Status = types.Agent24CandidateApproved
+	require.Error(t, s.CreateCandidate(ctx, bad))
+	none, err := s.GetCandidate(ctx, 1, "c0")
+	require.NoError(t, err)
+	require.Nil(t, none)
+
 	c := agent24TestCandidate("c1", "api_external_user:1:a")
 	require.NoError(t, s.CreateCandidate(ctx, c))
 	got, err := s.GetCandidate(ctx, 1, "c1")
@@ -324,11 +332,15 @@ func TestAgent24CandidateRetention(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 
-	// 90 days after the terminal state the row goes; submitted never does
+	// 90 days after the terminal state a returned or withdrawn row goes; submitted and approved never do (the
+	// approved row is what keeps its document an entry)
 	n, err = s.DeleteSettledCandidates(ctx, agent24T0.Add(time.Hour))
 	require.NoError(t, err)
-	require.Equal(t, int64(3), n)
-	for _, id := range []string{"ret-new", "sub"} {
+	require.Equal(t, int64(2), n)
+	is, err := s.IsEntryDocument(ctx, 1, "k-ap-old")
+	require.NoError(t, err)
+	require.True(t, is)
+	for _, id := range []string{"ret-new", "sub", "ap-old"} {
 		c, err := s.GetCandidate(ctx, 1, id)
 		require.NoError(t, err)
 		require.NotNil(t, c, id)
@@ -402,6 +414,8 @@ func TestAgent24KnowledgeAdminGrants(t *testing.T) {
 		{TenantID: 1, Principal: "pa", KnowledgeBaseID: "kb1", CreatedAt: agent24T0},
 		{TenantID: 1, Principal: "pstar", KnowledgeBaseID: types.Agent24KnowledgeAdminAnyKB, CreatedAt: agent24T0},
 		{TenantID: 1, Principal: "pr", KnowledgeBaseID: "kb1", CreatedAt: agent24T0, RevokedAt: &revoked},
+		// an operator row with no knowledge base grants nothing anywhere
+		{TenantID: 1, Principal: "pempty", KnowledgeBaseID: "", CreatedAt: agent24T0},
 	}).Error)
 	for _, c := range []struct {
 		tenant    uint64
@@ -420,6 +434,8 @@ func TestAgent24KnowledgeAdminGrants(t *testing.T) {
 		{1, "", "kb1", false},
 		{1, "pa", "", false},
 		{1, "pstar", "", false},
+		{1, "pempty", "kb1", false},
+		{1, "pempty", "", false},
 	} {
 		got, err := s.AdminHolds(ctx, c.tenant, c.principal, c.kb)
 		require.NoError(t, err)
@@ -430,7 +446,13 @@ func TestAgent24KnowledgeAdminGrants(t *testing.T) {
 		principal string
 		holds     bool
 	}{
-		{1, "pa", true}, {1, "pstar", true}, {1, "pr", false}, {1, "pb", false}, {2, "pa", false}, {1, "", false},
+		{1, "pa", true},
+		{1, "pstar", true},
+		{1, "pr", false},
+		{1, "pb", false},
+		{2, "pa", false},
+		{1, "", false},
+		{1, "pempty", false},
 	} {
 		got, err := s.AdminHoldsAnywhere(ctx, c.tenant, c.principal)
 		require.NoError(t, err)

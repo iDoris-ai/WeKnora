@@ -17,7 +17,7 @@ const (
 	// agent24CandidateContentRetention: title, body and note of a returned or withdrawn candidate go within an
 	// hour. The sweep runs every minute, so the content is gone at most a minute after the hour.
 	agent24CandidateContentRetention = 59 * time.Minute
-	// agent24CandidateRecordRetention: the candidate's metadata stays 90 days after its terminal state.
+	// agent24CandidateRecordRetention: a returned or withdrawn candidate's metadata stays 90 days after that state.
 	agent24CandidateRecordRetention = 90 * 24 * time.Hour
 )
 
@@ -39,8 +39,9 @@ type Agent24CandidateRetentionResult struct {
 	IdempotencyDeleted int64
 }
 
-// Sweep purges the content of returned and withdrawn candidates past the content retention, deletes candidates
-// past the record retention and deletes expired idempotency records. Each step runs even when an earlier one
+// Sweep purges the content of returned and withdrawn candidates past the content retention, deletes returned and
+// withdrawn candidates past the record retention (approved ones stay: they mark their document an entry) and
+// deletes expired idempotency records. Each step runs even when an earlier one
 // failed; the errors are joined.
 func (r *Agent24CandidateRetention) Sweep(ctx context.Context) (Agent24CandidateRetentionResult, error) {
 	now := r.now().UTC()

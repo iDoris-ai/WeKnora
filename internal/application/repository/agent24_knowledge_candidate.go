@@ -88,7 +88,7 @@ func EnsureAgent24CandidateTables(db *gorm.DB) error {
 }
 
 // agent24WidenIngestJobPrincipal widens agent24_ingest_jobs.principal_user_id when ColumnTypes reports it
-// narrower than agent24PrincipalColumnSize. AlterColumn cannot: the model tag is still varchar(64).
+// narrower than agent24PrincipalColumnSize: a table A24-KB-41 created before the model tag became varchar(255).
 // Only PostgreSQL enforces the length; other dialects are left alone.
 func agent24WidenIngestJobPrincipal(db *gorm.DB) error {
 	m := db.Migrator()
@@ -318,12 +318,15 @@ func (s *Agent24CandidateStore) PurgeCandidateContent(ctx context.Context, befor
 	return res.RowsAffected, res.Error
 }
 
-// DeleteSettledCandidates deletes candidates that reached a terminal state before before (W8.9: metadata kept 90
-// days after the terminal state). Submitted candidates are never deleted.
+// DeleteSettledCandidates deletes returned and withdrawn candidates that reached that state before before (W8.9:
+// metadata kept 90 days after the terminal state). Submitted candidates are never deleted, and neither are approved
+// ones: an approved candidate is what makes its knowledge_id an entry document (IsEntryDocument), for as long as the
+// document exists, and its body is the document's original (W8.9: handled by #997, not by this retention).
 func (s *Agent24CandidateStore) DeleteSettledCandidates(ctx context.Context, before time.Time) (int64, error) {
 	res := s.db.WithContext(ctx).
-		Where("status <> ? AND terminal_at IS NOT NULL AND terminal_at < ?",
-			types.Agent24CandidateSubmitted, before.UTC()).
+		Where("status IN ? AND terminal_at IS NOT NULL AND terminal_at < ?",
+			[]types.Agent24CandidateStatus{types.Agent24CandidateReturned, types.Agent24CandidateWithdrawn},
+			before.UTC()).
 		Delete(&types.Agent24KnowledgeCandidate{})
 	return res.RowsAffected, res.Error
 }
@@ -394,7 +397,7 @@ func (s *Agent24CandidateStore) AdminHolds(ctx context.Context, tenantID uint64,
 
 // AdminHoldsAnywhere reports whether principal holds an unrevoked organisation-administrator grant on any
 // knowledge base of the tenant (W1.9 ③(a): "holds the operation class in no scope"). An empty principal holds
-// nothing.
+// nothing, and a row with an empty knowledge_base_id grants nothing (AdminHolds never matches it either).
 func (s *Agent24CandidateStore) AdminHoldsAnywhere(
 	ctx context.Context, tenantID uint64, principal string,
 ) (bool, error) {
@@ -402,7 +405,8 @@ func (s *Agent24CandidateStore) AdminHoldsAnywhere(
 		return false, nil
 	}
 	err := s.db.WithContext(ctx).Select("principal").
-		Where("tenant_id = ? AND principal = ? AND revoked_at IS NULL", tenantID, principal).
+		Where("tenant_id = ? AND principal = ? AND revoked_at IS NULL AND knowledge_base_id <> ''",
+			tenantID, principal).
 		Take(&types.Agent24KnowledgeAdmin{}).Error
 	return agent24RowExists(err)
 }
