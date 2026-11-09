@@ -3,8 +3,9 @@
 //
 // Upstream calls it from two places, one line each: isKnowledgeAborted (the worker entry before it marks the row
 // processing, and every boundary of processChunks) and the post-process handler before it promotes the row to
-// finalizing, which is when the build becomes servable. A knowledge without the agent24_origin metadata is not an
-// Agent24 ingest and goes through untouched, without a database read.
+// finalizing, which is when the build becomes servable. A knowledge without the agent24_origin metadata is read
+// once for an occupying job: a job means it is an Agent24 ingest (an upstream whole-row save may have wiped the
+// marker); no job goes through untouched.
 //
 // At each boundary, in order (W1.3; the first that fails decides):
 //
@@ -75,10 +76,15 @@ func SetAgent24StageGate(db *gorm.DB, jobs *repository.Agent24IngestJobStore, po
 
 // agent24IngestEmbeddingContext puts the policy's embedding guard on an Agent24 ingest's task context, so each
 // embedding call is checked at call time and cannot follow a redirect away from the approved endpoint (W1.3 ③,
-// same as the search path). Without the gate installed the guard refuses every destination. Other documents get
-// ctx back unchanged.
+// same as the search path). Without the gate installed a marked knowledge's guard refuses every destination, and
+// an unmarked one whose occupying job cannot be read gets the same. Other documents get ctx back unchanged.
 func agent24IngestEmbeddingContext(ctx context.Context, k *types.Knowledge) context.Context {
-	if !agent24IsIngest(k) {
+	ingest, err := agent24KnowledgeIsIngest(ctx, k)
+	if err != nil {
+		// the occupying-job read failed: an unmarked row cannot be told from an Agent24 ingest, so fail closed
+		return types.WithProcessingEmbeddingGuard(ctx, agent24DenyAllGuard{})
+	}
+	if !ingest {
 		return ctx
 	}
 	var guard types.ProcessingGuard = agent24DenyAllGuard{}
@@ -110,6 +116,25 @@ func agent24IsIngest(k *types.Knowledge) bool {
 	return ok
 }
 
+// agent24KnowledgeIsIngest reports whether k is an Agent24 ingest: the origin marker, or, when that marker is
+// gone, an occupying job. An upstream whole-row save can wipe the marker. A gate that is not installed cannot
+// read the job, so an unmarked knowledge is not an ingest (it goes through untouched). err is set only when
+// that occupying-job read fails.
+func agent24KnowledgeIsIngest(ctx context.Context, k *types.Knowledge) (bool, error) {
+	if agent24IsIngest(k) {
+		return true, nil
+	}
+	g := agent24Gate.Load()
+	if k == nil || g == nil || g.db == nil || g.jobs == nil || g.policy == nil {
+		return false, nil
+	}
+	job, err := g.jobs.Occupying(ctx, k.TenantID, k.ID)
+	if err != nil {
+		return false, err
+	}
+	return job != nil, nil
+}
+
 // agent24StageGateAborts runs the gate for k. aborted reports that the caller must stop; status is the
 // isKnowledgeAborted status to stop with (cancelled once the gate settled the job, unreadable to retry).
 func agent24StageGateAborts(ctx context.Context, k *types.Knowledge) (aborted bool, status string) {
@@ -123,7 +148,12 @@ func agent24PostProcessGateAborts(ctx context.Context, k *types.Knowledge) (abor
 }
 
 func agent24RunStageGate(ctx context.Context, k *types.Knowledge, postProcess bool) (bool, string) {
-	if !agent24IsIngest(k) {
+	ingest, err := agent24KnowledgeIsIngest(ctx, k)
+	if err != nil {
+		return true, abortStatusUnreadable
+	}
+	if !ingest {
+		// unmarked and no occupying job: an upstream document, not an orphan
 		return false, ""
 	}
 	g := agent24Gate.Load()
