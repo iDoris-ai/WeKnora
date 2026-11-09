@@ -83,11 +83,22 @@ func newAgent24KnowledgeCandidatesHandler(
 ) *Agent24KnowledgeCandidatesHandler {
 	return &Agent24KnowledgeCandidatesHandler{
 		key: key, store: store, scope: scope,
-		auth:  agent24WriteAuthorizer{grants: agent24DefaultWriteGrants{}, scope: scope},
+		auth:  agent24CandidateAuthorizer(store, scope),
 		locks: newAgent24KeyedMutex(),
 		now:   time.Now,
 		newID: agent24NewCandidateID,
 	}
+}
+
+// agent24CandidateAuthorizer is W1.9 ③ over the organisation-administrator grants of store (D1), or the default
+// deny of agent24DefaultWriteGrants when there is no store.
+func agent24CandidateAuthorizer(
+	store *repository.Agent24CandidateStore, scope agent24ScopeResolver,
+) agent24WriteAuthorizer {
+	if store == nil {
+		return agent24WriteAuthorizer{grants: agent24DefaultWriteGrants{}, scope: scope}
+	}
+	return agent24WriteAuthorizer{grants: agent24StoreWriteGrants{store: store}, admins: store, scope: scope}
 }
 
 func agent24NewCandidateID() (string, error) {
@@ -155,6 +166,7 @@ type agent24CandidateAudit struct {
 	KnowledgeID           string   `json:"knowledge_id,omitempty"`
 	BaseRevision          string   `json:"base_revision,omitempty"`
 	Kind                  string   `json:"kind,omitempty"`
+	ReturnReason          string   `json:"return_reason,omitempty"` // W8.12; A24-KB-44
 	SessionRef            string   `json:"session_ref,omitempty"`
 	SkillVersion          string   `json:"skill_version,omitempty"`
 	RedactionRulesVersion int64    `json:"redaction_rules_version,omitempty"`

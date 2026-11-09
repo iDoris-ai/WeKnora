@@ -169,7 +169,7 @@ func TestAgent24CandidateTransitionIsCompareAndSet(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.Agent24CandidateApproved, got.Status)
 
-	// returned carries reason and note, not approval fields
+	// returned carries reason, note and the reviewer in approver; job_id stays empty
 	require.NoError(t, s.CreateCandidate(ctx, agent24TestCandidate("c2", "api_external_user:1:a")))
 	ok, err = s.TransitionCandidate(ctx, 1, "c2", types.Agent24CandidateTransition{
 		To: types.Agent24CandidateReturned, ReturnReason: types.Agent24ReturnReviewer, Note: "see note",
@@ -181,7 +181,7 @@ func TestAgent24CandidateTransitionIsCompareAndSet(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.Agent24ReturnReviewer, got.ReturnReason)
 	require.Equal(t, "see note", got.Note)
-	require.Empty(t, got.Approver)
+	require.Equal(t, "ignored", got.Approver)
 	require.Empty(t, got.JobID)
 
 	// a non-terminal target, an unknown id and another tenant all write nothing

@@ -1,7 +1,8 @@
 // Agent24 fork product patch A24-KB-40 (WeKnora#135, CONTRACT-OPS-v2 W1.1, W1.9 ③(a), W2.5): the credential
 // scope of the Agent24 write operation classes, and the one entry that turns it into the W1.9 ③ outcome.
 //
-// No write route uses it yet (KB-SOP-02, WeKnora#146, adds them); the integration gate serves none.
+// candidate.propose uses it (A24-KB-43). Review, approve and withdraw consult the organisation-administrator
+// grants (A24-KB-44, D1).
 
 package handler
 
@@ -37,9 +38,9 @@ type agent24WriteGrants interface {
 	HoldsAnywhere(ctx context.Context, op Agent24WriteOp) (bool, error)
 }
 
-// agent24DefaultWriteGrants is A until the organisation roles of W2.5 are wired (WeKnora#146): candidate.propose
+// agent24DefaultWriteGrants is the default deny used when no candidate store is available: candidate.propose
 // needs only the target in E, so it is held; review, approve and withdraw are organisation-administrator
-// grants and are held by nobody yet. Default deny.
+// grants and are held by nobody.
 type agent24DefaultWriteGrants struct{}
 
 func (agent24DefaultWriteGrants) HoldsAnywhere(_ context.Context, op Agent24WriteOp) (bool, error) {
@@ -61,10 +62,67 @@ func agent24CredentialHoldsWrite(ctx context.Context, op Agent24WriteOp) bool {
 	return scope.HasCapability(capability)
 }
 
-// agent24WriteAuthorizer computes W1.9 ③(a) for a write request.
+// agent24AdminGrants is the per-knowledge-base side A of review, approve and withdraw (D1): an unrevoked
+// organisation-administrator grant on kbID (*repository.Agent24CandidateStore).
+type agent24AdminGrants interface {
+	AdminHolds(ctx context.Context, tenantID uint64, principal, kbID string) (bool, error)
+}
+
+// agent24StoreWriteGrants is A over the agent24_knowledge_admins table (KB-SOP-02 S3, D1): candidate.propose needs
+// only the target in E (W2.5); review, approve and withdraw need an unrevoked grant somewhere in the tenant.
+type agent24StoreWriteGrants struct {
+	store agent24AdminAnywhere
+}
+
+// agent24AdminAnywhere is the W1.9 ③(a) half of D1 (*repository.Agent24CandidateStore).
+type agent24AdminAnywhere interface {
+	AdminHoldsAnywhere(ctx context.Context, tenantID uint64, principal string) (bool, error)
+}
+
+// HoldsAnywhere is W1.9 ③(a): propose is held; the other three need an unrevoked grant. No principal: not held.
+func (g agent24StoreWriteGrants) HoldsAnywhere(ctx context.Context, op Agent24WriteOp) (bool, error) {
+	switch op {
+	case Agent24WriteCandidatePropose:
+		return true, nil
+	case Agent24WriteCandidateReview, Agent24WriteCandidateApprove, Agent24WriteEntryWithdraw:
+		p, ok := types.PrincipalFromContext(ctx)
+		if !ok || p.StorageID() == "" {
+			return false, nil
+		}
+		return g.store.AdminHoldsAnywhere(ctx, types.CallerFromContext(ctx).TenantID, p.StorageID())
+	default:
+		return false, nil
+	}
+}
+
+// agent24WriteAuthorizer computes W1.9 ③ for a write request.
 type agent24WriteAuthorizer struct {
 	grants agent24WriteGrants
+	admins agent24AdminGrants // nil: nobody holds review, approve or withdraw on any knowledge base
 	scope  agent24ScopeResolver
+}
+
+// HoldsOn is W1.9 ③(b): propose is InScope; the other three also need AdminHolds. Nil admins grants none.
+func (a agent24WriteAuthorizer) HoldsOn(ctx context.Context, op Agent24WriteOp, kbID string) (bool, error) {
+	switch op {
+	case Agent24WriteCandidatePropose:
+		return a.InScope(ctx, kbID)
+	case Agent24WriteCandidateReview, Agent24WriteCandidateApprove, Agent24WriteEntryWithdraw:
+		in, err := a.InScope(ctx, kbID)
+		if err != nil || !in {
+			return false, err
+		}
+		if a.admins == nil {
+			return false, nil
+		}
+		p, ok := types.PrincipalFromContext(ctx)
+		if !ok || p.StorageID() == "" {
+			return false, nil
+		}
+		return a.admins.AdminHolds(ctx, types.CallerFromContext(ctx).TenantID, p.StorageID(), kbID)
+	default:
+		return false, nil
+	}
 }
 
 // Authorize returns nil when op may go on to target resolution, in this order (the first that fails):
