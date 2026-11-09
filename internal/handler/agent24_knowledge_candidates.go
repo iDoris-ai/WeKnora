@@ -236,7 +236,8 @@ func agent24WriteStored(
 		if id, ok := body["candidate_id"].(string); ok {
 			a.CandidateID = id
 		}
-		if v, ok := body["authz_version"].(string); ok {
+		// the row keeps this request's authz_version (W1.7): a replay answers with the first one (W3.2)
+		if v, ok := body["authz_version"].(string); ok && a.AuthzVersion == "" {
 			a.AuthzVersion = v
 		}
 	}

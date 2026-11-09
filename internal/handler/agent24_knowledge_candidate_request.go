@@ -45,15 +45,16 @@ type agent24WriteRequest struct {
 
 // parseAgent24WriteCommon decodes a write request body (one JSON object, nothing after it), strips the W1.6 host
 // approval fields, refuses any field not in allowed (and not stripped), and reads request_id and, for a Provider
-// request, generation. A body carrying a lone surrogate escape is invalid (W8.13): Go would decode it to U+FFFD,
-// and the hash the client computed could not be reproduced. Invalid UTF-8 is refused for the same reason (it is not
-// JSON, RFC 8259, and the decoder would replace it). The stripped fields are reported even when the request is then
-// refused, so the refusal's audit row records them too (F2).
+// request, generation. A field (other than a stripped one) carrying a lone surrogate escape is invalid (W8.13): Go
+// would decode it to U+FFFD, and the hash the client computed could not be reproduced. Invalid UTF-8 is refused for
+// the same reason (it is not JSON, RFC 8259, and the decoder would replace it). The stripped fields are reported
+// even when the request is then refused, so the refusal's audit row records them too (F2); what they hold, lone
+// surrogates included, never fails the request (W1.6).
 func parseAgent24WriteCommon(
 	body []byte, provider bool, allowed ...string,
 ) (agent24WriteRequest, *agent24KnowledgeError) {
 	var req agent24WriteRequest
-	if !utf8.Valid(body) || agent24JSONHasLoneSurrogate(body) {
+	if !utf8.Valid(body) {
 		return req, agent24InvalidRequest()
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
@@ -63,6 +64,17 @@ func parseAgent24WriteCommon(
 	}
 	if _, err := dec.Token(); err != io.EOF {
 		return req, agent24InvalidRequest()
+	}
+	for _, name := range agent24HostApprovalFields {
+		if _, ok := req.fields[name]; ok {
+			delete(req.fields, name)
+			req.stripped = append(req.stripped, name)
+		}
+	}
+	for _, raw := range req.fields {
+		if agent24JSONHasLoneSurrogate(raw) {
+			return req, agent24InvalidRequest()
+		}
 	}
 	if raw, ok := req.fields["request_id"]; ok {
 		var s string
@@ -75,12 +87,6 @@ func parseAgent24WriteCommon(
 			if g, ok := agent24JSONInt64(raw); ok && g >= 0 {
 				req.echo.Generation = &g
 			}
-		}
-	}
-	for _, name := range agent24HostApprovalFields {
-		if _, ok := req.fields[name]; ok {
-			delete(req.fields, name)
-			req.stripped = append(req.stripped, name)
 		}
 	}
 	known := map[string]bool{"request_id": true}
@@ -182,11 +188,12 @@ func agent24WireString(fields map[string]json.RawMessage, name string) (string, 
 	if !ok {
 		return "", false
 	}
-	var s string
-	if json.Unmarshal(raw, &s) != nil {
+	// json.Unmarshal leaves a string as it is on null; null is not a string
+	var s *string
+	if json.Unmarshal(raw, &s) != nil || s == nil {
 		return "", false
 	}
-	return s, true
+	return *s, true
 }
 
 // agent24WireID reads a required ops-v2 id field (1–256 characters).

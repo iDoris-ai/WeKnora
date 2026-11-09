@@ -22,6 +22,9 @@ import (
 // agent24IngestReconcileTimeout bounds one sweep, so a stalled database cannot hold the loop (or shutdown).
 const agent24IngestReconcileTimeout = time.Minute
 
+// agent24SweepInterval is how often each background sweep runs; a test shortens it.
+var agent24SweepInterval = time.Minute
+
 // ensureAgent24IngestJobs creates agent24_ingest_jobs in both modes: the integration process creates jobs and the
 // standalone worker advances them. A failure is returned; must panics, so the process does not start. It starts
 // no background work.
@@ -66,41 +69,57 @@ func startAgent24IngestReconcile(
 	r := service.NewAgent24JobReconciler(jobs)
 	retention := service.NewAgent24CandidateRetention(candidates)
 	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		sweep := func() {
-			ctx, cancel := context.WithTimeout(context.Background(), agent24IngestReconcileTimeout)
-			defer cancel()
-			if _, err := r.Sweep(ctx); err != nil {
-				logger.Warnf(ctx, "[agent24] ingest job sweep failed: error_len=%d error_type=%T",
-					len(fmt.Sprint(err)), err)
-			}
-			// its own deadline: a job sweep that used up the minute must not starve the W8.9 purge
-			rctx, rcancel := context.WithTimeout(context.Background(), agent24IngestReconcileTimeout)
-			defer rcancel()
-			if _, err := retention.Sweep(rctx); err != nil {
-				logger.Warnf(rctx, "[agent24] candidate retention sweep failed: error_len=%d error_type=%T",
-					len(fmt.Sprint(err)), err)
+	jobsDone := agent24EveryMinute(stop, "ingest job sweep", func(ctx context.Context) error {
+		_, err := r.Sweep(ctx)
+		return err
+	})
+	// A24-KB-43 (PR-Daemon on #156): the W8.9 purge has its own loop, so a slow or panicking job sweep never delays
+	// it; with its 55-minute threshold the content is gone within 57 minutes (one tick plus one sweep deadline).
+	retentionDone := agent24EveryMinute(stop, "candidate retention sweep", func(ctx context.Context) error {
+		_, err := retention.Sweep(ctx)
+		return err
+	})
+	cleaner.RegisterWithName("Agent24IngestReconcile", func() error {
+		close(stop)
+		for _, done := range []<-chan struct{}{jobsDone, retentionDone} {
+			if !runtime.WaitFor(done, cleanupStepTimeout) {
+				logger.Warnf(context.Background(),
+					"[agent24] background sweep still running after %s; continuing shutdown", cleanupStepTimeout)
 			}
 		}
-		ticker := time.NewTicker(time.Minute)
+		return nil
+	})
+}
+
+// agent24EveryMinute runs sweep once a minute, each run with its own agent24IngestReconcileTimeout deadline, until
+// stop closes; the returned channel closes when the loop has ended. A failing or panicking run is logged (only
+// the error's length and type) and the loop goes on.
+func agent24EveryMinute(stop <-chan struct{}, name string, sweep func(context.Context) error) <-chan struct{} {
+	done := make(chan struct{})
+	once := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), agent24IngestReconcileTimeout)
+		defer cancel()
+		defer func() {
+			if v := recover(); v != nil {
+				logger.Warnf(ctx, "[agent24] %s panicked: value_type=%T", name, v)
+			}
+		}()
+		if err := sweep(ctx); err != nil {
+			logger.Warnf(ctx, "[agent24] %s failed: error_len=%d error_type=%T", name, len(fmt.Sprint(err)), err)
+		}
+	}
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(agent24SweepInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				sweep()
+				once()
 			case <-stop:
 				return
 			}
 		}
 	}()
-	cleaner.RegisterWithName("Agent24IngestReconcile", func() error {
-		close(stop)
-		if !runtime.WaitFor(done, cleanupStepTimeout) {
-			logger.Warnf(context.Background(),
-				"[agent24] ingest job sweep still running after %s; continuing shutdown", cleanupStepTimeout)
-		}
-		return nil
-	})
+	return done
 }

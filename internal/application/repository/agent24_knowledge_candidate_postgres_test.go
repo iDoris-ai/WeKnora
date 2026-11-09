@@ -84,6 +84,10 @@ func TestAgent24CandidateTablesPostgres(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, found)
 		require.Equal(t, "c1", found.ID)
+		// A24-KB-43: a taken primary key is told apart from the dedup index, still inside the transaction
+		clash := agent24TestCandidate("c1", long)
+		clash.ContentSHA256 = "h-other"
+		require.ErrorIs(t, tx.CreateCandidate(ctx, clash), ErrAgent24CandidateIDTaken)
 
 		rec := &types.Agent24WriteIdempotency{
 			TenantID: 1, Principal: long, Op: "candidate.propose", Key: "k", Fingerprint: "f",

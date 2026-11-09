@@ -47,6 +47,12 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 			t.Fatalf("%s PlatformOnly = true, want false", path)
 		}
 	}
+	for _, path := range agent24CandidateRoutePaths {
+		policy := mustLookupAPIKeyPolicy(t, g, http.MethodPost, path)
+		if len(policy.Capabilities) != 0 || policy.RequireFullAccess || policy.PlatformOnly {
+			t.Fatalf("%s policy = %#v, want none", path, policy)
+		}
+	}
 	for _, rt := range []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/agent24/knowledge/ui/exchange"},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/session"},
@@ -112,9 +118,13 @@ var agent24KnowledgeRoutePaths = []string{
 	"/api/v1/agent24/knowledge/read",
 	"/api/v1/agent24/knowledge/ui/tickets",
 	"/api/v1/agent24/knowledge/ui/revocations",
-	"/api/v1/agent24/knowledge/candidates",          // A24-KB-43
-	"/api/v1/agent24/knowledge/candidates/withdraw", // A24-KB-43
-	"/api/v1/agent24/knowledge/candidates/get",      // A24-KB-43
+}
+
+// A24-KB-43: the candidate.propose routes ask for no capability; the handler checks kb_candidate_propose.
+var agent24CandidateRoutePaths = []string{
+	"/api/v1/agent24/knowledge/candidates",
+	"/api/v1/agent24/knowledge/candidates/withdraw",
+	"/api/v1/agent24/knowledge/candidates/get",
 }
 
 func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {

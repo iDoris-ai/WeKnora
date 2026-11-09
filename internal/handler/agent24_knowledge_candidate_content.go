@@ -24,11 +24,15 @@ const (
 //   - images: "![";
 //   - footnotes: "[^";
 //   - escape sequences other than HTML entities: a backslash before ASCII punctuation or at the end of a line;
-//   - a link whose destination is not https://, inline "](dest)" or a reference definition "[label]: dest".
+//   - a link whose destination is not a plain https:// URL, inline "](dest)" or a reference definition
+//     "[label]: dest": no title, and no backtick, "<", ">", quote, backslash or parenthesis in it;
+//   - a backtick run with no run of the same length after it on its line.
 //
-// Fences are the CommonMark ones at the start of a line (at most three spaces, three or more backticks or tildes);
-// an unclosed fence runs to the end. A fence nested in a list item or a quote is not recognised, so its text is
-// judged as prose: the check only ever refuses more than CommonMark would render as code, never less.
+// Every rule errs on the side of refusing. What it skips as code must be code to CommonMark too, so a backtick never
+// pairs across lines (CommonMark would pair it across a paragraph's lines), never inside a link destination (which
+// CommonMark parses first), and a fence opens only at the start of a line with no indent (an indented fence can
+// belong to a list item, whose end closes it); a closing fence may be indented up to three spaces, and an unclosed
+// fence runs to the end. Anything else (fences in lists or quotes, indented code) is judged as prose.
 func agent24RestrictedMarkdownViolation(body string) bool {
 	fence := ""
 	for _, line := range strings.Split(body, "\n") {
@@ -38,7 +42,7 @@ func agent24RestrictedMarkdownViolation(body string) bool {
 			}
 			continue
 		}
-		if f, ok := agent24MarkdownOpensFence(line); ok {
+		if f, ok := agent24MarkdownOpensFence(line); ok { // no indent: see above
 			fence = f
 			continue
 		}
@@ -58,9 +62,8 @@ func agent24MarkdownFenceIndent(line string) (string, bool) {
 	return line[n:], true
 }
 
-func agent24MarkdownOpensFence(line string) (string, bool) {
-	rest, ok := agent24MarkdownFenceIndent(line)
-	if !ok || rest == "" || (rest[0] != '`' && rest[0] != '~') {
+func agent24MarkdownOpensFence(rest string) (string, bool) {
+	if rest == "" || (rest[0] != '`' && rest[0] != '~') {
 		return "", false
 	}
 	run := len(rest) - len(strings.TrimLeft(rest, rest[:1]))
@@ -84,18 +87,18 @@ func agent24MarkdownClosesFence(line, fence string) bool {
 
 // agent24MarkdownLineViolation judges one line outside fenced code.
 func agent24MarkdownLineViolation(line string) bool {
-	if dest, ok := agent24MarkdownReferenceDestination(line); ok && !agent24MarkdownHTTPS(dest) {
+	if dest, ok := agent24MarkdownReferenceDestination(line); ok && !agent24MarkdownSafeDestination(dest) {
 		return true
 	}
 	for i := 0; i < len(line); i++ {
 		switch b := line[i]; b {
 		case '`':
 			run := agent24MarkdownRun(line, i, '`')
-			if end := agent24MarkdownCodeSpanEnd(line, i+run, run); end >= 0 {
-				i = end - 1
-				continue
+			end := agent24MarkdownCodeSpanEnd(line, i+run, run)
+			if end < 0 {
+				return true // CommonMark could pair it with a run on a later line
 			}
-			i += run - 1 // an unmatched run is literal backticks
+			i = end - 1
 		case '\\':
 			if i+1 == len(line) || agent24ASCIIPunct(line[i+1]) {
 				return true
@@ -117,9 +120,12 @@ func agent24MarkdownLineViolation(line string) bool {
 			}
 		case ']':
 			if i+1 < len(line) && line[i+1] == '(' {
-				if !agent24MarkdownHTTPS(strings.TrimLeft(line[i+2:], " \t")) {
+				rest := strings.TrimLeft(line[i+2:], " \t")
+				end := strings.IndexAny(rest, " \t)")
+				if end < 0 || rest[end] != ')' || !agent24MarkdownSafeDestination(rest[:end]) {
 					return true
 				}
+				i = len(line) - len(rest) + end // the destination is never scanned for code spans
 			}
 		}
 	}
@@ -166,13 +172,11 @@ func agent24MarkdownReferenceDestination(line string) (string, bool) {
 	return strings.TrimLeft(rest[end+2:], " \t"), true
 }
 
-// agent24MarkdownHTTPS reports whether the link destination at the start of s (up to whitespace or ")") is an
-// https:// URL with something after the scheme.
-func agent24MarkdownHTTPS(s string) bool {
-	if end := strings.IndexAny(s, " \t)"); end >= 0 {
-		s = s[:end]
-	}
-	return len(s) > len("https://") && strings.EqualFold(s[:len("https://")], "https://")
+// agent24MarkdownSafeDestination reports whether dest is a link destination the restricted Markdown keeps: an
+// https:// URL with something after the scheme and none of the characters that could start another construct.
+func agent24MarkdownSafeDestination(dest string) bool {
+	return len(dest) > len("https://") && strings.EqualFold(dest[:len("https://")], "https://") &&
+		!strings.ContainsAny(dest, " \t`<>\"'\\()")
 }
 
 func agent24ASCIIPunct(b byte) bool {

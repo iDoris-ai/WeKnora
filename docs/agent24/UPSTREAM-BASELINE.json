@@ -1058,7 +1058,14 @@
             "internal/router/agent24_integration_gate_test.go",
             "internal/router/agent24_integration_cors_test.go",
             "internal/router/router.go",
-            "internal/container/container.go"
+            "internal/container/container.go",
+            "internal/container/agent24_ingest.go",
+            "internal/container/agent24_ingest_test.go",
+            "internal/application/service/agent24_candidate_retention.go",
+            "internal/application/service/agent24_candidate_retention_test.go",
+            "internal/application/repository/agent24_knowledge_candidate.go",
+            "internal/application/repository/agent24_knowledge_candidate_test.go",
+            "internal/application/repository/agent24_knowledge_candidate_postgres_test.go"
           ],
           "remove_when": "长期保留（Agent24 集成专用）",
           "added_on": "2026-11-09"

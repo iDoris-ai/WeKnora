@@ -15,10 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Copied verbatim from Agent24 f7291afd (CONTRACT-OPS-v2 55ed0540); see testdata/agent24_knowledge_ops_v2/README.md.
+// Copied verbatim from Agent24 aa98363a (CONTRACT-OPS-v2 r2); see testdata/agent24_knowledge_ops_v2/README.md.
 var agent24OpsV2FixtureSHA256 = map[string]string{
-	"candidate.schema.json":   "3ef5bc360ec8358d690a6bb34d86581fc1f3f32fb25f11b10a1055203748510a",
-	"schema-cases.json":       "cc2f9acf9715fd64524cc32e20c27e738e1d81ed9f4cea940251a1379801db29",
+	"candidate.schema.json":   "54ad995b7550fedf130cfe84fcf889e15b57f975a26998f68230ad36c3539e9e",
+	"schema-cases.json":       "8ec64a631b6550a3dc1a123a7ea92bcab5f0f581c4f9df09d266b682f96e81f4",
 	"entry-hash.samples.json": "c8069d60b6ee2e5789aa2cfa7a4dfb1c08228cfef16ca78bbdf8fedc2cbf5b2e",
 }
 
@@ -177,6 +177,9 @@ func TestAgent24CandidateSubmitShape(t *testing.T) {
 		{"title with CR", set("title", "a\rb"), "invalid_request"},
 		{"body with CR", set("body", "a\r\nb"), "invalid_request"},
 		{"no body", del("body"), "invalid_request"},
+		{"null body", set("body", nil), "invalid_request"}, // Codex S2 r1 C3
+		{"null title", set("title", nil), "invalid_request"},
+		{"empty body", set("body", ""), "ok"},
 		{"hash uppercase", set("content_sha256", strings.Repeat("A", 64)), "invalid_request"},
 		{"hash short", set("content_sha256", "abc"), "invalid_request"},
 		{"no provenance", del("provenance"), "invalid_request"},
@@ -217,6 +220,11 @@ func TestAgent24CandidateSubmitStripsHostApproval(t *testing.T) {
 	}))
 	assert.Equal(t, "invalid_request/idempotency_key_missing", agent24Outcome(kerr))
 	assert.Equal(t, []string{"approved"}, req.stripped, "a refusal still reports what it stripped")
+	// Codex S2 r1 C5: what a stripped field holds never fails the request (W1.6)
+	_, req, kerr = parseAgent24CandidateSubmit([]byte(strings.Replace(string(agent24SubmitDoc(nil)),
+		`"kind":`, `"author":"\ud800","kind":`, 1)))
+	assert.Nil(t, kerr)
+	assert.Equal(t, []string{"author"}, req.stripped)
 }
 
 func TestAgent24CandidateRequestEncoding(t *testing.T) {
@@ -258,6 +266,9 @@ func TestAgent24CandidateRef(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
 		{`{"request_id":"r","generation":0,"candidate_id":"c1"}`, "ok"},
 		{`{"request_id":"r","generation":0,"candidate_id":"c1","approved":true}`, "ok"},
+		{`{"request_id":"r","generation":0,"candidate_id":"c1","author":"\ud800"}`, "ok"},
+		{`{"request_id":"r","generation":0,"candidate_id":"c1\ud800"}`, "invalid_request"},
+		{`{"request_id":"r","generation":0,"candidate_id":null}`, "invalid_request"},
 		{`{"request_id":"r","generation":0}`, "invalid_request"},
 		{`{"request_id":"r","generation":0,"candidate_id":""}`, "invalid_request"},
 		{`{"request_id":"r","candidate_id":"c1"}`, "invalid_request"},
@@ -291,9 +302,10 @@ func TestAgent24RestrictedMarkdown(t *testing.T) {
 		{"C:\\Users\\name and \\d and a \\ b", false},
 		{"```\n<script>alert(1)</script>\n![x](y)\n```\nafter", false},
 		{"~~~~ go\n<b>\n~~~\n~~~~\nok", false},
-		{"   ```\n<div>\n   ```", false},
+		{"   ```\n<div>\n   ```", true}, // an indented fence is judged as prose
+		{"```\n<b>\n   ```\nok", false}, // a closing fence may be indented
 		{"`` a ` <b> ``", false},
-		{"unclosed ``` fence still prose?", false},
+		{"unclosed ``` fence still prose?", true}, // an unmatched run could pair on a later line
 		{"```\nnever closed <div>", false},
 		{"<script>x</script>", true},
 		{"</p>", true},
@@ -311,9 +323,23 @@ func TestAgent24RestrictedMarkdown(t *testing.T) {
 		{"[x]( https://example.org)", false},
 		{"[x](HTTPS://EXAMPLE.ORG)", false},
 		{"[x](https://)", true},
+		// Codex S2 r1 C1 and its relatives: what CommonMark parses before a code span is never skipped as code
+		{"[x](https://example.org/`)<img src=\"https://attacker.example/p\">`", true},
+		{"[x](https://example.org \"t`\")<img src=x>`", true},
+		{"[x](https://example.org \"title\")", true},
+		{"[x](https://example.org/(a))", true},
+		{"[x](<https://example.org>)", true},
+		{"[x](https://example.org/`a`)", true},      // a backtick in a destination, even paired
+		{"[x](https://a.example/b_%28c%29)", false}, // parentheses percent-encoded are kept
+		{"    <b> in indented code", true},          // indented code is judged as prose
+		{"`x\n` <img src=x> `y`", true},
+		{"- item\n  ```\n<img src=x>\n  ```", true},
+		{"[ref]: https://example.org \"t`\"", true},
+		{"`a` and `b` and ``c`d``", false},
 		{"[ref]: http://example.org", true},
 		{"`code` then <b>", true},
 		{"unmatched ` then <b>", true},
+		{"unmatched ` alone", true},
 		{"    ```\n<b>\n    ```", true}, // indented four: not a fence
 		{"```js`\n<b>\n```", true},      // a backtick in the info string: not a fence
 		{"~~~\n<b>\n```\n<i>", false},   // a tilde fence is not closed by backticks
@@ -348,4 +374,68 @@ func TestAgent24EntryTitleValid(t *testing.T) {
 	} {
 		assert.Equal(t, tc.ok, agent24EntryTitleValid(tc.title), "%q", tc.title)
 	}
+}
+
+// A closing fence may be indented up to three spaces, not four (CommonMark); a longer run closes, a shorter does not.
+func TestAgent24MarkdownClosesFence(t *testing.T) {
+	for _, tc := range []struct {
+		line, fence string
+		closes      bool
+	}{
+		{"```", "```", true},
+		{"   ```", "```", true},
+		{"    ```", "```", false},
+		{"````", "```", true},
+		{"``", "```", false},
+		{"``` x", "```", false},
+		{"```  \t", "```", true},
+		{"~~~", "```", false},
+	} {
+		assert.Equal(t, tc.closes, agent24MarkdownClosesFence(tc.line, tc.fence), "%q", tc.line)
+	}
+	// so after a four-space "closing" line the block goes on, and what follows is still code
+	assert.False(t, agent24RestrictedMarkdownViolation("```\na\n    ```\n<b>"))
+	assert.True(t, agent24RestrictedMarkdownViolation("```\na\n   ```\n<b>"))
+}
+
+// The get and withdraw requests of the Agent24 fixtures get the schema's verdict from the server's parser, except the
+// host-approval flag, which W1.6 strips; every get_response case keeps its verdict against the copied schema.
+func TestAgent24CandidateRefSchemaCases(t *testing.T) {
+	var f struct {
+		Cases []struct {
+			Name   string          `json:"name"`
+			Schema string          `json:"schema"`
+			Valid  bool            `json:"valid"`
+			Doc    json.RawMessage `json:"doc"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(agent24OpsV2Fixture(t, "schema-cases.json"), &f))
+	schemas := map[string]*jsonschema.Schema{}
+	n := map[string]int{}
+	for _, c := range f.Cases {
+		def, ok := map[string]string{
+			"candidate.get_request": "get_request", "candidate.withdraw_request": "withdraw_request",
+			"candidate.get_response": "get_response",
+		}[c.Schema]
+		if !ok {
+			continue
+		}
+		n[c.Schema]++
+		if schemas[def] == nil {
+			schemas[def] = agent24CandidateSchema(t, def)
+		}
+		require.Equal(t, c.Valid, agent24Validate(schemas[def], c.Doc) == nil, "fixture verdict %s", c.Name)
+		if def == "get_response" {
+			continue
+		}
+		_, req, kerr := parseAgent24CandidateRef(c.Doc)
+		if len(req.stripped) > 0 {
+			assert.Nil(t, kerr, "%s: a stripped field never fails the request", c.Name)
+			continue
+		}
+		assert.Equal(t, c.Valid, kerr == nil, "%s: %v", c.Name, kerr)
+	}
+	assert.GreaterOrEqual(t, n["candidate.get_request"], 3)
+	assert.GreaterOrEqual(t, n["candidate.get_response"], 4)
+	assert.GreaterOrEqual(t, n["candidate.withdraw_request"], 2)
 }

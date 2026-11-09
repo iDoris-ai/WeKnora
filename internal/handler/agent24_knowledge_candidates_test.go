@@ -224,6 +224,14 @@ func TestAgent24CandidateSubmitIdempotencyAndDedup(t *testing.T) {
 			retry.body["submitted_at"], retry.body["authz_version"],
 		})
 	assert.True(t, retry.audit().Replayed)
+	// Codex S2 r1 C4: a replay under another credential answers with the first authz_version (W3.2) and audits
+	// its own (W1.7)
+	rekeyed := alice
+	rekeyed.scope.KeyID = 10
+	again0 := agent24CandidateCall(t, e.h.Submit, rekeyed, agent24Submit(nil))
+	assert.Equal(t, map[string]any{"replayed": true}, again0.details())
+	assert.Equal(t, first.body["authz_version"], again0.body["authz_version"])
+	assert.NotEqual(t, first.body["authz_version"], again0.audit().AuthzVersion)
 
 	reused := agent24CandidateCall(t, e.h.Submit, alice, agent24Submit(func(m map[string]any) {
 		m["body"] = "另一份正文"
@@ -316,12 +324,19 @@ func TestAgent24CandidateSubmitDecisionOrder(t *testing.T) {
 	full.scope.FullAccess = true
 	assert.Equal(t, "forbidden/empty_scope", agent24CandidateCall(t, e.h.Submit, empty, agent24Submit(nil)).outcome())
 	assert.Equal(t, "forbidden/empty_scope", agent24CandidateCall(t, e.h.Submit, full, agent24Submit(nil)).outcome())
+	// Codex S2 r1 C2: a key with kb_candidate_propose and no retrieve may propose (W2.5)
+	proposeOnly := alice
+	proposeOnly.scope.Capabilities = types.StringArray{"kb_candidate_propose"}
+	r0 := agent24CandidateCall(t, e.h.Submit, proposeOnly, agent24Submit(func(m map[string]any) {
+		m["idempotency_key"], m["body"] = agent24KeyN(40), "只有提交能力"
+	}))
+	assert.Equal(t, http.StatusOK, r0.code, r0.raw)
 	// no principal: never a write
 	anon := alice
 	anon.principal = types.Principal{}
 	assert.Equal(t, "forbidden/operation_not_allowed",
 		agent24CandidateCall(t, e.h.Submit, anon, agent24Submit(nil)).outcome())
-	assert.Zero(t, e.count(t, "1 = 1"))
+	assert.EqualValues(t, 1, e.count(t, "1 = 1"), "only the propose-only key wrote")
 
 	// ③ before ④: a caller who lost the capability gets no replay
 	require.Equal(t, http.StatusOK, agent24CandidateCall(t, e.h.Submit, alice, agent24Submit(nil)).code)
@@ -709,10 +724,12 @@ func TestAgent24CandidateWithdraw(t *testing.T) {
 func TestAgent24CandidateGet(t *testing.T) {
 	e := newAgent24CandidateEnv(t)
 	view := agent24CandidateSchema(t, "view")
+	getResponse := agent24CandidateSchema(t, "get_response") // Agent24 aa98363a (OPS-v2 r2)
 	alice := agent24Proposer(agent24Alice)
 	id := e.submit(t, alice, nil)
 	r := agent24CandidateCall(t, e.h.Get, alice, agent24Ref(id))
 	require.Equal(t, http.StatusOK, r.code, r.raw)
+	require.NoError(t, agent24Validate(getResponse, []byte(r.raw)), r.raw)
 	assert.Equal(t, []any{"r9", 5.0}, []any{r.body["request_id"], r.body["generation"]})
 	assert.True(t, strings.HasPrefix(r.body["authz_version"].(string), "az1_"))
 	v := r.body["candidate"].(map[string]any)
@@ -744,6 +761,7 @@ func TestAgent24CandidateGet(t *testing.T) {
 	_, err = e.store.PurgeCandidateContent(context.Background(), e.clock.Add(2*time.Hour), e.clock.Add(2*time.Hour))
 	require.NoError(t, err)
 	r = agent24CandidateCall(t, e.h.Get, alice, agent24Ref(id))
+	require.NoError(t, agent24Validate(getResponse, []byte(r.raw)), r.raw)
 	v = r.body["candidate"].(map[string]any)
 	raw, _ = json.Marshal(v)
 	require.NoError(t, agent24Validate(view, raw), string(raw))

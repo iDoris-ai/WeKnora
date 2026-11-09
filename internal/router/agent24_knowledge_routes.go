@@ -34,15 +34,14 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/read", apiKeyRetrieve(apiKeyAny()), g.Viewer(), rd.Read)
 	}
 	// A24-KB-43: candidate.propose with C. Registered only when the handler is non-nil, which is integration mode.
-	// The route asks for retrieve, as every Provider route does; the handler checks kb_candidate_propose (W1.9 ③,
-	// after the shape).
+	// The route asks for no capability: the handler checks kb_candidate_propose itself, after the shape (W1.9 ②
+	// before ③), and answers in the contract envelope. A propose-only key is valid (W2.5: the target in E is all
+	// candidate.propose needs).
 	if candidates != nil {
-		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates", apiKeyRetrieve(apiKeyAny()), g.Viewer(),
-			candidates.Submit)
-		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates/withdraw", apiKeyRetrieve(apiKeyAny()),
-			g.Viewer(), candidates.Withdraw)
-		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates/get", apiKeyRetrieve(apiKeyAny()),
-			g.Viewer(), candidates.Get)
+		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates", apiKeyAny(), g.Viewer(), candidates.Submit)
+		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates/withdraw", apiKeyAny(), g.Viewer(),
+			candidates.Withdraw)
+		g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/candidates/get", apiKeyAny(), g.Viewer(), candidates.Get)
 	}
 	// A24-KB-32: registered only when the handler is non-nil, which is when the UI session key is configured.
 	if tickets != nil {

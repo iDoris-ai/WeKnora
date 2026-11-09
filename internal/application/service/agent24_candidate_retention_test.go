@@ -79,3 +79,41 @@ func TestAgent24CandidateRetentionSweep(t *testing.T) {
 	_, err = r.Sweep(ctx)
 	require.Error(t, err)
 }
+
+// A24-KB-43 (PR-Daemon on #156): the content threshold is 55 minutes, so with one tick and one sweep deadline of
+// lateness the content is still gone before the hour of W8.9.
+func TestAgent24CandidateRetentionBoundary(t *testing.T) {
+	require.Equal(t, 55*time.Minute, agent24CandidateContentRetention)
+	require.LessOrEqual(t, agent24CandidateContentRetention+2*time.Minute, time.Hour)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, repository.EnsureAgent24IngestJobTable(db))
+	require.NoError(t, repository.EnsureAgent24CandidateTables(db))
+	store := repository.NewAgent24CandidateStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	for id, age := range map[string]time.Duration{
+		"keep": 55*time.Minute - time.Second, "purge": 55*time.Minute + time.Second, "late": 59 * time.Minute,
+	} {
+		at := now.Add(-age)
+		require.NoError(t, store.CreateCandidate(ctx, &types.Agent24KnowledgeCandidate{
+			ID: id, TenantID: 1, Author: "p", TargetKnowledgeBaseID: "kb", Mode: types.Agent24CandidateCreate,
+			ContentSHA256: "h-" + id, Kind: types.Agent24EntryKindNote, Title: "t", Body: "b", SessionRef: "s",
+			SkillVersion: "v", RedactionRulesVersion: 1, Status: types.Agent24CandidateSubmitted, SubmittedAt: at,
+		}))
+		ok, err := store.TransitionCandidate(ctx, 1, id,
+			types.Agent24CandidateTransition{To: types.Agent24CandidateWithdrawn}, at)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	r := NewAgent24CandidateRetention(store)
+	r.now = func() time.Time { return now }
+	res, err := r.Sweep(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), res.ContentPurged)
+	for id, purged := range map[string]bool{"keep": false, "purge": true, "late": true} {
+		got, err := store.GetCandidate(ctx, 1, id)
+		require.NoError(t, err)
+		require.Equal(t, purged, got.PurgedAt != nil, id)
+	}
+}

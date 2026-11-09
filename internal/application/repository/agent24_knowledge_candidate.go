@@ -32,6 +32,8 @@ var (
 	// ErrAgent24CandidateDuplicate: Create hit the submitted-dedup unique index (same tenant, author, target
 	// knowledge base, mode, knowledge_id, base revision and content_sha256 already submitted). Nothing was written.
 	ErrAgent24CandidateDuplicate = errors.New("agent24 candidate: an identical candidate is already submitted")
+	// ErrAgent24CandidateIDTaken is CreateCandidate's answer when the candidate id is already in use.
+	ErrAgent24CandidateIDTaken = errors.New("agent24 candidate: the candidate id is taken")
 	// ErrAgent24IdempotencyExists: PutIdempotency found a record under the same (tenant, principal, op, key).
 	// Nothing was written; the caller reads the existing record and replays or rejects it.
 	ErrAgent24IdempotencyExists = errors.New("agent24 write idempotency: a record exists for the key")
@@ -146,13 +148,22 @@ func (s *Agent24CandidateStore) CreateCandidate(ctx context.Context, c *types.Ag
 	}
 	// a savepoint: on PostgreSQL a failed insert aborts the caller's transaction, and the caller still has to
 	// read the duplicate in it
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		err := tx.Create(c).Error
-		if agent24IsUniqueViolation(err) {
-			return ErrAgent24CandidateDuplicate
-		}
-		return err
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Create(c).Error
 	})
+	if !agent24IsUniqueViolation(err) {
+		return err
+	}
+	// A24-KB-43 (PR-Daemon on #156): only the dedup index is a duplicate; a taken primary key is not
+	taken, lookupErr := agent24RowExists(s.db.WithContext(ctx).Select("id").Where("id = ?", c.ID).
+		Take(&types.Agent24KnowledgeCandidate{}).Error)
+	switch {
+	case lookupErr != nil:
+		return lookupErr
+	case taken:
+		return ErrAgent24CandidateIDTaken
+	}
+	return ErrAgent24CandidateDuplicate
 }
 
 // GetCandidate returns the tenant's candidate id, or nil when there is none.
@@ -426,6 +437,9 @@ func (s *Agent24CandidateStore) Withdraw(ctx context.Context, w *types.Agent24En
 
 // IsWithdrawn reports whether the tenant's knowledgeID is withdrawn.
 func (s *Agent24CandidateStore) IsWithdrawn(ctx context.Context, tenantID uint64, knowledgeID string) (bool, error) {
+	if knowledgeID == "" {
+		return false, nil
+	}
 	err := s.db.WithContext(ctx).Select("knowledge_id").
 		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
 		Take(&types.Agent24EntryWithdrawal{}).Error
