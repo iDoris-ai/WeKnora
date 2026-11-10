@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -133,6 +134,52 @@ func TestAgent24EntryWithdrawNotFound(t *testing.T) {
 	deleting := agent24CandidateCall(t, e.h.EntryWithdraw, who, agent24WithdrawDoc(t, "docD", "same"))
 	assert.Equal(t, "not_found", deleting.outcome(), deleting.raw)
 	assert.Empty(t, e.withdrawalRows(t))
+}
+
+// A move can commit after entryTarget authorizes kbA and before the withdrawal locks the document. The locked
+// row must still belong to the authorized KB, whether kbB is outside the credential scope or lacks an admin grant.
+func TestAgent24EntryWithdrawRejectsMovedTarget(t *testing.T) {
+	for _, scope := range []types.StringArray{{"kbA", "kbB"}, {"kbA"}} {
+		t.Run(strings.Join(scope, "+"), func(t *testing.T) {
+			e := newAgent24CandidateEnv(t)
+			e.grantAdmin(t, agent24Alice, "kbA", false)
+			const doc = "doc-moved"
+			e.entryDoc(t, doc, "kbA", types.ParseStatusProcessing, true)
+			e.putJob(t, "job-moved", doc, types.Agent24JobProcessing, types.Agent24EnrichmentNone)
+			var before types.Agent24IngestJob
+			require.NoError(t, e.db.Where("id = ?", "job-moved").Take(&before).Error)
+			who := agent24Withdrawer(agent24Alice)
+			who.scope.KnowledgeBaseIDs = scope
+			missing := agent24CandidateCall(t, e.h.EntryWithdraw, who, agent24WithdrawDoc(t, "no-such", "same"))
+			require.Equal(t, "not_found", missing.outcome(), missing.raw)
+
+			moved := false
+			e.h.commit = func(ctx context.Context, fn func(*repository.Agent24CandidateStore) error) error {
+				// The existing transaction seam places the committed move precisely after authorization; no sleep
+				// or SQLite row-lock assumption is needed to exercise the locked-row KB comparison.
+				result := e.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", doc).
+					Update("knowledge_base_id", "kbB")
+				require.NoError(t, result.Error)
+				require.EqualValues(t, 1, result.RowsAffected)
+				moved = true
+				return e.store.Transaction(ctx, fn)
+			}
+			r := agent24CandidateCall(t, e.h.EntryWithdraw, who, agent24WithdrawDoc(t, doc, "same"))
+			require.True(t, moved, "entryTarget must have authorized the original KB before the move")
+			assert.Equal(t, missing.code, r.code, r.raw)
+			assert.Equal(t, missing.raw, r.raw)
+			assert.Empty(t, e.withdrawalRows(t))
+			var after types.Agent24IngestJob
+			require.NoError(t, e.db.Where("id = ?", "job-moved").Take(&after).Error)
+			assert.Equal(t, before, after, "a moved target must not have its job ended")
+			var k types.Knowledge
+			require.NoError(t, e.db.Where("id = ?", doc).Take(&k).Error)
+			assert.Equal(t, "kbB", k.KnowledgeBaseID)
+			assert.Equal(t, types.ParseStatusProcessing, k.ParseStatus)
+			assert.Empty(t, k.ErrorMessage)
+			assert.Empty(t, r.audit().SourceRevision)
+		})
+	}
 }
 
 func TestAgent24EntryWithdrawOrder(t *testing.T) {

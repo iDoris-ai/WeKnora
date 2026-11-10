@@ -56,7 +56,7 @@ func (h *Agent24KnowledgeCandidatesHandler) EntryWithdraw(c *gin.Context) {
 	var already bool
 	err = h.transaction(ctx, func(tx *repository.Agent24CandidateStore) error {
 		var err error
-		already, kerr, err = h.entryWithdrawIn(ctx, tx, caller, kid, audit)
+		already, kerr, err = h.entryWithdrawIn(ctx, tx, caller, kid, k.KnowledgeBaseID, audit)
 		return err
 	})
 	if err != nil {
@@ -108,11 +108,12 @@ func (h *Agent24KnowledgeCandidatesHandler) entryTarget(
 	return &k, nil, nil
 }
 
-// entryWithdrawIn is the transaction: lock the knowledge row (gone or deleting now: not_found), Withdraw with the
-// current source revision (false: already, nothing else written), then end the occupying job's work. It fills
-// audit.SourceRevision.
+// entryWithdrawIn is the transaction: lock the knowledge row (gone, deleting, or moved out of the authorized KB:
+// not_found), Withdraw with the current source revision (false: already, nothing else written), then end the
+// occupying job's work. It fills audit.SourceRevision.
 func (h *Agent24KnowledgeCandidatesHandler) entryWithdrawIn(
-	ctx context.Context, tx *repository.Agent24CandidateStore, caller agent24CandidateCaller, kid string,
+	ctx context.Context, tx *repository.Agent24CandidateStore, caller agent24CandidateCaller,
+	kid, authorizedKBID string,
 	audit *agent24CandidateAudit,
 ) (already bool, kerr *agent24KnowledgeError, err error) {
 	var k types.Knowledge
@@ -123,6 +124,9 @@ func (h *Agent24KnowledgeCandidatesHandler) entryWithdrawIn(
 	}
 	if err != nil {
 		return false, nil, err
+	}
+	if k.KnowledgeBaseID != authorizedKBID {
+		return false, agent24NotFound(), nil
 	}
 	current, err := agent24KnowledgeSourceRevision(h.key, &k)
 	if err != nil {
