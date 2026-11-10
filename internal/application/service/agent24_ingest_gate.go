@@ -218,10 +218,23 @@ func (g *agent24StageGate) holds(ctx context.Context, job *types.Agent24IngestJo
 	switch job.OpClass {
 	case types.Agent24JobOpIngestSubmit:
 		return g.keyHolds(ctx, job, types.APIKeyCapabilityIngest)
+	case types.Agent24JobOpCandidateApprove:
+		return g.approveHolds(ctx, job)
 	default:
-		// candidate.approve is rechecked against the organisation grants KB-SOP-02 (WeKnora#146) adds
 		return false, nil
 	}
+}
+
+// approveHolds is W1.3 ① and ② for a candidate.approve job (A24-KB-45): the approver still holds an unrevoked
+// organisation-administrator grant on the job's knowledge base, and the establishing key still carries
+// kb_candidate_approve on it. A key that does not hold is not an unreadable grant table.
+func (g *agent24StageGate) approveHolds(ctx context.Context, job *types.Agent24IngestJob) (bool, error) {
+	held, err := g.keyHolds(ctx, job, types.APIKeyCapabilityKBCandidateApprove)
+	if err != nil || !held {
+		return false, err
+	}
+	return repository.NewAgent24CandidateStore(g.db).AdminHolds(
+		ctx, job.TenantID, job.PrincipalUserID, job.KnowledgeBaseID)
 }
 
 // keyHolds reads the establishing tenant API key as it is now: it still exists and is not revoked (②), and it

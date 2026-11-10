@@ -558,7 +558,7 @@ func TestAgent24CandidateSubmitDisabled(t *testing.T) {
 	ref := `{"request_id":"r","generation":0,"candidate_id":"c"}`
 	assert.Equal(t, "forbidden/operation_disabled", agent24CandidateCall(t, h.Withdraw, alice, ref).outcome())
 	assert.Equal(t, "forbidden/operation_disabled", agent24CandidateCall(t, h.Get, alice, ref).outcome())
-	assert.Nil(t, NewAgent24KnowledgeCandidatesHandler(nil, nil), "outside integration mode the routes stay off")
+	assert.Nil(t, NewAgent24KnowledgeCandidatesHandler(nil, nil, nil), "outside integration mode the routes stay off")
 }
 
 // A record another writer committed between this request's read and its write replays; none visible is

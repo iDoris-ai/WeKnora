@@ -157,7 +157,7 @@ func TestAgent24KnowledgeCapabilityCandidatePropose(t *testing.T) {
 			assert.Equal(t, tc.want, BuildAgent24KnowledgeCapability().SupportedOperations)
 			declared := slices.Contains(tc.want, "candidate.propose")
 			assert.Equal(t, declared, NewAgent24KnowledgeReadyHandler(nil, nil, nil).candidates)
-			assert.Equal(t, declared, NewAgent24KnowledgeCandidatesHandler(nil, nil) != nil)
+			assert.Equal(t, declared, NewAgent24KnowledgeCandidatesHandler(nil, nil, nil) != nil)
 		})
 	}
 }

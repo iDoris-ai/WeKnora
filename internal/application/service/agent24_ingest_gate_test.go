@@ -46,6 +46,7 @@ func newAgent24GateHarness(t *testing.T) *agent24GateHarness {
 		require.NoError(t, db.Migrator().CreateTable(m))
 	}
 	require.NoError(t, repository.EnsureAgent24IngestJobTable(db))
+	require.NoError(t, repository.EnsureAgent24CandidateTables(db))
 	h := &agent24GateHarness{db: db, jobs: repository.NewAgent24IngestJobStore(db), policy: &agent24FakePolicy{}}
 	prev := agent24Gate.Load()
 	t.Cleanup(func() { agent24Gate.Store(prev) })
@@ -544,4 +545,60 @@ func TestAgent24ProcessDocumentCarriesTheEmbeddingGuard(t *testing.T) {
 		require.NotNil(t, tr.ctx)
 		require.Equal(t, tc.guard, types.ProcessingEmbeddingGuardFromContext(tr.ctx) != nil, tc.meta)
 	}
+}
+
+// W1.3 ①② for a candidate.approve job: the key still carries kb_candidate_approve and the approver still holds
+// an unrevoked administrator grant. Either missing cancels; an unreadable grant table retries.
+func TestAgent24StageGateApproveHolds(t *testing.T) {
+	const principal = "api_external_user:7:approver"
+	ready := func(t *testing.T) *agent24GateHarness {
+		t.Helper()
+		h := newAgent24GateHarness(t)
+		require.NoError(t, h.db.Model(&types.TenantAPIKey{}).Where("id = 45").Update("capabilities",
+			types.StringArray{"retrieve", "ingest", "kb_candidate_approve"}).Error)
+		h.job(t, types.Agent24JobSaved, types.Agent24JobOpCandidateApprove)
+		require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Where("id = ?", "j-1").
+			Update("principal_user_id", principal).Error)
+		require.NoError(t, h.db.Create(&types.Agent24KnowledgeAdmin{
+			TenantID: 7, Principal: principal, KnowledgeBaseID: "kb-1", CreatedAt: time.Now().UTC(),
+		}).Error)
+		return h
+	}
+	t.Run("pass", func(t *testing.T) {
+		h := ready(t)
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.False(t, aborted)
+		require.Empty(t, status)
+		j := h.jobRow(t)
+		require.Equal(t, types.Agent24JobProcessing, j.Status)
+		require.NotNil(t, j.ProcessingAt)
+	})
+	t.Run("admin revoked", func(t *testing.T) {
+		h := ready(t)
+		require.NoError(t, h.db.Model(&types.Agent24KnowledgeAdmin{}).
+			Where("principal = ?", principal).Update("revoked_at", time.Now().UTC()).Error)
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted)
+		require.Equal(t, types.ParseStatusCancelled, status)
+		j := h.jobRow(t)
+		require.Equal(t, types.Agent24JobCancelled, j.Status)
+		require.Equal(t, types.Agent24JobCancelRevoked, j.CancelReason)
+	})
+	t.Run("capability removed", func(t *testing.T) {
+		h := ready(t)
+		require.NoError(t, h.db.Model(&types.TenantAPIKey{}).Where("id = 45").
+			Update("capabilities", types.StringArray{"retrieve", "ingest"}).Error)
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted)
+		require.Equal(t, types.ParseStatusCancelled, status)
+		require.Equal(t, types.Agent24JobCancelRevoked, h.jobRow(t).CancelReason)
+	})
+	t.Run("admin table dropped", func(t *testing.T) {
+		h := ready(t)
+		require.NoError(t, h.db.Migrator().DropTable(&types.Agent24KnowledgeAdmin{}))
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted)
+		require.Equal(t, abortStatusUnreadable, status)
+		require.Equal(t, types.Agent24JobSaved, h.jobRow(t).Status)
+	})
 }
