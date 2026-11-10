@@ -186,6 +186,24 @@ func TestAgent24ReconcileSweepTimesOutSavedJobsAndPurges(t *testing.T) {
 	require.Nil(t, gone)
 }
 
+func TestAgent24ReconcileApproveJobStuckInSavedTimesOut(t *testing.T) {
+	h := newAgent24ReconcileHarness(t)
+	h.add(t, "approve", "k-approve", types.ParseStatusPending, "", types.Agent24JobSaved, 1)
+	require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Where("id = ?", "approve").
+		Update("op_class", types.Agent24JobOpCandidateApprove).Error)
+	h.now = h.t0.Add(10*time.Minute + time.Second)
+	n, err := h.r.Sweep(h.ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	j, err := h.jobs.Get(h.ctx, 7, "approve")
+	require.NoError(t, err)
+	require.Equal(t, types.Agent24JobFailed, j.Status)
+	require.Equal(t, types.Agent24JobFailTimeout, j.FailureReason)
+	var row types.Knowledge
+	require.NoError(t, h.db.Where("id = ?", "k-approve").Take(&row).Error)
+	require.Equal(t, types.ParseStatusFailed, row.ParseStatus)
+}
+
 func TestAgent24ReconcileSweepDoesNotFailAPickedUpRow(t *testing.T) {
 	h := newAgent24ReconcileHarness(t)
 	h.add(t, "j", "k", types.ParseStatusPending, "", types.Agent24JobSaved, 1)

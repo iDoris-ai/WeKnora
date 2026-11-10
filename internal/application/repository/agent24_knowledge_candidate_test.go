@@ -526,3 +526,46 @@ func TestAgent24CandidateLockCandidate(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+func TestAgent24FindApprovedByContent(t *testing.T) {
+	_, s := agent24CandidateDB(t)
+	ctx := context.Background()
+	const hash = "same-hash"
+	later := agent24T0.Add(time.Hour)
+	mk := func(id, author string, tenant uint64, kb, sha string) {
+		c := agent24TestCandidate(id, author)
+		c.TenantID = tenant
+		c.TargetKnowledgeBaseID = kb
+		c.ContentSHA256 = sha
+		require.NoError(t, s.CreateCandidate(ctx, c))
+	}
+	mk("m", "a1", 1, "kb1", hash)
+	mk("n", "a2", 1, "kb1", hash)
+	mk("c", "a3", 1, "kb1", hash)
+	mk("other-tenant", "a4", 2, "kb1", hash)
+	mk("other-kb", "a5", 1, "kb2", hash)
+	mk("other-hash", "a6", 1, "kb1", "other")
+	mk("still", "a7", 1, "kb1", hash)
+	mk("nok", "a8", 1, "kb1", hash)
+	approve := func(id, kid string, tenant uint64, at time.Time) {
+		moved, err := s.TransitionCandidate(ctx, tenant, id, types.Agent24CandidateTransition{
+			To: types.Agent24CandidateApproved, KnowledgeID: kid, Approver: "ap", SourceRevision: "r",
+		}, at)
+		require.NoError(t, err)
+		require.True(t, moved)
+	}
+	approve("m", "k-m", 1, later)
+	approve("n", "k-n", 1, later)
+	approve("c", "k-c", 1, agent24T0)
+	approve("other-tenant", "k-t", 2, later)
+	approve("other-kb", "k-b", 1, later)
+	approve("other-hash", "k-h", 1, later)
+	approve("nok", "", 1, later)
+	list, err := s.FindApprovedByContent(ctx, 1, "kb1", hash)
+	require.NoError(t, err)
+	ids := make([]string, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	require.Equal(t, []string{"m", "n", "c"}, ids)
+}

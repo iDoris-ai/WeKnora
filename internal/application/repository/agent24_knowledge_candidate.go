@@ -319,6 +319,20 @@ func (s *Agent24CandidateStore) IsEntryDocument(
 	return agent24RowExists(err)
 }
 
+// FindApprovedByContent returns the tenant's approved candidates in kbID whose content_sha256 is sha, most recently
+// approved first: the W3.5 dedup candidates of an approval (the caller checks the bound documents).
+func (s *Agent24CandidateStore) FindApprovedByContent(
+	ctx context.Context, tenantID uint64, kbID, sha string,
+) ([]types.Agent24KnowledgeCandidate, error) {
+	var list []types.Agent24KnowledgeCandidate
+	err := s.db.WithContext(ctx).
+		Where("tenant_id = ? AND target_knowledge_base_id = ? AND content_sha256 = ?", tenantID, kbID, sha).
+		Where("status = ? AND knowledge_id <> ''", types.Agent24CandidateApproved).
+		Order("terminal_at DESC, id ASC").
+		Find(&list).Error
+	return list, err
+}
+
 // PurgeCandidateContent empties title, body and note of returned and withdrawn candidates that reached that state
 // before before and are not purged yet, and sets purged_at to now (W8.9). It returns how many it purged.
 func (s *Agent24CandidateStore) PurgeCandidateContent(ctx context.Context, before, now time.Time) (int64, error) {

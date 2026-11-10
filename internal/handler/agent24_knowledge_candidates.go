@@ -29,6 +29,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -65,17 +66,24 @@ type Agent24KnowledgeCandidatesHandler struct {
 	newID func() (string, error)
 	// commit runs the submission transaction; nil is store.Transaction (a test replaces it)
 	commit func(ctx context.Context, fn func(tx *repository.Agent24CandidateStore) error) error
+	// ingest publishes an approved candidate (A24-KB-45); nil disables candidate.approve
+	ingest agent24CandidateIngest
 }
 
 // NewAgent24KnowledgeCandidatesHandler returns nil outside integration mode, which leaves the routes unregistered.
 func NewAgent24KnowledgeCandidatesHandler(
 	store *repository.Agent24CandidateStore, kbService interfaces.KnowledgeBaseService,
+	ingest *service.Agent24Ingest,
 ) *Agent24KnowledgeCandidatesHandler {
 	if !agent24CandidateRoutesEnabled() {
 		return nil
 	}
 	scope := agent24DefaultScopeResolver{kbs: kbService}
-	return newAgent24KnowledgeCandidatesHandler(agent24SearchTagKey(), store, scope)
+	h := newAgent24KnowledgeCandidatesHandler(agent24SearchTagKey(), store, scope)
+	if ingest != nil {
+		h.ingest = ingest
+	}
+	return h
 }
 
 func newAgent24KnowledgeCandidatesHandler(
@@ -175,6 +183,7 @@ type agent24CandidateAudit struct {
 	Outcome               string   `json:"outcome,omitempty"`
 	Replayed              bool     `json:"replayed,omitempty"`
 	Already               bool     `json:"already,omitempty"`
+	AuthorIsApprover      *bool    `json:"author_is_approver,omitempty"` // W8.12, W2.4; A24-KB-45
 	StrippedFields        []string `json:"stripped_fields,omitempty"`
 }
 
@@ -474,6 +483,17 @@ func agent24CheckEntryContent(sub agent24CandidateSubmit) *agent24KnowledgeError
 	return nil
 }
 
+// agent24KnowledgeSourceRevision is the current source revision, shared by revise submit and approve.
+func agent24KnowledgeSourceRevision(key []byte, k *types.Knowledge) (string, error) {
+	mv, err := agent24ManualVersion(k)
+	if err != nil {
+		return "", err
+	}
+	return agent24SourceRevision(key, k.ID, agent24SourceFingerprint{
+		FileHash: k.FileHash, FilePath: k.FilePath, Source: k.Source, ManualVersion: mv,
+	}), nil
+}
+
 // checkReviseTarget is W8.2 ⑤3: the document is in target_knowledge_base_id (already in E, Authorize), exists, is not
 // withdrawn and not being deleted, all one not_found (F1); it is an entry document (forbidden/operation_not_allowed
 // otherwise); and its current source revision is the expected one (stale/base_revision_changed with
@@ -503,13 +523,10 @@ func (h *Agent24KnowledgeCandidatesHandler) checkReviseTarget(
 	if !entry {
 		return agent24Forbidden("operation_not_allowed"), nil
 	}
-	mv, err := agent24ManualVersion(&k)
+	current, err := agent24KnowledgeSourceRevision(h.key, &k)
 	if err != nil {
 		return nil, err
 	}
-	current := agent24SourceRevision(h.key, k.ID, agent24SourceFingerprint{
-		FileHash: k.FileHash, FilePath: k.FilePath, Source: k.Source, ManualVersion: mv,
-	})
 	if current != sub.ExpectedRevision {
 		return agent24StaleWrite("base_revision_changed", map[string]any{"current_revision": current}), nil
 	}

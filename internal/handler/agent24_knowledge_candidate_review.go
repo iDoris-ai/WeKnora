@@ -162,7 +162,7 @@ func (h *Agent24KnowledgeCandidatesHandler) reviewOne(
 	if !ok {
 		return caller, nil, req, audit, false
 	}
-	cand, ok := h.reviewVisible(c, caller, id, req, audit)
+	cand, ok := h.adminVisible(c, Agent24WriteCandidateReview, caller, id, req, audit)
 	if !ok {
 		return caller, nil, req, audit, false
 	}
@@ -172,6 +172,14 @@ func (h *Agent24KnowledgeCandidatesHandler) reviewOne(
 
 func (h *Agent24KnowledgeCandidatesHandler) reviewAuth(
 	c *gin.Context, req agent24WriteRequest, audit *agent24CandidateAudit,
+) (agent24CandidateCaller, bool) {
+	return h.adminAuth(c, Agent24WriteCandidateReview, req, audit)
+}
+
+// adminAuth is W1.9 from disabled to ③(a) for an organisation-administrator operation (review, approve), and the
+// authz_version over the credential, the principal and the principal's grants (W1.2).
+func (h *Agent24KnowledgeCandidatesHandler) adminAuth(
+	c *gin.Context, op Agent24WriteOp, req agent24WriteRequest, audit *agent24CandidateAudit,
 ) (agent24CandidateCaller, bool) {
 	ctx := c.Request.Context()
 	caller, has := agent24CandidateCallerOf(ctx)
@@ -185,7 +193,7 @@ func (h *Agent24KnowledgeCandidatesHandler) reviewAuth(
 	case !has:
 		return refuse(agent24Forbidden("operation_not_allowed"))
 	}
-	if kerr, gone := h.auth.Authorize(ctx, Agent24WriteCandidateReview, ""); gone {
+	if kerr, gone := h.auth.Authorize(ctx, op, ""); gone {
 		agent24CandidateGone(c, req.echo, audit)
 		return caller, false
 	} else if kerr != nil {
@@ -224,14 +232,16 @@ func (h *Agent24KnowledgeCandidatesHandler) reviewableKnowledgeBases(ctx context
 	return out, nil
 }
 
-func (h *Agent24KnowledgeCandidatesHandler) reviewVisible(
-	c *gin.Context, caller agent24CandidateCaller, id string, req agent24WriteRequest, audit *agent24CandidateAudit,
+// adminVisible is W1.9 ③(b) for a candidate: it exists and op is held on its target knowledge base, or one not_found.
+func (h *Agent24KnowledgeCandidatesHandler) adminVisible(
+	c *gin.Context, op Agent24WriteOp, caller agent24CandidateCaller, id string, req agent24WriteRequest,
+	audit *agent24CandidateAudit,
 ) (*types.Agent24KnowledgeCandidate, bool) {
 	ctx := c.Request.Context()
 	cand, err := h.store.GetCandidate(ctx, caller.tenant, id)
 	var held bool
 	if err == nil && cand != nil {
-		held, err = h.auth.HoldsOn(ctx, Agent24WriteCandidateReview, cand.TargetKnowledgeBaseID)
+		held, err = h.auth.HoldsOn(ctx, op, cand.TargetKnowledgeBaseID)
 	}
 	if err != nil {
 		agent24ReviewStorage(c, req.echo, audit, err)
