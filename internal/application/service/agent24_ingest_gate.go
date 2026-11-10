@@ -117,9 +117,10 @@ func agent24IsIngest(k *types.Knowledge) bool {
 }
 
 // agent24KnowledgeIsIngest reports whether k is an Agent24 ingest: the origin marker, or, when that marker is
-// gone, an occupying job. An upstream whole-row save can wipe the marker. A gate that is not installed cannot
-// read the job, so an unmarked knowledge is not an ingest (it goes through untouched). err is set only when
-// that occupying-job read fails.
+// gone, an occupying job or an entry withdrawal. An upstream whole-row save can wipe the marker, and
+// entry.withdraw ends the jobs; only an entry document (an Agent24 ingest) can be withdrawn (W8.10, A24-KB-46). A
+// gate that is not installed cannot read either, so an unmarked knowledge is not an ingest (it goes through
+// untouched). err is set only when one of those reads fails.
 func agent24KnowledgeIsIngest(ctx context.Context, k *types.Knowledge) (bool, error) {
 	if agent24IsIngest(k) {
 		return true, nil
@@ -129,10 +130,10 @@ func agent24KnowledgeIsIngest(ctx context.Context, k *types.Knowledge) (bool, er
 		return false, nil
 	}
 	job, err := g.jobs.Occupying(ctx, k.TenantID, k.ID)
-	if err != nil {
-		return false, err
+	if err != nil || job != nil {
+		return job != nil, err
 	}
-	return job != nil, nil
+	return repository.NewAgent24CandidateStore(g.db).IsWithdrawn(ctx, k.TenantID, k.ID)
 }
 
 // agent24StageGateAborts runs the gate for k. aborted reports that the caller must stop; status is the
@@ -173,6 +174,11 @@ func (g *agent24StageGate) check(ctx context.Context, k *types.Knowledge, postPr
 	job, err := g.jobs.Occupying(ctx, k.TenantID, k.ID)
 	if err != nil {
 		return true, abortStatusUnreadable
+	}
+	// W8.10: a withdrawn entry document is not built again. entry.withdraw has already cancelled its jobs, so this
+	// runs before the no-occupying-job (orphan) branch
+	if aborted, status, done := g.withdrawnStop(ctx, job, k); done {
+		return aborted, status
 	}
 	if job == nil {
 		return g.orphan(ctx, k, postProcess)
@@ -224,6 +230,39 @@ func (g *agent24StageGate) holds(ctx context.Context, job *types.Agent24IngestJo
 		return false, nil
 	}
 }
+
+// withdrawnStop is W8.10 at a stage boundary (A24-KB-46): when k is in agent24_entry_withdrawals, done is true and
+// the run stops. With an occupying job, the job settles as cancelled/document_withdrawn and the row as cancelled
+// (settle). With none (entry.withdraw ended the jobs), a row still pending or processing moves to cancelled, and a
+// post-process run on an activated build stops before its enrichment. A read error is done with
+// abortStatusUnreadable.
+func (g *agent24StageGate) withdrawnStop(
+	ctx context.Context, job *types.Agent24IngestJob, k *types.Knowledge,
+) (aborted bool, status string, done bool) {
+	withdrawn, err := repository.NewAgent24CandidateStore(g.db).IsWithdrawn(ctx, k.TenantID, k.ID)
+	if err != nil {
+		return true, abortStatusUnreadable, true
+	}
+	if !withdrawn {
+		return false, "", false
+	}
+	if job == nil {
+		err := g.jobs.MoveKnowledge(ctx, k.TenantID, k.ID,
+			[]string{types.ParseStatusPending, types.ParseStatusProcessing}, types.ParseStatusCancelled,
+			agent24WithdrawnMessage, g.now())
+		if err != nil {
+			return true, abortStatusUnreadable, true
+		}
+		return true, types.ParseStatusCancelled, true
+	}
+	aborted, status = g.settle(ctx, job, k, types.Agent24JobChange{
+		Status: types.Agent24JobCancelled, CancelReason: types.Agent24JobCancelWithdrawn, Enrichment: job.Enrichment,
+	}, types.ParseStatusCancelled, agent24WithdrawnMessage)
+	return aborted, status, true
+}
+
+// agent24WithdrawnMessage is the error_message of a knowledge row stopped because its entry document was withdrawn.
+const agent24WithdrawnMessage = "Agent24: the entry document was withdrawn"
 
 // approveHolds is W1.3 ① and ② for a candidate.approve job (A24-KB-45): the approver still holds an unrevoked
 // organisation-administrator grant on the job's knowledge base, and the establishing key still carries
