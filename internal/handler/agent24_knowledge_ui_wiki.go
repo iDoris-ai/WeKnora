@@ -400,7 +400,8 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIWikiSources(
 			Select("id, title").
 			Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ? AND parse_status IN ?",
 				tenantID, kbID, ids[start:end], agent24CountedParseStatuses).
-			Scopes(agent24NotWithdrawn("knowledges")). // A24-KB-47
+			// A24-KB-47
+			Scopes(agent24NotWithdrawn("knowledges")).
 			Find(&rows).Error
 		if err != nil {
 			return nil, err

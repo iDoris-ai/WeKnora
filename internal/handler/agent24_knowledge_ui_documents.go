@@ -111,7 +111,8 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIListDocuments(
 		return h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status IN ?",
 				tenantID, kbID, agent24CountedParseStatuses).
-			Scopes(agent24NotWithdrawn("knowledges")) // A24-KB-47
+			// A24-KB-47
+			Scopes(agent24NotWithdrawn("knowledges"))
 	}
 	var total int64
 	if err := base().Count(&total).Error; err != nil {
