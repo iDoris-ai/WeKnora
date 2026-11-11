@@ -75,7 +75,9 @@ var agent24BuildingParseStatuses = []string{types.ParseStatusPending, types.Pars
 func (r agent24DBIndexReader) Facts(ctx context.Context, kb *types.KnowledgeBase) (agent24KBIndexFacts, error) {
 	docs := func() *gorm.DB {
 		return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("tenant_id = ? AND knowledge_base_id = ?"+
-			" AND parse_status IN ?", kb.TenantID, kb.ID, agent24CountedParseStatuses)
+			" AND parse_status IN ?", kb.TenantID, kb.ID, agent24CountedParseStatuses).
+			// A24-KB-47: a withdrawn document counts as one that does not exist (an only one leaves an empty KB)
+			Scopes(agent24NotWithdrawn("knowledges"))
 	}
 	var f agent24KBIndexFacts
 	err := docs().Select("COUNT(*) AS docs, "+

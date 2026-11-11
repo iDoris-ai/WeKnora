@@ -554,6 +554,8 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIDocumentCounts(
 		Select("knowledge_base_id, COUNT(*) AS n").
 		Where("tenant_id = ? AND knowledge_base_id IN ? AND parse_status IN ?",
 			tenantID, ids, agent24CountedParseStatuses).
+		// A24-KB-47
+		Scopes(agent24NotWithdrawn("knowledges")).
 		Group("knowledge_base_id").
 		Scan(&rows).Error
 	if err != nil {
@@ -607,6 +609,8 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UITagDocumentCounts(
 		Joins("JOIN knowledges AS k ON ktr.knowledge_id = k.id AND k.deleted_at IS NULL").
 		Where("k.tenant_id = ? AND k.knowledge_base_id = ? AND k.parse_status IN ? AND ktr.tag_id IN ?",
 			tenantID, kbID, agent24CountedParseStatuses, tagIDs).
+		// A24-KB-47
+		Scopes(agent24NotWithdrawn("k")).
 		Group("ktr.tag_id").
 		Scan(&rows).Error
 	if err != nil {
