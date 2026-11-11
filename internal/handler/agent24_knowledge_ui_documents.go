@@ -110,7 +110,9 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIListDocuments(
 	base := func() *gorm.DB {
 		return h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status IN ?",
-				tenantID, kbID, agent24CountedParseStatuses)
+				tenantID, kbID, agent24CountedParseStatuses).
+			// A24-KB-47
+			Scopes(agent24NotWithdrawn("knowledges"))
 	}
 	var total int64
 	if err := base().Count(&total).Error; err != nil {

@@ -375,7 +375,8 @@ func TestAgent24DefaultScopeAndIndex(t *testing.T) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}))
+	// A24-KB-47: Facts filters on the withdrawal table, which the container always ensures
+	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}, &types.Agent24EntryWithdrawal{}))
 	rows := []any{ // r9: deleting and draft are not counted; a cancelled doc's chunks are not servable
 		&types.Knowledge{ID: "d", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusDeleting},
 		&types.Knowledge{ID: "k", TenantID: 1, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusCancelled},

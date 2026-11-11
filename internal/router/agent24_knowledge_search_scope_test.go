@@ -66,7 +66,9 @@ func agent24SearchScopeDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&types.VectorStore{}, &types.Knowledge{}, &types.Chunk{}); err != nil {
+	// A24-KB-47: the read surfaces filter on the withdrawal table and fail closed without it.
+	if err := db.AutoMigrate(&types.VectorStore{}, &types.Knowledge{}, &types.Chunk{},
+		&types.Agent24EntryWithdrawal{}); err != nil {
 		t.Fatal(err)
 	}
 	rows := []any{&types.VectorStore{ID: "vs", TenantID: 1, Name: "vs", EngineType: "postgres"}}
