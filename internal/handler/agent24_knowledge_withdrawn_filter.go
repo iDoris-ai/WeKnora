@@ -38,18 +38,9 @@ func agent24NotWithdrawn(table string) func(*gorm.DB) *gorm.DB {
 func (h *Agent24KnowledgeUIReadHandler) agent24UIWikiHiddenSlugs(
 	ctx context.Context, tenantID uint64, kbID string,
 ) ([]string, error) {
-	var withdrawn []string
-	err := h.db.WithContext(ctx).Table(types.Agent24EntryWithdrawal{}.TableName()+" AS w").
-		Select("w.knowledge_id").
-		Where("w.tenant_id = ? AND w.knowledge_id IN (?)", tenantID,
-			h.db.Table("knowledges").Select("id").Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)).
-		Pluck("w.knowledge_id", &withdrawn).Error
-	if err != nil || len(withdrawn) == 0 {
+	gone, err := h.agent24UIWikiWithdrawnIDs(ctx, tenantID, kbID)
+	if err != nil || len(gone) == 0 {
 		return nil, err
-	}
-	gone := make(map[string]struct{}, len(withdrawn))
-	for _, id := range withdrawn {
-		gone[id] = struct{}{}
 	}
 	var rows []agent24UIWikiRefsRow
 	err = h.db.WithContext(ctx).Table("wiki_pages").
@@ -71,6 +62,28 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIWikiHiddenSlugs(
 		}
 	}
 	return hidden, nil
+}
+
+// agent24UIWikiWithdrawnIDs is the set of withdrawn documents of this tenant in kbID (a soft-deleted document row
+// still counts, so the set only ever hides more).
+func (h *Agent24KnowledgeUIReadHandler) agent24UIWikiWithdrawnIDs(
+	ctx context.Context, tenantID uint64, kbID string,
+) (map[string]struct{}, error) {
+	var withdrawn []string
+	err := h.db.WithContext(ctx).Table(types.Agent24EntryWithdrawal{}.TableName()+" AS w").
+		Select("w.knowledge_id").
+		Where("w.tenant_id = ? AND w.knowledge_id IN (?)", tenantID,
+			h.db.WithContext(ctx).Table("knowledges").Select("id").
+				Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)).
+		Pluck("w.knowledge_id", &withdrawn).Error
+	if err != nil {
+		return nil, err
+	}
+	gone := make(map[string]struct{}, len(withdrawn))
+	for _, id := range withdrawn {
+		gone[id] = struct{}{}
+	}
+	return gone, nil
 }
 
 type agent24UIWikiRefsRow struct {

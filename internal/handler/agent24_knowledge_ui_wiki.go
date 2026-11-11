@@ -246,13 +246,20 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIGetWikiPage(
 	if len(rows) == 0 {
 		return agent24UIWikiGetRow{}, gorm.ErrRecordNotFound
 	}
-	// A24-KB-47: a page citing a withdrawn document is a page that does not exist
-	hidden, err := h.agent24UIWikiHiddenSlugs(ctx, tenantID, kbID)
+	// A24-KB-47: a page citing a withdrawn document is a page that does not exist. The refs are the row just read,
+	// so a page changed after this read cannot fall out of the check (review R2 C1).
+	gone, err := h.agent24UIWikiWithdrawnIDs(ctx, tenantID, kbID)
 	if err != nil {
 		return agent24UIWikiGetRow{}, err
 	}
-	if slices.Contains(hidden, rows[0].Slug) {
-		return agent24UIWikiGetRow{}, gorm.ErrRecordNotFound
+	if len(gone) > 0 {
+		refs, err := agent24UIWikiStrings(rows[0].SourceRefs)
+		if err != nil {
+			return agent24UIWikiGetRow{}, err
+		}
+		if agent24UIWikiCitesAny(refs, gone) {
+			return agent24UIWikiGetRow{}, gorm.ErrRecordNotFound
+		}
 	}
 	return rows[0], nil
 }
