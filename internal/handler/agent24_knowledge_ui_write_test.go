@@ -296,6 +296,9 @@ func TestAgent24UIWriteGuardGetBody(t *testing.T) {
 		{p + "/candidates/" + agent24UIWriteCand + "?request_id=r1&after=x", ""}, // after is the list's only
 		{p + "/candidates/" + agent24UIWriteCand + "?request_id=r1&candidate_id=" + agent24UIWriteCand, ""},
 		{p + "/candidates?request_id=r1", `{"request_id":"r1"}`},
+		// invalid UTF-8 is refused, not silently replaced with U+FFFD before the handler sees it
+		{p + "/candidates?request_id=r%FF1", ""},
+		{p + "/candidates?request_id=r1&after=%C3", ""},
 	}
 	for _, tc := range bad {
 		rig.reset()

@@ -42,7 +42,22 @@ var UIWriteRoutes = []UIRoute{
 
 // UIWriteOps is the operations named by UIWriteRoutes, deduplicated, in UIOps order (A24-KB-49).
 func UIWriteOps() []string {
-	panic("TODO(grok): A24-KB-49 UIWriteOps")
+	seen := make(map[string]struct{}, len(UIWriteRoutes))
+	out := make([]string, 0, len(UIWriteRoutes))
+	for _, op := range UIOps {
+		for _, rt := range UIWriteRoutes {
+			if rt.Op != op {
+				continue
+			}
+			if _, ok := seen[op]; ok {
+				break
+			}
+			seen[op] = struct{}{}
+			out = append(out, op)
+			break
+		}
+	}
+	return out
 }
 
 // IsUIReadRoute reports an exact method and FullPath match. A prefix is not enough.
