@@ -976,7 +976,13 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 
 	// Step 1: Delete the knowledge base record first (mark as deleted)
 	logger.Infof(ctx, "Deleting knowledge base from database")
-	err = s.repo.DeleteKnowledgeBase(ctx, id)
+	// A24-KB-48 (W1.11/A14): the Agent24 hook withdraws the base's entry documents and returns its submitted
+	// candidates first, and the soft delete joins the hook's transaction; a failing hook deletes nothing.
+	hookTenant := tenantID
+	if kb != nil {
+		hookTenant = kb.TenantID
+	}
+	err = agent24DeleteKnowledgeBaseRecord(ctx, s.repo, hookTenant, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_id": id,

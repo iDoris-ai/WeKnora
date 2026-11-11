@@ -58,6 +58,12 @@ func installAgent24StageGate(
 	service.SetAgent24StageGate(db, jobs, policy)
 }
 
+// installAgent24KBRemovalHook installs the A24-KB-48 W1.11/A14 hook that the upstream knowledge base delete and
+// clear call first, in both modes (the processes share one database). It only stores the hook; it starts nothing.
+func installAgent24KBRemovalHook(db *gorm.DB, audit interfaces.AuditLogService) {
+	handler.InstallAgent24KBRemovalHook(db, audit)
+}
+
 // startAgent24IngestReconcile sweeps Agent24 ingest jobs once a minute in the process that runs the pipeline
 // (standalone); integration mode skips it through invokeBackground, like every other background job.
 // A24-KB-42: the same loop applies the retention of the knowledge-entry records (W8.9), which must run without
