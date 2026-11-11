@@ -54,7 +54,7 @@
         {
           "id": "A24-PATCH-03",
           "issue": null,
-          "summary": "go1.26.11 起 cmd/go 拒绝 #cgo LDFLAGS 的 -L 目录里带 LTO/bitcode 段的库（disallowed LTO section .llvmbc）。只对 *-unknown-linux-* 在编出 .a 之后用 objcopy 按名删除 .llvmbc 与 .llvmcmd；GNU ld 不开 LTO 插件时不读这些段，删掉不影响产物。darwin 与 windows 不改。随后用 scripts/agent24/check-anydoc-archive.sh 按 go1.26.11 完整禁止清单自检（段名 .gnu.lto_*、.gnu.debuglto_*、.llvm.lto*、.llvmbc、.llvmcmd，段类型 0x6fff4c01、0x6fff4c04、0x6fff4c0c）。Dockerfile.app 里编这份 .a 的 rustup 钉住 Rust 1.99.1。已知局限：golang 镜像 tag 仍然浮动；mac 本地在 go1.26.11 下的情况没核实",
+          "summary": "go1.26.11 起 cmd/go 拒绝 #cgo LDFLAGS 的 -L 目录里带 LTO/bitcode 段的库（disallowed LTO section .llvmbc）。只对 *-unknown-linux-* 在编出 .a 之后用 objcopy 按名删除 .llvmbc 与 .llvmcmd；这两个段带 SHF_EXCLUDE 标志（readelf 显示 E），链接器本来就不会写进产物，删掉不影响产物（11-11 镜像构建实测：原始 .a 有 267 个 .llvmbc、267 个 .llvmcmd，都是 E）。darwin 与 windows 不改。随后用 scripts/agent24/check-anydoc-archive.sh 按 go1.26.11 完整禁止清单自检（段名 .gnu.lto_*、.gnu.debuglto_*、.llvm.lto*、.llvmbc、.llvmcmd，段类型 0x6fff4c01、0x6fff4c04、0x6fff4c0c）。Dockerfile.app 里编这份 .a 的 rustup 钉住 Rust 1.99.1。已知局限：golang 镜像 tag 仍然浮动；mac 本地在 go1.26.11 下的情况没核实",
           "upstream_commit": null,
           "paths": [
             "scripts/build-anydoc-lib.sh",

@@ -138,9 +138,10 @@ mkdir -p "$dest"
 cp "$crate_dir/target/$target/release/$lib_name" "$dest/$lib_name"
 
 # go1.26.11's cmd/go rejects an LTO/bitcode section in a library found under a
-# #cgo LDFLAGS -L directory (the failure names ".llvmbc"). GNU ld does not read
-# these sections when its LTO plugin is off, so removing them does not change
-# the linked artifact. Linux targets only; darwin and windows are unchanged.
+# #cgo LDFLAGS -L directory (the failure names ".llvmbc"). rustc emits .llvmbc
+# and .llvmcmd with SHF_EXCLUDE (readelf flag "E"), so a linker never copies
+# them into its output and removing them does not change the linked artifact.
+# Linux targets only; darwin and windows are unchanged.
 case "$target" in
   *-unknown-linux-*)
     "${OBJCOPY:-objcopy}" --remove-section=.llvmbc --remove-section=.llvmcmd "$dest/$lib_name"
