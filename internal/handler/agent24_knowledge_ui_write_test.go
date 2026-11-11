@@ -292,6 +292,11 @@ func TestAgent24UIWriteGuardGetBody(t *testing.T) {
 		{p + "/candidates?request_id=r1&limit=five", ""},
 		{p + "/candidates?request_id=r1&limit=", ""},
 		{p + "/candidates?request_id=r1&limit=5,6", ""},
+		// valid JSON that is not a number token: json.Valid alone would let these through
+		{p + "/candidates?request_id=r1&limit=true", ""},
+		{p + "/candidates?request_id=r1&limit=null", ""},
+		{p + "/candidates?request_id=r1&limit=%225%22", ""},
+		{p + "/candidates?request_id=r1&limit=%5B5%5D", ""},
 		{p + "/candidates?request_id=r1&sort=asc", ""},
 		{p + "/candidates?request_id=r1&request_id=r2", ""},
 		{p + "/candidates?request_id=r1&after=a&after=b", ""},
