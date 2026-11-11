@@ -71,7 +71,9 @@ func (r agent24DBReadReader) Snapshot(ctx context.Context, tenantID uint64, kbID
 		// apart from an absent one.
 		if err := tx.Select(
 			"id, knowledge_base_id, parse_status, title, file_name, file_hash, file_path, source, type",
-		).Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).Limit(1).Find(&rows).Error; err != nil {
+		).Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).
+			Scopes(agent24NotWithdrawn("knowledges")). // A24-KB-47
+			Limit(1).Find(&rows).Error; err != nil {
 			return err
 		}
 		if agent24ReadSnapshotTestHook != nil {

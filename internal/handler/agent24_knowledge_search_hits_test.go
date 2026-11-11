@@ -123,6 +123,8 @@ func agent24HitTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}))
+	// A24-KB-47: the read surfaces filter on the withdrawal table, which the container always ensures
+	require.NoError(t, db.AutoMigrate(&types.Agent24EntryWithdrawal{}))
 	text := string(types.ChunkTypeText)
 	doc := func(id string, tenant uint64, kb, status string) *types.Knowledge {
 		return &types.Knowledge{ID: id, TenantID: tenant, KnowledgeBaseID: kb, ParseStatus: status, Type: "file"}

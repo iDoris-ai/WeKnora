@@ -157,6 +157,7 @@ func (r agent24DBHitReader) Snapshot(ctx context.Context, tenantID uint64, kbIDs
 		var knowledges []types.Knowledge
 		if err := tx.Select("id, knowledge_base_id, title, file_name, file_hash, file_path, source, type, metadata").
 			Where("tenant_id = ? AND id IN ? AND parse_status IN ?", tenantID, docIDs, agent24ActiveParseStatuses).
+			Scopes(agent24NotWithdrawn("knowledges")). // A24-KB-47
 			Find(&knowledges).Error; err != nil {
 			return err
 		}

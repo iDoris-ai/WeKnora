@@ -103,7 +103,8 @@ func agent24UIReadMigrate(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.AutoMigrate(
 		&agent24UIReadKBRow{}, &types.Knowledge{}, &types.Chunk{}, &types.KnowledgeTag{},
 		&types.KnowledgeTagRelation{}, &types.KnowledgeBaseShare{},
-		&types.WikiPage{}, // A24-KB-36
+		&types.WikiPage{},               // A24-KB-36
+		&types.Agent24EntryWithdrawal{}, // A24-KB-47: the read surfaces filter on it
 	)) // A24-KB-35: chunks back doc.get and chunk.list
 }
 
