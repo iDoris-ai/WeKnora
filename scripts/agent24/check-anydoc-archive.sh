@@ -8,9 +8,10 @@
 # Every member is read with readelf. Rejected section names: .gnu.lto_*, .gnu.debuglto_*, .llvm.lto*, .llvmbc,
 # .llvmcmd. Rejected section types: 0x6fff4c01 (SHT_LLVM_LINKER_OPTIONS), 0x6fff4c04 (SHT_LLVM_DEPENDENT_LIBRARIES)
 # and 0x6fff4c0c (SHT_LLVM_LTO). Depending on the binutils version, readelf prints a type in the OS range as its
-# LLVM_* name, as LOOS+0xfff4c0N, or as the bare hex value; all three spellings are matched, and only on section
-# header lines. Exit 0 only when the archive exists, has members and none of them carries one; anything readelf
-# cannot read is a failure.
+# LLVM_* name, as LOOS+0xfff4c0N, or as the bare hex value; all three spellings are matched as a whole word anywhere
+# on a section header line, so a section with an empty (or unusual) name is still checked by its type. A word in
+# another column that happens to spell one of them only makes the check fail, never pass. Exit 0 only when the
+# archive exists, has members and none of them carries one; anything readelf cannot read is a failure.
 set -euo pipefail
 
 archive=${1:?usage: check-anydoc-archive.sh ARCHIVE}
@@ -42,7 +43,7 @@ fi
 # Section header lines only ("  [Nr] Name Type …"), so a member or path name cannot match.
 sections=$(grep -E '^ *\[ *[0-9]+\] ' <<<"$out" || true)
 bad=$(grep -E \
-  '\] (\.gnu\.lto_|\.gnu\.debuglto_|\.llvm\.lto|\.llvmbc |\.llvmcmd )|\] [^ ]+ +(0x)?6fff4c0[14c] |\] [^ ]+ +LOOS\+0xfff4c0[14c] |\] [^ ]+ +LLVM_(LTO|LINKER_OPTIONS|DEPENDENT_LIBRARIES) ' \
+  '\] (\.gnu\.lto_|\.gnu\.debuglto_|\.llvm\.lto|\.llvmbc |\.llvmcmd )|\] .* ((0x)?6fff4c0[14c]|LOOS\+0xfff4c0[14c]|LLVM_(LTO|LINKER_OPTIONS|DEPENDENT_LIBRARIES)) ' \
   <<<"$sections" || true)
 if [ -n "$bad" ]; then
   echo "error: $archive still carries sections go1.26.11+ rejects:" >&2
