@@ -22,8 +22,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-const agent24UIWriteCand = "cand-1"
-const agent24UIWriteDoc = "doc-1"
+const (
+	agent24UIWriteCand = "cand-1"
+	agent24UIWriteDoc  = "doc-1"
+)
 
 // agent24UIWriteSeen is what the recorder behind the guard saw.
 type agent24UIWriteSeen struct {
@@ -119,13 +121,19 @@ func agent24UIWriteCalls() []struct{ method, target, body string } {
 	return []struct{ method, target, body string }{
 		{http.MethodGet, p + "/candidates?request_id=r1", ""},
 		{http.MethodGet, p + "/candidates/" + agent24UIWriteCand + "?request_id=r1", ""},
-		{http.MethodPost, p + "/candidates/" + agent24UIWriteCand + "/return",
-			`{"request_id":"r1","candidate_id":"` + agent24UIWriteCand + `"}`},
-		{http.MethodPost, p + "/candidates/" + agent24UIWriteCand + "/approve",
+		{
+			http.MethodPost, p + "/candidates/" + agent24UIWriteCand + "/return",
+			`{"request_id":"r1","candidate_id":"` + agent24UIWriteCand + `"}`,
+		},
+		{
+			http.MethodPost, p + "/candidates/" + agent24UIWriteCand + "/approve",
 			`{"request_id":"r1","candidate_id":"` + agent24UIWriteCand + `","content_sha256":"` +
-				strings.Repeat("a", 64) + `"}`},
-		{http.MethodPost, p + "/documents/" + agent24UIWriteDoc + "/withdraw",
-			`{"request_id":"r1","knowledge_id":"` + agent24UIWriteDoc + `"}`},
+				strings.Repeat("a", 64) + `"}`,
+		},
+		{
+			http.MethodPost, p + "/documents/" + agent24UIWriteDoc + "/withdraw",
+			`{"request_id":"r1","knowledge_id":"` + agent24UIWriteDoc + `"}`,
+		},
 	}
 }
 
@@ -156,7 +164,8 @@ func TestAgent24UIWriteRoutesTable(t *testing.T) {
 		"/documents/:knowledge_id/withdraw": "knowledge_id",
 	}
 	for _, rt := range agent24uisession.UIWriteRoutes {
-		require.Equal(t, want[strings.TrimPrefix(rt.Path, agent24uisession.UIReadPrefix)], agent24UIWriteIDParam(rt), rt.Path)
+		suffix := strings.TrimPrefix(rt.Path, agent24uisession.UIReadPrefix)
+		require.Equal(t, want[suffix], agent24UIWriteIDParam(rt), rt.Path)
 	}
 }
 
@@ -244,8 +253,11 @@ func TestAgent24UIWriteGuardRevoked(t *testing.T) {
 	}{
 		{"view family revoked", nil, time.Now(), true, "credential_invalid"},
 		{"credential revoked", []*types.TenantAPIKey{}, time.Now(), false, "credential_revoked"},
-		{"credential expired", []*types.TenantAPIKey{agent24UILiveKey([]string{"kb-a"}, false, nil, &past)},
-			time.Now(), false, "credential_expired"},
+		{
+			"credential expired",
+			[]*types.TenantAPIKey{agent24UILiveKey([]string{"kb-a"}, false, nil, &past)},
+			time.Now(), false, "credential_expired",
+		},
 		{"session expired", nil, time.Now().Add(-2 * time.Minute), false, "credential_expired"},
 	}
 	for _, tc := range cases {
@@ -275,8 +287,10 @@ func TestAgent24UIWriteGuardGetBody(t *testing.T) {
 		{p + "/candidates?request_id=r1&limit=1.0", `{"request_id":"r1","limit":1.0}`}, // refused by the handler
 		{p + "/candidates?request_id=r1&limit=1e0", `{"request_id":"r1","limit":1e0}`},
 		{p + "/candidates", `{}`}, // missing request_id is the handler's invalid_request
-		{p + "/candidates/" + agent24UIWriteCand + "?request_id=r1",
-			`{"request_id":"r1","candidate_id":"` + agent24UIWriteCand + `"}`},
+		{
+			p + "/candidates/" + agent24UIWriteCand + "?request_id=r1",
+			`{"request_id":"r1","candidate_id":"` + agent24UIWriteCand + `"}`,
+		},
 	}
 	for _, tc := range ok {
 		rig.reset()
