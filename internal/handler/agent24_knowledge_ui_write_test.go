@@ -209,7 +209,9 @@ func TestAgent24UIWriteGuardContext(t *testing.T) {
 // Q2 = B: an E that became empty after the exchange is handed on as an empty, non-full-access scope; the guard
 // does not answer empty_scope.
 func TestAgent24UIWriteGuardEmptyE(t *testing.T) {
-	caps := []string{string(types.APIKeyCapabilityKBCandidateReview)}
+	// A non-FullAccess ticket credential must still carry retrieve (agent24_knowledge_ui_credential.go), so the
+	// empty-E cases reach the guard's E step instead of failing as credential_invalid.
+	caps := []string{string(types.APIKeyCapabilityRetrieve), string(types.APIKeyCapabilityKBCandidateReview)}
 	for name, key := range map[string]*types.TenantAPIKey{
 		"allowlist disjoint": agent24UILiveKey([]string{"kb-nope"}, false, caps, nil),
 		"allowlist empty":    agent24UILiveKey([]string{}, false, caps, nil),
