@@ -245,7 +245,9 @@ func (h *Agent24KnowledgeUIExchangeHandler) Exchange(c *gin.Context) {
 		writeAgent24KnowledgeError(c, agent24Unauthorized("credential_expired"), agent24KnowledgeEcho{})
 		return
 	}
-	token, err := h.agent24UIIssueSession(ticket, effective, now, lifetime)
+	// A24-KB-50 (KB-SOP-02 S5b, P1): the read ops plus the write ops C_now holds a capability for.
+	ops := agent24UISessionOps(scope)
+	token, err := h.agent24UIIssueSession(ticket, effective, ops, now, lifetime)
 	if err != nil {
 		agent24UILogErr(ctx, "ui exchange issue", err)
 		agent24UINoteTicket(c, ticket, "", false)
@@ -260,7 +262,7 @@ func (h *Agent24KnowledgeUIExchangeHandler) Exchange(c *gin.Context) {
 	c.JSON(http.StatusOK, agent24UIExchangeResponse{
 		SessionToken:   token,
 		ExpiresIn:      int(lifetime / time.Second),
-		Ops:            append([]string(nil), agent24uisession.UIRouteOps()...), // A24-KB-34
+		Ops:            append([]string(nil), ops...), // A24-KB-34; A24-KB-50: the same list as the JWT
 		EffectiveScope: agent24UIExchangeScope{KnowledgeBaseIDs: effective},
 	})
 }
@@ -300,14 +302,14 @@ func (h *Agent24KnowledgeUIExchangeHandler) agent24UIEffectiveScope(
 }
 
 func (h *Agent24KnowledgeUIExchangeHandler) agent24UIIssueSession(
-	ticket *types.Agent24UITicket, effective []string, now time.Time, lifetime time.Duration,
+	ticket *types.Agent24UITicket, effective, ops []string, now time.Time, lifetime time.Duration,
 ) (string, error) {
 	gen := ticket.Generation
 	return agent24uisession.Issue(h.key, h.issuer, agent24uisession.Claims{
 		RegisteredClaims:   jwt.RegisteredClaims{Subject: ticket.Principal},
 		TenantID:           ticket.TenantID,
 		Scope:              agent24uisession.Scope{KnowledgeBaseIDs: append([]string(nil), effective...)},
-		Ops:                append([]string(nil), agent24uisession.UIRouteOps()...), // A24-KB-34
+		Ops:                append([]string(nil), ops...), // A24-KB-34; A24-KB-50
 		TicketID:           ticket.TicketID,
 		ParentCredentialID: ticket.CredentialID,
 		BindingTag:         ticket.BindingTag,
@@ -427,4 +429,23 @@ func parseAgent24UIExchangeRequest(body []byte) (string, *agent24KnowledgeError)
 		return "", agent24InvalidRequest()
 	}
 	return ticket, nil
+}
+
+// agent24UISessionOps is the session's operations (A24-KB-50, KB-SOP-02 S5b, s5-preconditions P1): every UI read op,
+// plus each UI write op whose capability C_now holds — kb_candidate_review → candidate.review, kb_candidate_approve →
+// candidate.approve, kb_entry_withdraw → entry.withdraw. Only C is consulted here; the organisation-administrator
+// grant (D1) is judged by the write entry's Authorize. Order is UIOps order. Full access does not stand in for a
+// capability (agent24CredentialHoldsWrite).
+func agent24UISessionOps(scope types.TenantAPIKeyScope) []string {
+	ops := append([]string(nil), agent24uisession.UIRouteOps()...)
+	if scope.IsPlatform() {
+		return ops
+	}
+	for _, op := range agent24uisession.UIWriteOps() {
+		capability, known := agent24WriteCapabilities[Agent24WriteOp(op)]
+		if known && scope.HasCapability(capability) {
+			ops = append(ops, op)
+		}
+	}
+	return ops
 }

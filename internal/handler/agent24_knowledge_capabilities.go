@@ -72,6 +72,11 @@ func BuildAgent24KnowledgeCapability() Agent24KnowledgeCapability {
 	if agent24CandidateRoutesEnabled() {
 		ops = append(ops, string(Agent24WriteCandidatePropose))
 	}
+	// A24-KB-50: review, approve and entry.withdraw, under the same condition as their UI write routes.
+	if Agent24UIWriteRoutesEnabled() {
+		ops = append(ops, string(Agent24WriteCandidateReview), string(Agent24WriteCandidateApprove),
+			string(Agent24WriteEntryWithdraw))
+	}
 	return Agent24KnowledgeCapability{
 		ProtocolVersions:    []int{agent24KnowledgeProtocolVersion},
 		Mode:                mode,
@@ -113,4 +118,17 @@ func agent24ServerVersion(version, commit string) string {
 		return "unknown"
 	}
 	return s
+}
+
+// Agent24UIWriteRoutesEnabled reports whether the UI write entries are registered (A24-KB-50): the candidate routes
+// are (agent24CandidateRoutesEnabled) and the UI session routes are (agent24UISessionKeyGate). The router registers
+// them when both handlers are non-nil, and their constructors return nil exactly when one of these two is off
+// (NewAgent24KnowledgeCandidatesHandler, NewAgent24KnowledgeUIReadHandler), so capabilities never declares an
+// operation whose route is not there.
+func Agent24UIWriteRoutesEnabled() bool {
+	if !agent24CandidateRoutesEnabled() {
+		return false
+	}
+	on, err := agent24UISessionKeyGate()
+	return err == nil && on
 }

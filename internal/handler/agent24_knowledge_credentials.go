@@ -100,6 +100,9 @@ func agent24UIBypassesCredential(method, path, fullPath string) bool {
 	if agent24uisession.IsUIReadRoute(method, fullPath) { // A24-KB-34
 		return true
 	}
+	if agent24uisession.IsUIWriteRoute(method, fullPath) { // A24-KB-50: the session JWT is the credential
+		return true
+	}
 	switch method {
 	case http.MethodPost:
 		return path == agent24AuditPathUIExchange
