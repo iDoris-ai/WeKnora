@@ -323,12 +323,20 @@ func TestAgent24UIWriteGuardPostBody(t *testing.T) {
 		// not a JSON object: passed through for the handler to refuse
 		{ret, `not json`},
 		{ret, `["candidate_id"]`},
+		{ret, `null`},
 	}
 	for _, tc := range passed {
 		rig.reset()
 		w := rig.do(http.MethodPost, tc.target, tc.body)
 		require.Equal(t, http.StatusNoContent, w.Code, tc.body+" "+w.Body.String())
 		require.True(t, bytes.Equal([]byte(tc.body), rig.seen.body), "body changed: %q", rig.seen.body)
+	}
+	// What the guard passes through without an id check is refused by the handlers' parser, so a body that is not a
+	// JSON object (null included) can never stand in for one that lacks the id.
+	for _, body := range []string{`not json`, `["candidate_id"]`, `null`} {
+		_, kerr := parseAgent24WriteCommon([]byte(body), false, "candidate_id", "note")
+		require.NotNil(t, kerr, body)
+		require.Equal(t, agent24CodeInvalidRequest, kerr.Code, body)
 	}
 	refused := []struct{ target, body string }{
 		{ret, `{"request_id":"r1"}`},
