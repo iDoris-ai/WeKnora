@@ -354,7 +354,7 @@ func agent24UIWriteScopeFor(scope types.TenantAPIKeyScope, e []string) types.Ten
 }
 
 // agent24UIWriteNoteSource marks the row as coming through a UI session (A24-KB-50, details.source). The principal is
-// C's, so this is the only field that tells a UI write from a direct one.
+// C's, so in details this is the only field that tells a UI write from a direct one; request_path differs too.
 func agent24UIWriteNoteSource(c *gin.Context) {
 	agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Source = agent24AuditSourceUISession })
 }
@@ -362,8 +362,9 @@ func agent24UIWriteNoteSource(c *gin.Context) {
 // RegisterAgent24UIWriteRoutes registers every UIWriteRoutes entry on r (the /api/v1 group) as WriteGuard(rt)
 // followed by the candidates handler for that route (A24-KB-50, KB-SOP-02 S5b): ReviewList, ReviewGet, ReviewReturn,
 // ReviewApprove, EntryWithdraw. With preflight (UI origins configured) each path also gets an OPTIONS route served
-// by unreachable, which agent24UICORS answers before Auth. The router calls it only when
-// Agent24UIWriteRoutesEnabled holds; it lives here so the handler tests mount the real registration.
+// by unreachable, which agent24UICORS answers before Auth. The router calls it only with both handlers non-nil, which
+// in production is when Agent24UIWriteRoutesEnabled holds; it lives here so the handler tests mount the real
+// registration.
 func RegisterAgent24UIWriteRoutes(
 	r gin.IRoutes, read *Agent24KnowledgeUIReadHandler, candidates *Agent24KnowledgeCandidatesHandler,
 	preflight bool, unreachable gin.HandlerFunc,

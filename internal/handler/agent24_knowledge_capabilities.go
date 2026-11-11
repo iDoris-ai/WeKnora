@@ -122,7 +122,9 @@ func agent24ServerVersion(version, commit string) string {
 
 // Agent24UIWriteRoutesEnabled reports whether the UI write entries are registered (A24-KB-50): the candidate routes
 // are (agent24CandidateRoutesEnabled) and the UI session routes are (agent24UISessionKeyGate). The router registers
-// them exactly when this is true, so capabilities never declares an operation whose route is not there.
+// them when both handlers are non-nil, and their constructors return nil exactly when one of these two is off
+// (NewAgent24KnowledgeCandidatesHandler, NewAgent24KnowledgeUIReadHandler), so capabilities never declares an
+// operation whose route is not there.
 func Agent24UIWriteRoutesEnabled() bool {
 	if !agent24CandidateRoutesEnabled() {
 		return false
