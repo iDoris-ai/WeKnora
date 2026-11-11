@@ -39,6 +39,31 @@
       "method": "GET",
       "path": "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/wiki/pages/*slug",
       "op": "wiki.get"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/candidates",
+      "op": "candidate.review"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent24/knowledge/ui/candidates/:candidate_id",
+      "op": "candidate.review"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent24/knowledge/ui/candidates/:candidate_id/return",
+      "op": "candidate.review"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent24/knowledge/ui/candidates/:candidate_id/approve",
+      "op": "candidate.approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent24/knowledge/ui/documents/:knowledge_id/withdraw",
+      "op": "entry.withdraw"
     }
   ]
 }

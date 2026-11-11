@@ -28,6 +28,38 @@ var UIReadRoutes = []UIRoute{
 	{http.MethodGet, UIReadPrefix + "/knowledge-bases/:kb_id/wiki/pages/*slug", "wiki.get"},
 }
 
+// UIWriteRoutes is the UI session write entries (A24-KB-49, KB-SOP-02 S5, CONTRACT-OPS-v2 W1.6, design §5). Paths are
+// the ones agreed with the host (s5-preconditions P2) and are matched by it byte for byte. docs/agent24/ui-routes.json
+// lists UIReadRoutes and then these, in this order. They are not read routes: IsUIReadRoute and UIRouteOp do not
+// match them, and UIRouteOps does not name them.
+var UIWriteRoutes = []UIRoute{
+	{http.MethodGet, UIReadPrefix + "/candidates", "candidate.review"},
+	{http.MethodGet, UIReadPrefix + "/candidates/:candidate_id", "candidate.review"},
+	{http.MethodPost, UIReadPrefix + "/candidates/:candidate_id/return", "candidate.review"},
+	{http.MethodPost, UIReadPrefix + "/candidates/:candidate_id/approve", "candidate.approve"},
+	{http.MethodPost, UIReadPrefix + "/documents/:knowledge_id/withdraw", "entry.withdraw"},
+}
+
+// UIWriteOps is the operations named by UIWriteRoutes, deduplicated, in UIOps order (A24-KB-49).
+func UIWriteOps() []string {
+	seen := make(map[string]struct{}, len(UIWriteRoutes))
+	out := make([]string, 0, len(UIWriteRoutes))
+	for _, op := range UIOps {
+		for _, rt := range UIWriteRoutes {
+			if rt.Op != op {
+				continue
+			}
+			if _, ok := seen[op]; ok {
+				break
+			}
+			seen[op] = struct{}{}
+			out = append(out, op)
+			break
+		}
+	}
+	return out
+}
+
 // IsUIReadRoute reports an exact method and FullPath match. A prefix is not enough.
 func IsUIReadRoute(method, fullPath string) bool {
 	_, ok := UIRouteOp(method, fullPath)
