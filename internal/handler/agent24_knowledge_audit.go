@@ -151,8 +151,8 @@ type agent24AuditDetails struct {
 	Suppressed int64 `json:"suppressed,omitempty"`
 	// A24-KB-34: the UI read operation; A24-KB-50: also the UI write operation. Absent on every other row.
 	Op string `json:"op,omitempty"`
-	// A24-KB-50: "ui_session" on a UI write entry row (the principal is C's, so it cannot tell the channel apart).
-	// Absent on every other row.
+	// A24-KB-50: "ui_session" on every UI write entry row (the five UIWriteRoutes, success and refusal alike; the
+	// principal is C's, so it cannot tell the channel apart). Absent on every other row, UI read rows included.
 	Source string `json:"source,omitempty"`
 }
 
@@ -735,6 +735,22 @@ func agent24AuditTenantDetail(c *gin.Context) *uint64 {
 // knowledge.entry.withdraw, the two review GETs → knowledge.ui.view. Not by op: the review GETs and return share
 // candidate.review. false for any other route.
 func agent24UIWriteAuditAction(method, fullPath string) (types.AuditAction, bool) {
-	// TODO(grok A24-KB-50 ③)
-	return "", false
+	rt, ok := agent24uisession.UIWriteRouteFor(method, fullPath)
+	if !ok {
+		return "", false
+	}
+	switch {
+	case rt.Method == http.MethodGet && rt.Path == agent24uisession.UIReadPrefix+"/candidates":
+		return agent24AuditActionUIView, true
+	case rt.Method == http.MethodGet && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id":
+		return agent24AuditActionUIView, true
+	case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id/return":
+		return agent24AuditActionCandidateReturn, true
+	case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id/approve":
+		return agent24AuditActionCandidateApprove, true
+	case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/documents/:knowledge_id/withdraw":
+		return agent24AuditActionEntryWithdraw, true
+	default:
+		return "", false
+	}
 }

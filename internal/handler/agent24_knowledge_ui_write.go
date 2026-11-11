@@ -356,7 +356,7 @@ func agent24UIWriteScopeFor(scope types.TenantAPIKeyScope, e []string) types.Ten
 // agent24UIWriteNoteSource marks the row as coming through a UI session (A24-KB-50, details.source). The principal is
 // C's, so this is the only field that tells a UI write from a direct one.
 func agent24UIWriteNoteSource(c *gin.Context) {
-	// TODO(grok A24-KB-50 ④): set the audit facts' Source to agent24AuditSourceUISession (agent24NoteAudit).
+	agent24NoteAudit(c, func(f *agent24AuditFacts) { f.Source = agent24AuditSourceUISession })
 }
 
 // RegisterAgent24UIWriteRoutes registers every UIWriteRoutes entry on r (the /api/v1 group) as WriteGuard(rt)
@@ -368,5 +368,32 @@ func RegisterAgent24UIWriteRoutes(
 	r gin.IRoutes, read *Agent24KnowledgeUIReadHandler, candidates *Agent24KnowledgeCandidatesHandler,
 	preflight bool, unreachable gin.HandlerFunc,
 ) {
-	// TODO(grok A24-KB-50 ⑥)
+	if read == nil || candidates == nil {
+		return
+	}
+	for _, rt := range agent24uisession.UIWriteRoutes {
+		if !strings.HasPrefix(rt.Path, "/api/v1/") {
+			panic("agent24 ui write route is not under /api/v1: " + rt.Method + " " + rt.Path)
+		}
+		rel := strings.TrimPrefix(rt.Path, "/api/v1")
+		var next gin.HandlerFunc
+		switch {
+		case rt.Method == http.MethodGet && rt.Path == agent24uisession.UIReadPrefix+"/candidates":
+			next = candidates.ReviewList
+		case rt.Method == http.MethodGet && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id":
+			next = candidates.ReviewGet
+		case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id/return":
+			next = candidates.ReviewReturn
+		case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id/approve":
+			next = candidates.ReviewApprove
+		case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/documents/:knowledge_id/withdraw":
+			next = candidates.EntryWithdraw
+		default:
+			panic("agent24 ui write route has no handler: " + rt.Method + " " + rt.Path)
+		}
+		r.Handle(rt.Method, rel, read.WriteGuard(rt), next)
+		if preflight {
+			r.OPTIONS(rel, unreachable)
+		}
+	}
 }

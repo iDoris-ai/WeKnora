@@ -124,6 +124,9 @@ func agent24ServerVersion(version, commit string) string {
 // are (agent24CandidateRoutesEnabled) and the UI session routes are (agent24UISessionKeyGate). The router registers
 // them exactly when this is true, so capabilities never declares an operation whose route is not there.
 func Agent24UIWriteRoutesEnabled() bool {
-	// TODO(grok A24-KB-50 ⑤)
-	return false
+	if !agent24CandidateRoutesEnabled() {
+		return false
+	}
+	on, err := agent24UISessionKeyGate()
+	return err == nil && on
 }

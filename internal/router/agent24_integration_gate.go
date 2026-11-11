@@ -1,6 +1,6 @@
 // Agent24 fork product patch A24-KB-04 (KB-C1-01). In integration
 // mode every route outside the allowlist answers 404, indistinguishable from a
-// missing route.
+// missing route. The allowlist includes the UI read and write routes (A24-KB-34, A24-KB-50).
 
 package router
 
@@ -41,19 +41,31 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	"GET " + agent24EmbedAdminAssetPath:  {},
 }
 
-// agent24UIReadPaths is the set of UI read route paths, the only paths that may take a preflight (A24-KB-38).
-var agent24UIReadPaths = map[string]struct{}{}
+// agent24UIPaths maps each UI read and write route path to its one method. These are the only paths that may take a
+// preflight (A24-KB-38, A24-KB-50).
+var agent24UIPaths = map[string]string{}
 
 func init() {
 	// A24-KB-34: UI read routes come from the single table. Do not hand-copy them.
 	for _, rt := range agent24uisession.UIReadRoutes {
 		agent24IntegrationAllowlist[rt.Method+" "+rt.Path] = struct{}{}
-		agent24UIReadPaths[rt.Path] = struct{}{}
+		if _, ok := agent24UIPaths[rt.Path]; ok {
+			panic("agent24 UI path registered twice: " + rt.Path)
+		}
+		agent24UIPaths[rt.Path] = rt.Method
+	}
+	// A24-KB-50: UI write routes, the same way.
+	for _, rt := range agent24uisession.UIWriteRoutes {
+		agent24IntegrationAllowlist[rt.Method+" "+rt.Path] = struct{}{}
+		if _, ok := agent24UIPaths[rt.Path]; ok {
+			panic("agent24 UI path registered twice: " + rt.Path)
+		}
+		agent24UIPaths[rt.Path] = rt.Method
 	}
 }
 
 // agent24IntegrationGate passes allowlisted method+route pairs. With uiPreflight (A24-KB-38: UI origins
-// configured) it also passes OPTIONS on a UI read path; agent24UICORS then answers it before Auth.
+// configured) it also passes OPTIONS on a UI read or write path; agent24UICORS then answers it before Auth.
 func agent24IntegrationGate(uiPreflight bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if p := c.FullPath(); p != "" {
@@ -61,7 +73,7 @@ func agent24IntegrationGate(uiPreflight bool) gin.HandlerFunc {
 				c.Next()
 				return
 			}
-			if _, ok := agent24UIReadPaths[p]; ok && uiPreflight && c.Request.Method == http.MethodOptions {
+			if _, ok := agent24UIPaths[p]; ok && uiPreflight && c.Request.Method == http.MethodOptions {
 				c.Next()
 				return
 			}

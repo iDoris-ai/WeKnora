@@ -134,6 +134,9 @@ func TestAgent24UIWriteRoutesReachGuard(t *testing.T) {
 			require.Empty(t, w.Body.String(), "%s %s", m, rt.Path)
 		}
 		for _, extra := range []string{path + "/x", path + "/", strings.ToUpper(path)} {
+			if rt.Path == agent24uisession.UIReadPrefix+"/candidates" && extra == path+"/x" {
+				continue // GET /candidates/x is GET /candidates/:candidate_id, a write entry of its own
+			}
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest(rt.Method, extra, strings.NewReader("{}")))
 			require.Equal(t, http.StatusNotFound, w.Code, "%s %s: %s", rt.Method, extra, w.Body.String())

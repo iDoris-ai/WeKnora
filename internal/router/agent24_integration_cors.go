@@ -22,7 +22,7 @@ const (
 	agent24UIPreflightMaxAge   = "600"
 )
 
-// agent24UIOrigins returns the cross-origin allowlist for the UI read routes: nil outside integration mode
+// agent24UIOrigins returns the cross-origin allowlist for the UI read and write routes: nil outside integration mode
 // or when AGENT24_KNOWLEDGE_UI_ORIGINS is unset. An invalid value never reaches here:
 // installAgent24IntegrationMode already stopped startup on it.
 func agent24UIOrigins() []string {
@@ -41,7 +41,7 @@ func agent24UIOrigins() []string {
 // Integration mode with no UI origins configured installs nothing (A24-KB-37): no response carries an
 // Access-Control-* header and every preflight stays 404 at the integration gate. The embed page is served
 // from the API's own origin (WeKnora#134) and every other caller is the Agent24 main process.
-// With UI origins configured (A24-KB-38) only the UI read routes answer cross-origin; see agent24UICORS.
+// With UI origins configured (A24-KB-38) only the UI read and write routes answer cross-origin; see agent24UICORS.
 // An invalid mode never reaches here: installAgent24IntegrationMode already stopped startup on it.
 func installAgent24CORS(r *gin.Engine, cors gin.HandlerFunc) {
 	mode, err := handler.Agent24KnowledgeModeFromEnv()
@@ -54,18 +54,20 @@ func installAgent24CORS(r *gin.Engine, cors gin.HandlerFunc) {
 	r.Use(cors)
 }
 
-// agent24UICORS serves CORS for the UI read routes only. Every other route passes through untouched.
-//   - GET from an allowed origin gets Access-Control-Allow-Origin echoing it; from any other origin, none.
-//     Both get Vary: Origin. No response allows credentials: the host injects the JWT, no cookie is used.
-//   - A preflight from an allowed origin asking for GET and only the allowed headers gets 204 here, before
-//     Auth. Any other OPTIONS on a UI path gets the gate's bare 404 with no CORS header.
+// agent24UICORS serves CORS for the UI read and write routes only. Every other route passes through untouched.
+//   - A non-OPTIONS request from an allowed origin gets Access-Control-Allow-Origin echoing it; from any other
+//     origin, none. Both get Vary: Origin. No response allows credentials: the host injects the JWT, no cookie
+//     is used. This holds for every UI path, write paths included.
+//   - A preflight from an allowed origin asking for that path's one method and only the allowed headers gets 204
+//     here, before Auth. Any other OPTIONS on a UI path gets the gate's bare 404 with no CORS header.
 func agent24UICORS(origins []string) gin.HandlerFunc {
 	allowed := make(map[string]struct{}, len(origins))
 	for _, o := range origins {
 		allowed[o] = struct{}{}
 	}
 	return func(c *gin.Context) {
-		if _, ui := agent24UIReadPaths[c.FullPath()]; !ui {
+		m, ui := agent24UIPaths[c.FullPath()]
+		if !ui {
 			c.Next()
 			return
 		}
@@ -76,12 +78,12 @@ func agent24UICORS(origins []string) gin.HandlerFunc {
 		}
 		h := c.Writer.Header()
 		if c.Request.Method == http.MethodOptions {
-			if !ok || !agent24UIPreflightRequestOK(c.Request.Header) {
+			if !ok || !agent24UIPreflightRequestOK(c.Request.Header, m) {
 				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
 			h.Set("Access-Control-Allow-Origin", origin)
-			h.Set("Access-Control-Allow-Methods", http.MethodGet)
+			h.Set("Access-Control-Allow-Methods", m)
 			h.Set("Access-Control-Allow-Headers", agent24UIAllowHeadersValue)
 			h.Set("Access-Control-Max-Age", agent24UIPreflightMaxAge)
 			h.Add("Vary", "Origin")
@@ -98,10 +100,11 @@ func agent24UICORS(origins []string) gin.HandlerFunc {
 	}
 }
 
-// agent24UIPreflightRequestOK requires a CORS preflight for GET whose requested headers are all allowed.
-// An OPTIONS without Access-Control-Request-Method is not a preflight.
-func agent24UIPreflightRequestOK(h http.Header) bool {
-	if ms := h.Values("Access-Control-Request-Method"); len(ms) != 1 || ms[0] != http.MethodGet {
+// agent24UIPreflightRequestOK requires a CORS preflight asking for that path's one method whose requested
+// headers are all allowed. An OPTIONS without Access-Control-Request-Method is not a preflight. method is
+// compared exactly, case-sensitively.
+func agent24UIPreflightRequestOK(h http.Header, method string) bool {
+	if ms := h.Values("Access-Control-Request-Method"); len(ms) != 1 || ms[0] != method {
 		return false
 	}
 	for _, line := range h.Values("Access-Control-Request-Headers") {
@@ -118,8 +121,8 @@ func agent24UIPreflightRequestOK(h http.Header) bool {
 	return true
 }
 
-// agent24UIPreflightUnreachable is the OPTIONS route handler on the UI read paths. agent24UICORS answers
-// every OPTIONS there first, so reaching this means the middleware is missing: refuse like the gate.
+// agent24UIPreflightUnreachable is the OPTIONS route handler on the UI read and write routes. agent24UICORS
+// answers every OPTIONS there first, so reaching this means the middleware is missing: refuse like the gate.
 func agent24UIPreflightUnreachable(c *gin.Context) {
 	c.AbortWithStatus(http.StatusNotFound)
 }

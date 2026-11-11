@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/agent24uisession"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/middleware"
@@ -53,7 +54,7 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 			t.Fatalf("%s policy = %#v, want none", path, policy)
 		}
 	}
-	for _, rt := range []struct{ method, path string }{
+	noPolicy := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/agent24/knowledge/ui/exchange"},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/session"},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases"},
@@ -64,7 +65,12 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/documents/:knowledge_id/chunks"},
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/wiki/pages"},       // A24-KB-36
 		{http.MethodGet, "/api/v1/agent24/knowledge/ui/knowledge-bases/:kb_id/wiki/pages/*slug"}, // A24-KB-36
-	} {
+	}
+	// A24-KB-50: the five UI write entries, like the reads: no API key policy, WriteGuard holds the session.
+	for _, rt := range agent24uisession.UIWriteRoutes {
+		noPolicy = append(noPolicy, struct{ method, path string }{rt.Method, rt.Path})
+	}
+	for _, rt := range noPolicy {
 		n := 0
 		for _, got := range engine.Routes() {
 			if got.Method == rt.method && got.Path == rt.path {
@@ -80,9 +86,10 @@ func TestAgent24KnowledgeRoutePolicy(t *testing.T) {
 			}
 		}
 	}
-	if len(engine.Routes()) != 18 { // A24-KB-36: eight ui reads; A24-KB-43: three candidate routes
+	// A24-KB-36: eight ui reads; A24-KB-43: three candidate routes; A24-KB-50: five ui write entries
+	if len(engine.Routes()) != 23 {
 		t.Fatalf("routes = %#v, want ready, search, read, ui tickets, "+
-			"ui revocations, exchange, session, eight ui reads and three candidate routes",
+			"ui revocations, exchange, session, eight ui reads, three candidate routes and five ui writes",
 			engine.Routes())
 	}
 }

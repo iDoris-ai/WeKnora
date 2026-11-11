@@ -107,6 +107,10 @@ func IsUIWriteRoute(method, fullPath string) bool {
 
 // UIWriteRouteFor returns the UIWriteRoutes entry for an exact method and FullPath match (A24-KB-50).
 func UIWriteRouteFor(method, fullPath string) (UIRoute, bool) {
-	// TODO(grok A24-KB-50 ①): exact match over UIWriteRoutes, the same way UIRouteOp matches UIReadRoutes.
+	for _, rt := range UIWriteRoutes {
+		if rt.Method == method && rt.Path == fullPath {
+			return rt, true
+		}
+	}
 	return UIRoute{}, false
 }

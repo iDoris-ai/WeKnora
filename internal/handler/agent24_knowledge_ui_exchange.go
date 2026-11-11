@@ -437,6 +437,15 @@ func parseAgent24UIExchangeRequest(body []byte) (string, *agent24KnowledgeError)
 // grant (D1) is judged by the write entry's Authorize. Order is UIOps order. Full access does not stand in for a
 // capability (agent24CredentialHoldsWrite).
 func agent24UISessionOps(scope types.TenantAPIKeyScope) []string {
-	// TODO(grok A24-KB-50 ②)
-	return append([]string(nil), agent24uisession.UIRouteOps()...)
+	ops := append([]string(nil), agent24uisession.UIRouteOps()...)
+	if scope.IsPlatform() {
+		return ops
+	}
+	for _, op := range agent24uisession.UIWriteOps() {
+		capability, known := agent24WriteCapabilities[Agent24WriteOp(op)]
+		if known && scope.HasCapability(capability) {
+			ops = append(ops, op)
+		}
+	}
+	return ops
 }

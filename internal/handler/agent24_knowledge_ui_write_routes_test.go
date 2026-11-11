@@ -169,18 +169,19 @@ func TestAgent24UIWriteRoutesPositive(t *testing.T) {
 
 	w = g.do(http.MethodGet, p+"/candidates/"+toApprove+"?request_id=r-get", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Equal(t, toApprove, agent24UIJSON(t, w)["candidate_id"])
+	cand, _ := agent24UIJSON(t, w)["candidate"].(map[string]any)
+	assert.Equal(t, toApprove, cand["candidate_id"], w.Body.String())
 
 	w = g.do(http.MethodPost, p+"/candidates/"+toReturn+"/return",
 		`{"request_id":"r-ret","candidate_id":"`+toReturn+`","note":"请补充出处"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Equal(t, "returned", g.e.candidate(t, toReturn).Status)
+	assert.Equal(t, "returned", string(g.e.candidate(t, toReturn).Status))
 
 	w = g.do(http.MethodPost, p+"/candidates/"+toApprove+"/approve",
 		`{"request_id":"r-app","candidate_id":"`+toApprove+`","content_sha256":"`+sha+`"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	approved := g.e.candidate(t, toApprove)
-	assert.Equal(t, "approved", approved.Status)
+	assert.Equal(t, "approved", string(approved.Status))
 	assert.Equal(t, agent24UISessionAdmin.StorageID(), approved.Approver)
 	assert.False(t, approved.AuthorIsApprover)
 
@@ -219,7 +220,7 @@ func TestAgent24UIWriteRoutesRefusalsAudited(t *testing.T) {
 	w := g.do(http.MethodPost, p+"/candidates/"+id+"/approve",
 		`{"request_id":"r1","candidate_id":"`+id+`","content_sha256":"`+sha+`"}`)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-	assert.Equal(t, "submitted", g.e.candidate(t, id).Status)
+	assert.Equal(t, "submitted", string(g.e.candidate(t, id).Status))
 
 	g.token = ""
 	w = httptest.NewRecorder()
@@ -229,7 +230,7 @@ func TestAgent24UIWriteRoutesRefusalsAudited(t *testing.T) {
 	req.Header.Set("X-API-Key", "sk-c-key")
 	g.r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
-	assert.Equal(t, "submitted", g.e.candidate(t, id).Status)
+	assert.Equal(t, "submitted", string(g.e.candidate(t, id).Status))
 	assert.Zero(t, g.e.approveRecords(t))
 
 	entries := g.stub.entries
