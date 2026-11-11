@@ -43,8 +43,19 @@ func TestAgent24UIRoutesJSONMatchesTable(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Routes) != len(agent24uisession.UIReadRoutes) {
-		t.Fatalf("file has %d routes, table has %d", len(doc.Routes), len(agent24uisession.UIReadRoutes))
+	// A24-KB-49: the file lists UIReadRoutes and then UIWriteRoutes, in order.
+	tableLen := len(agent24uisession.UIReadRoutes) + len(agent24uisession.UIWriteRoutes)
+	if len(doc.Routes) != tableLen {
+		t.Fatalf("file has %d routes, table has %d", len(doc.Routes), tableLen)
+	}
+	for i, rt := range agent24uisession.UIWriteRoutes {
+		got := doc.Routes[len(agent24uisession.UIReadRoutes)+i]
+		if got.Method != rt.Method || got.Path != rt.Path || got.Op != rt.Op {
+			t.Fatalf("file[%d] = %+v, write table = %+v", len(agent24uisession.UIReadRoutes)+i, got, rt)
+		}
+		if !agent24UIRouteShapeOK(rt.Path) {
+			t.Fatalf("write table path %s is not :param segments", rt.Path)
+		}
 	}
 	for i, rt := range agent24uisession.UIReadRoutes {
 		got := doc.Routes[i]
@@ -93,6 +104,14 @@ func TestAgent24UIRoutesJSONMatchesTable(t *testing.T) {
 	// Both wiki routes sit under one node registered last, so that node's
 	// priority rises above tags and documents and Routes() lists wiki first.
 	// JSON already matches the table in order. Here the route sets must match.
+	// A24-KB-49 S5a: the write routes are listed but not registered yet (S5b registers them).
+	for _, rt := range engine.Routes() {
+		for _, w := range agent24uisession.UIWriteRoutes {
+			if rt.Method == w.Method && rt.Path == w.Path {
+				t.Fatalf("S5a registered the write route %s %s", rt.Method, rt.Path)
+			}
+		}
+	}
 	slices.Sort(got)
 	slices.Sort(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

@@ -36,8 +36,11 @@ var ErrInvalid = errors.New("agent24 ui session token invalid")
 
 // UIOps is the closed set of UI operation names (A24-KB-33, U3.2). It stays the full set.
 // A24-KB-34: a session JWT carries UIRouteOps, the subset ui-routes.json actually releases.
+// A24-KB-49: the three UI write operations (CONTRACT-OPS-v2 W1.6) join the closed set. Whether a session carries
+// them is decided at exchange (S5b); naming them here releases nothing.
 var UIOps = []string{
 	"kb.list", "kb.get", "doc.list", "doc.get", "chunk.list", "wiki.list", "wiki.get", "tag.list",
+	"candidate.review", "candidate.approve", "entry.withdraw",
 }
 
 // Scope is the knowledge-base allowlist carried in a session JWT (U3.2).
