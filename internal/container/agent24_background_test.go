@@ -80,7 +80,9 @@ var agent24ForegroundInvokes = map[string]bool{
 	// starts nothing.
 	"ensureAgent24IngestJobs": true,
 	// installAgent24StageGate only stores the A24-KB-41 stage gate the pipeline calls.
-	"installAgent24StageGate":        true,
+	"installAgent24StageGate": true,
+	// installAgent24KBRemovalHook only stores the A24-KB-48 W1.11/A14 hook the delete and clear call.
+	"installAgent24KBRemovalHook":    true,
 	"registerChatLocalImageResolver": true,
 	// The BrowserSkill cleanup Promote closure, keyed by its whole text; any
 	// other closure, or a change to its body, is unreviewed.

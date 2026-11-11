@@ -78,11 +78,12 @@ ENV GO_VERSION=${GO_VERSION_ARG}
 ARG WITH_ANYDOC=1
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
+# 钉住 11-11 能编出 .a 的版本
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     if [ "$WITH_ANYDOC" = "1" ]; then \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain stable && \
+            | sh -s -- -y --profile minimal --default-toolchain 1.99.1 && \
         ./scripts/build-anydoc-lib.sh; \
     fi
 
