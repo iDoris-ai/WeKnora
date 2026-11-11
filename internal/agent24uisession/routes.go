@@ -96,3 +96,17 @@ func UIRouteOps() []string {
 	}
 	return out
 }
+
+// IsUIWriteRoute reports an exact method and FullPath match against UIWriteRoutes (A24-KB-50, KB-SOP-02 S5b). A prefix,
+// another method, an extra or a missing segment, or a different case is not a match. This is where the UI write
+// entries are let past Auth and the credential gate (PR-Daemon #168 N2), so it must stay exact.
+func IsUIWriteRoute(method, fullPath string) bool {
+	_, ok := UIWriteRouteFor(method, fullPath)
+	return ok
+}
+
+// UIWriteRouteFor returns the UIWriteRoutes entry for an exact method and FullPath match (A24-KB-50).
+func UIWriteRouteFor(method, fullPath string) (UIRoute, bool) {
+	// TODO(grok A24-KB-50 ①): exact match over UIWriteRoutes, the same way UIRouteOp matches UIReadRoutes.
+	return UIRoute{}, false
+}

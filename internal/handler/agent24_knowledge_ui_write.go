@@ -68,6 +68,7 @@ func (h *Agent24KnowledgeUIReadHandler) WriteGuard(rt agent24uisession.UIRoute) 
 		}
 		// NoteTicket replaces the resource map, so op and the resource id are merged after it.
 		agent24UIReadNoteOp(c, rt.Op, "", knowledgeID)
+		agent24UIWriteNoteSource(c) // A24-KB-50: before any refusal, so refused rows carry it too
 		if kerr != nil {
 			writeAgent24KnowledgeError(c, kerr, agent24KnowledgeEcho{})
 			return
@@ -350,4 +351,22 @@ func agent24UIWriteScopeFor(scope types.TenantAPIKeyScope, e []string) types.Ten
 		out.KnowledgeBaseIDs = types.StringArray(e)
 	}
 	return out
+}
+
+// agent24UIWriteNoteSource marks the row as coming through a UI session (A24-KB-50, details.source). The principal is
+// C's, so this is the only field that tells a UI write from a direct one.
+func agent24UIWriteNoteSource(c *gin.Context) {
+	// TODO(grok A24-KB-50 ④): set the audit facts' Source to agent24AuditSourceUISession (agent24NoteAudit).
+}
+
+// RegisterAgent24UIWriteRoutes registers every UIWriteRoutes entry on r (the /api/v1 group) as WriteGuard(rt)
+// followed by the candidates handler for that route (A24-KB-50, KB-SOP-02 S5b): ReviewList, ReviewGet, ReviewReturn,
+// ReviewApprove, EntryWithdraw. With preflight (UI origins configured) each path also gets an OPTIONS route served
+// by unreachable, which agent24UICORS answers before Auth. The router calls it only when
+// Agent24UIWriteRoutesEnabled holds; it lives here so the handler tests mount the real registration.
+func RegisterAgent24UIWriteRoutes(
+	r gin.IRoutes, read *Agent24KnowledgeUIReadHandler, candidates *Agent24KnowledgeCandidatesHandler,
+	preflight bool, unreachable gin.HandlerFunc,
+) {
+	// TODO(grok A24-KB-50 ⑥)
 }

@@ -104,11 +104,12 @@ func TestAgent24UIRoutesJSONMatchesTable(t *testing.T) {
 	// Both wiki routes sit under one node registered last, so that node's
 	// priority rises above tags and documents and Routes() lists wiki first.
 	// JSON already matches the table in order. Here the route sets must match.
-	// A24-KB-49 S5a: the write routes are listed but not registered yet (S5b registers them).
+	// A24-KB-50 S5b: the write routes need the candidate handler too, which this engine lacks, so none of them is
+	// registered here (TestAgent24UIWriteRoutesRegisteredExactly covers the engine that has both).
 	for _, rt := range engine.Routes() {
 		for _, w := range agent24uisession.UIWriteRoutes {
 			if rt.Method == w.Method && rt.Path == w.Path {
-				t.Fatalf("S5a registered the write route %s %s", rt.Method, rt.Path)
+				t.Fatalf("write route %s %s registered without the candidate handler", rt.Method, rt.Path)
 			}
 		}
 	}

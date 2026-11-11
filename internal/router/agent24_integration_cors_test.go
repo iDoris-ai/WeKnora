@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,6 +81,9 @@ func TestAgent24IntegrationModeSendsNoCORSHeaders(t *testing.T) {
 	for _, rt := range agent24uisession.UIReadRoutes {
 		require.True(t, checked[rt.Method+" "+rt.Path], rt.Path)
 	}
+	for _, rt := range agent24uisession.UIWriteRoutes { // A24-KB-50: registered and allowlisted, no CORS without origins
+		require.True(t, checked[rt.Method+" "+rt.Path], rt.Path)
+	}
 	require.True(t, checked["GET /health"])
 	require.Len(t, checked, len(agent24IntegrationAllowlist))
 }
@@ -138,23 +142,25 @@ func agent24RequireBare404(t *testing.T, w *httptest.ResponseRecorder, what stri
 	require.Empty(t, w.Header().Values("Vary"), what)
 }
 
-// TestAgent24UIOriginsCORS: with origins configured, the eight UI read routes answer cross-origin GETs and
-// preflights from those exact origins only, without credentials. Every other allowlisted route still sends
-// no CORS header and its preflight stays 404.
+// TestAgent24UIOriginsCORS: with origins configured, the eight UI read routes and (A24-KB-50) the five UI write
+// routes answer cross-origin requests and preflights from those exact origins only, without credentials. A UI
+// path's preflight allows exactly the one method that path is registered for (GET, or POST for return, approve
+// and withdraw). Every other allowlisted route still sends no CORS header and its preflight stays 404.
 func TestAgent24UIOriginsCORS(t *testing.T) {
 	r := agent24UICORSRouter(t, " "+agent24UIOriginA+" ,"+agent24UIOriginB+","+agent24UIOriginA)
-	ui := map[string]bool{}
-	for _, rt := range agent24uisession.UIReadRoutes {
-		ui[rt.Path] = true
+	ui := map[string]string{} // path -> its one method
+	for _, rt := range append(slices.Clone(agent24uisession.UIReadRoutes), agent24uisession.UIWriteRoutes...) {
+		require.NotContains(t, ui, rt.Path, "one method per UI path")
+		ui[rt.Path] = rt.Method
 	}
 	options := 0
 	for _, rt := range r.Routes() {
 		if rt.Method == http.MethodOptions {
-			require.True(t, ui[rt.Path], "OPTIONS route outside the UI read paths: %s", rt.Path)
+			require.Contains(t, ui, rt.Path, "OPTIONS route outside the UI paths: %s", rt.Path)
 			options++
 		}
 	}
-	require.Equal(t, len(agent24uisession.UIReadRoutes), options)
+	require.Equal(t, len(ui), options)
 
 	checked := map[string]bool{}
 	for _, rt := range r.Routes() {
@@ -164,7 +170,8 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 		}
 		path := agent24ConcretePath(rt.Path)
 		checked[key] = true
-		if !ui[rt.Path] {
+		method, isUI := ui[rt.Path]
+		if !isUI {
 			req := httptest.NewRequest(rt.Method, path, nil)
 			req.Header.Set("Origin", agent24UIOriginA)
 			w := httptest.NewRecorder()
@@ -178,7 +185,7 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 		}
 
 		for _, origin := range []string{agent24UIOriginA, agent24UIOriginB} {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req := httptest.NewRequest(method, path, nil)
 			req.Header.Set("Origin", origin)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
@@ -188,12 +195,12 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 			require.Contains(t, w.Header().Values("Vary"), "Origin", key)
 
 			w = httptest.NewRecorder()
-			r.ServeHTTP(w, agent24Preflight(path, origin, http.MethodGet,
+			r.ServeHTTP(w, agent24Preflight(path, origin, method,
 				"Authorization, X-Agent24-View-Proof,x-request-id , content-type"))
 			require.Equal(t, http.StatusNoContent, w.Code, "OPTIONS "+key)
 			require.Zero(t, w.Body.Len(), "OPTIONS "+key)
 			require.Equal(t, origin, w.Header().Get("Access-Control-Allow-Origin"), "OPTIONS "+key)
-			require.Equal(t, "GET", w.Header().Get("Access-Control-Allow-Methods"), "OPTIONS "+key)
+			require.Equal(t, method, w.Header().Get("Access-Control-Allow-Methods"), "OPTIONS "+key)
 			require.Equal(t, "Authorization, Content-Type, X-Agent24-View-Proof, X-Request-ID",
 				w.Header().Get("Access-Control-Allow-Headers"), "OPTIONS "+key)
 			require.Equal(t, "600", w.Header().Get("Access-Control-Max-Age"), "OPTIONS "+key)
@@ -204,7 +211,7 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 
 		// A preflight that asks for no header at all is still a preflight.
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, agent24Preflight(path, agent24UIOriginA, http.MethodGet, ""))
+		r.ServeHTTP(w, agent24Preflight(path, agent24UIOriginA, method, ""))
 		require.Equal(t, http.StatusNoContent, w.Code, "OPTIONS "+key+" without request headers")
 
 		others := []string{
@@ -212,7 +219,7 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 			"https://UI.example.org", "http://ui.example.org", "https://ui.example.org:443",
 		}
 		for _, origin := range others {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req := httptest.NewRequest(method, path, nil)
 			if origin != "" {
 				req.Header.Set("Origin", origin)
 			}
@@ -223,26 +230,28 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 			require.Contains(t, w.Header().Values("Vary"), "Origin", key)
 
 			w = httptest.NewRecorder()
-			r.ServeHTTP(w, agent24Preflight(path, origin, http.MethodGet, "authorization"))
+			r.ServeHTTP(w, agent24Preflight(path, origin, method, "authorization"))
 			agent24RequireBare404(t, w, "OPTIONS "+key+" from "+origin)
 		}
 
 		bad := map[string]*http.Request{
-			"method POST":        agent24Preflight(path, agent24UIOriginA, http.MethodPost, "authorization"),
-			"method get":         agent24Preflight(path, agent24UIOriginA, "get", "authorization"),
+			"the other method":   agent24Preflight(path, agent24UIOriginA, agent24OtherMethod(method), "authorization"),
+			"method PUT":         agent24Preflight(path, agent24UIOriginA, http.MethodPut, "authorization"),
+			"method DELETE":      agent24Preflight(path, agent24UIOriginA, http.MethodDelete, "authorization"),
+			"lower-case method":  agent24Preflight(path, agent24UIOriginA, strings.ToLower(method), "authorization"),
 			"no request method":  agent24Preflight(path, agent24UIOriginA, "", "authorization"),
-			"header x-api-key":   agent24Preflight(path, agent24UIOriginA, http.MethodGet, "authorization, x-api-key"),
-			"header x-tenant-id": agent24Preflight(path, agent24UIOriginA, http.MethodGet, "x-tenant-id"),
-			"header cookie":      agent24Preflight(path, agent24UIOriginA, http.MethodGet, "cookie"),
+			"header x-api-key":   agent24Preflight(path, agent24UIOriginA, method, "authorization, x-api-key"),
+			"header x-tenant-id": agent24Preflight(path, agent24UIOriginA, method, "x-tenant-id"),
+			"header cookie":      agent24Preflight(path, agent24UIOriginA, method, "cookie"),
 		}
-		two := agent24Preflight(path, agent24UIOriginA, http.MethodGet, "authorization")
+		two := agent24Preflight(path, agent24UIOriginA, method, "authorization")
 		two.Header.Add("Origin", agent24UIOriginB)
 		bad["two origins"] = two
-		twoHdr := agent24Preflight(path, agent24UIOriginA, http.MethodGet, "authorization")
+		twoHdr := agent24Preflight(path, agent24UIOriginA, method, "authorization")
 		twoHdr.Header.Add("Access-Control-Request-Headers", "x-api-key")
 		bad["second header line"] = twoHdr
-		twoMethod := agent24Preflight(path, agent24UIOriginA, http.MethodGet, "authorization")
-		twoMethod.Header.Add("Access-Control-Request-Method", http.MethodGet)
+		twoMethod := agent24Preflight(path, agent24UIOriginA, method, "authorization")
+		twoMethod.Header.Add("Access-Control-Request-Method", method)
 		bad["two request methods"] = twoMethod
 		for what, req := range bad {
 			w := httptest.NewRecorder()
@@ -250,14 +259,14 @@ func TestAgent24UIOriginsCORS(t *testing.T) {
 			agent24RequireBare404(t, w, "OPTIONS "+key+" "+what)
 		}
 
-		twoGet := httptest.NewRequest(http.MethodGet, path, nil)
+		twoGet := httptest.NewRequest(method, path, nil)
 		twoGet.Header.Add("Origin", agent24UIOriginA)
 		twoGet.Header.Add("Origin", agent24UIOriginB)
 		w = httptest.NewRecorder()
 		r.ServeHTTP(w, twoGet)
 		agent24RequireNoCORSHeaders(t, w.Header(), key+" with two origins")
 	}
-	for _, rt := range agent24uisession.UIReadRoutes {
+	for _, rt := range append(slices.Clone(agent24uisession.UIReadRoutes), agent24uisession.UIWriteRoutes...) {
 		require.True(t, checked[rt.Method+" "+rt.Path], rt.Path)
 	}
 	require.Len(t, checked, len(agent24IntegrationAllowlist))
@@ -340,4 +349,11 @@ func TestInstallAgent24IntegrationModeRejectsInvalidUIOrigins(t *testing.T) {
 	}
 	t.Setenv(handler.Agent24KnowledgeUIOriginsEnv, agent24UIOriginA+","+agent24UIOriginB)
 	require.NoError(t, installAgent24IntegrationMode(gin.New(), &config.Config{Tenant: &config.TenantConfig{}}))
+}
+
+func agent24OtherMethod(m string) string {
+	if m == http.MethodGet {
+		return http.MethodPost
+	}
+	return http.MethodGet
 }

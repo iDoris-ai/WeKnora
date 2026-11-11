@@ -81,6 +81,12 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 			}
 		}
 	}
+	// A24-KB-50 (KB-SOP-02 S5b): the UI write entries, each behind WriteGuard. Only with the UI read routes (session
+	// key, integration mode) and the candidate routes, i.e. when handler.Agent24UIWriteRoutesEnabled.
+	if read != nil && candidates != nil {
+		handler.RegisterAgent24UIWriteRoutes(r, read, candidates, len(agent24UIOrigins()) > 0,
+			agent24UIPreflightUnreachable)
+	}
 }
 
 func agent24UIReadDispatch(read *handler.Agent24KnowledgeUIReadHandler, op string) gin.HandlerFunc {

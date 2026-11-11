@@ -46,6 +46,12 @@ const (
 	agent24AuditActionCandidateSubmit   types.AuditAction = "knowledge.candidate.submit"
 	agent24AuditActionCandidateWithdraw types.AuditAction = "knowledge.candidate.withdraw"
 	agent24AuditActionCandidateRead     types.AuditAction = "knowledge.candidate.read"
+	// A24-KB-50 (W8.12): the UI write entry candidate.approve. return and entry.withdraw reuse the kb_removal
+	// constants (agent24AuditActionCandidateReturn, agent24AuditActionEntryWithdraw); the two review GETs are
+	// knowledge.ui.view. Decision: ~/.claude/decisions/2026-11-12-s5b-audit-ready (Q1=A).
+	agent24AuditActionCandidateApprove types.AuditAction = "knowledge.candidate.approve"
+	// A24-KB-50: details.source on every UI write entry row, success or refusal.
+	agent24AuditSourceUISession = "ui_session"
 
 	agent24AuditScopeType = "agent24_knowledge"
 
@@ -103,8 +109,11 @@ type agent24AuditFacts struct {
 	Principal    *types.Principal
 	CredentialID string
 	TenantID     uint64
-	// A24-KB-34: the UI read operation name. Empty on every other row, so the JSON key is omitted.
+	// A24-KB-34: the UI read operation name; A24-KB-50: also the UI write operation name. Empty on every other row,
+	// so the JSON key is omitted.
 	Op string
+	// A24-KB-50: agent24AuditSourceUISession on a UI write entry row. Empty on every other row.
+	Source string
 }
 
 type agent24AuditPrincipal struct {
@@ -140,8 +149,11 @@ type agent24AuditDetails struct {
 	// rows of the same kind (anonymous, or that key's) the token bucket dropped since the previous one was
 	// written.
 	Suppressed int64 `json:"suppressed,omitempty"`
-	// A24-KB-34: the UI read operation. Absent on every other row.
+	// A24-KB-34: the UI read operation; A24-KB-50: also the UI write operation. Absent on every other row.
 	Op string `json:"op,omitempty"`
+	// A24-KB-50: "ui_session" on a UI write entry row (the principal is C's, so it cannot tell the channel apart).
+	// Absent on every other row.
+	Source string `json:"source,omitempty"`
 }
 
 // agent24AnonymousAuditLimiter is the token bucket for anonymous rows, with the count of rows it dropped.
@@ -401,12 +413,15 @@ func agent24KnowledgeAuditPath(c *gin.Context) bool {
 			agent24AuditPathCandidates, agent24AuditPathCandidateWithdraw, agent24AuditPathCandidateGet: // A24-KB-43
 			return true
 		default:
-			return false
+			// A24-KB-50: the UI write POSTs carry an id in the path, so match FullPath. Without this the middleware
+			// skips them and writes no row at all (agent24KnowledgeAudit).
+			return agent24uisession.IsUIWriteRoute(c.Request.Method, c.FullPath())
 		}
 	case http.MethodGet:
 		// A24-KB-33: the session probe. A24-KB-34: UI read entries, matched by FullPath.
 		return c.Request.URL.Path == agent24AuditPathUISession ||
-			agent24uisession.IsUIReadRoute(c.Request.Method, c.FullPath())
+			agent24uisession.IsUIReadRoute(c.Request.Method, c.FullPath()) ||
+			agent24uisession.IsUIWriteRoute(c.Request.Method, c.FullPath()) // A24-KB-50: the two review GETs
 	default:
 		return false
 	}
@@ -416,6 +431,9 @@ func agent24AuditAction(c *gin.Context) types.AuditAction {
 	// A24-KB-34: a parameterized read route's URL.Path is the concrete id, so match FullPath.
 	if _, ok := agent24uisession.UIRouteOp(c.Request.Method, c.FullPath()); ok {
 		return agent24AuditActionUIView
+	}
+	if a, ok := agent24UIWriteAuditAction(c.Request.Method, c.FullPath()); ok { // A24-KB-50
+		return a
 	}
 	switch c.Request.URL.Path {
 	case agent24AuditPathSearch:
@@ -670,7 +688,8 @@ func agent24AuditDetail(
 		}
 	}
 	if facts != nil {
-		d.Op = facts.Op // A24-KB-34
+		d.Op = facts.Op         // A24-KB-34
+		d.Source = facts.Source // A24-KB-50
 	}
 	return d
 }
@@ -709,4 +728,13 @@ func agent24AuditTenantDetail(c *gin.Context) *uint64 {
 	}
 	id := types.CallerFromContext(c.Request.Context()).TenantID
 	return &id
+}
+
+// agent24UIWriteAuditAction is the action of a UI write entry row, by exact method and FullPath (A24-KB-50, W8.12):
+// return → knowledge.candidate.return, approve → knowledge.candidate.approve, document withdraw →
+// knowledge.entry.withdraw, the two review GETs → knowledge.ui.view. Not by op: the review GETs and return share
+// candidate.review. false for any other route.
+func agent24UIWriteAuditAction(method, fullPath string) (types.AuditAction, bool) {
+	// TODO(grok A24-KB-50 ③)
+	return "", false
 }
