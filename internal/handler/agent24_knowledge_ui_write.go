@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -137,7 +138,12 @@ func agent24UIWriteGetBody(c *gin.Context, idParam string) *agent24KnowledgeErro
 		return kerr
 	}
 	list := idParam == ""
-	q := c.Request.URL.Query()
+	// Codex review C1: URL.Query() drops a pair it cannot parse (a bad %-escape, a ';', too many parameters) and
+	// returns no error, which would let a repeated or unknown key past the shape check. ParseQuery reports it.
+	q, perr := url.ParseQuery(c.Request.URL.RawQuery)
+	if perr != nil {
+		return agent24InvalidRequest()
+	}
 	if kerr := agent24UIWriteQueryKeys(q, list); kerr != nil {
 		return kerr
 	}

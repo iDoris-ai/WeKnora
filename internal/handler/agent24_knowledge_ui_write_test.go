@@ -297,6 +297,10 @@ func TestAgent24UIWriteGuardGetBody(t *testing.T) {
 		{p + "/candidates?request_id=r1&limit=null", ""},
 		{p + "/candidates?request_id=r1&limit=%225%22", ""},
 		{p + "/candidates?request_id=r1&limit=%5B5%5D", ""},
+		// a pair URL.Query() would silently drop must not hide a repeated or unknown key (Codex review C1)
+		{p + "/candidates?request_id=r1&limit=1&limit=%ZZ", ""},
+		{p + "/candidates?request_id=r1&x;y=1", ""},
+		{p + "/candidates?request_id=r1&%ZZ=1", ""},
 		{p + "/candidates?request_id=r1&sort=asc", ""},
 		{p + "/candidates?request_id=r1&request_id=r2", ""},
 		{p + "/candidates?request_id=r1&after=a&after=b", ""},
