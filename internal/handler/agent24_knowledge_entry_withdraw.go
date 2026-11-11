@@ -14,6 +14,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -133,10 +134,7 @@ func (h *Agent24KnowledgeCandidatesHandler) entryWithdrawIn(
 		return false, nil, err
 	}
 	audit.SourceRevision = current
-	wrote, err := tx.Withdraw(ctx, &types.Agent24EntryWithdrawal{
-		TenantID: caller.tenant, KnowledgeID: kid, WithdrawnBy: caller.author,
-		SourceRevision: current, WithdrawnAt: h.now(),
-	})
+	wrote, err := agent24WithdrawEntryIn(ctx, tx, caller.tenant, kid, caller.author, current, h.now)
 	if err != nil {
 		return false, nil, err
 	}
@@ -150,23 +148,41 @@ func (h *Agent24KnowledgeCandidatesHandler) entryWithdrawIn(
 		audit.SourceRevision = row.SourceRevision
 		return true, nil, nil
 	}
+	return false, nil, nil
+}
+
+// agent24WithdrawEntryIn is entryWithdrawIn's ②–④ (the Withdraw, then EndForKnowledge and MoveKnowledge). now is
+// called at the same two points as that code was: WithdrawnAt, and, only when the withdrawal was written, the
+// clock of EndForKnowledge and MoveKnowledge. !wrote returns before that work; the caller re-reads the existing
+// SourceRevision.
+func agent24WithdrawEntryIn(
+	ctx context.Context, tx *repository.Agent24CandidateStore,
+	tenantID uint64, kid, by, revision string, now func() time.Time,
+) (bool, error) {
+	wrote, err := tx.Withdraw(ctx, &types.Agent24EntryWithdrawal{
+		TenantID: tenantID, KnowledgeID: kid, WithdrawnBy: by,
+		SourceRevision: revision, WithdrawnAt: now(),
+	})
+	if err != nil {
+		return false, err
+	}
+	if !wrote {
+		return false, nil
+	}
 	// end the in-flight work like a new revision does, with document_withdrawn (W5.7); a job a worker moved after
 	// the read rolls the transaction back (ErrAgent24JobChanged) and the request can be retried
 	jobs := repository.NewAgent24IngestJobStore(tx.DB())
-	now := h.now()
-	if err = jobs.EndForKnowledge(ctx, tx.DB(), caller.tenant, kid, types.Agent24JobCancelWithdrawn, now); err != nil {
-		return false, nil, err
+	at := now()
+	if err = jobs.EndForKnowledge(ctx, tx.DB(), tenantID, kid, types.Agent24JobCancelWithdrawn, at); err != nil {
+		return false, err
 	}
 	// a run still pending or processing stops like an upstream cancel: the worker's abort check reads cancelled,
 	// and the activation writes (SetFinalizing, CompleteProcessingWithoutSubtasks) need processing, so no build
 	// activates after this commit (W8.10). An activated build keeps its status; the read surfaces filter it (S4b)
-	err = jobs.MoveKnowledge(ctx, caller.tenant, kid,
+	err = jobs.MoveKnowledge(ctx, tenantID, kid,
 		[]string{types.ParseStatusPending, types.ParseStatusProcessing}, types.ParseStatusCancelled,
-		agent24EntryWithdrawnMessage, now)
-	if err != nil {
-		return false, nil, err
-	}
-	return false, nil, nil
+		agent24EntryWithdrawnMessage, at)
+	return wrote, err
 }
 
 // agent24EntryWithdrawnMessage is the error_message of an in-flight knowledge row that entry.withdraw cancelled. It

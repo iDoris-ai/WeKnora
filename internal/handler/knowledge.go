@@ -1998,6 +1998,26 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		return
 	}
 
+	knowledgeIDs := make([]string, 0, len(knowledgeList))
+	for _, knowledge := range knowledgeList {
+		if err := access.RejectMovingKnowledge(knowledge); err != nil {
+			_ = c.Error(err)
+			return
+		}
+		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+	}
+
+	// A24-KB-48 (W1.11/A14): after the move check (a refused clear changes nothing) and before both the empty
+	// answer and the enqueue (an empty base can still be the target of submitted candidates). A failing hook
+	// clears nothing.
+	if hook := service.Agent24KBRemovalHookInstalled(); hook != nil {
+		if err := hook.BeforeRemoval(ctx, effectiveTenantID, kbID, nil); err != nil {
+			logger.Errorf(ctx, "Agent24 knowledge base removal hook failed: error_type=%T", err)
+			_ = c.Error(errors.NewInternalServerError("Failed to prepare the knowledge base clear"))
+			return
+		}
+	}
+
 	if len(knowledgeList) == 0 {
 		logger.Infof(ctx, "Knowledge base %s is already empty", secutils.SanitizeForLog(kbID))
 		c.JSON(http.StatusOK, gin.H{
@@ -2006,15 +2026,6 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 			"data":    gin.H{"deleted_count": 0},
 		})
 		return
-	}
-
-	knowledgeIDs := make([]string, 0, len(knowledgeList))
-	for _, knowledge := range knowledgeList {
-		if err := access.RejectMovingKnowledge(knowledge); err != nil {
-			_ = c.Error(err)
-			return
-		}
-		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
 	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, knowledgeIDs)
