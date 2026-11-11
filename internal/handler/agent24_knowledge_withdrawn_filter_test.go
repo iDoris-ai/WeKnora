@@ -75,7 +75,7 @@ func agent24WDOpen(t *testing.T, docs []agent24WDDoc, wikiRefs []string) *agent2
 		agent24WDInsertDoc(t, db, doc)
 	}
 	if wikiRefs != nil {
-		agent24WDInsertWiki(t, db, wikiRefs)
+		agent24WDInsertWiki(t, db, "wiki-1", agent24WDSlug, "wiki-body", wikiRefs, nil)
 	}
 	proof, vph := agent24UIViewSecret()
 	raw := agent24UIRawTicket(91)
@@ -112,19 +112,20 @@ func agent24WDInsertDoc(t *testing.T, db *gorm.DB, doc agent24WDDoc) {
 	}
 }
 
-func agent24WDInsertWiki(t *testing.T, db *gorm.DB, refs []string) {
+// agent24WDInsertWiki stores a published page whose source_refs are refs as given (bare ids or "id|title") and
+// whose out_links and in_links are links.
+func agent24WDInsertWiki(t *testing.T, db *gorm.DB, id, slug, content string, refs, links []string) {
 	t.Helper()
-	stored := make(types.StringArray, len(refs))
-	for i, id := range refs {
-		stored[i] = types.FormatWikiSourceRef(id, id)
-	}
 	at := time.Date(2026, 11, 11, 2, 0, 0, 0, time.UTC)
+	if links == nil {
+		links = []string{}
+	}
 	require.NoError(t, db.Create(&types.WikiPage{
-		ID: "wiki-1", TenantID: agent24WDTenant, KnowledgeBaseID: agent24WDKB,
-		Slug: agent24WDSlug, Title: "Sources", PageType: types.WikiPageTypeSummary,
-		Status: types.WikiPageStatusPublished, Summary: "summary", Content: "wiki-body",
-		Aliases: types.StringArray{}, OutLinks: types.StringArray{}, InLinks: types.StringArray{},
-		SourceRefs: stored, Version: 1, CreatedAt: at, UpdatedAt: at,
+		ID: id, TenantID: agent24WDTenant, KnowledgeBaseID: agent24WDKB,
+		Slug: slug, Title: "title " + content, PageType: types.WikiPageTypeSummary,
+		Status: types.WikiPageStatusPublished, Summary: "summary " + content, Content: content,
+		Aliases: types.StringArray{}, OutLinks: types.StringArray(links), InLinks: types.StringArray(links),
+		SourceRefs: types.StringArray(refs), Version: 1, CreatedAt: at, UpdatedAt: at,
 	}).Error)
 }
 
@@ -141,7 +142,7 @@ func agent24WDPair(t *testing.T) *agent24WDFix {
 			status: types.ParseStatusCompleted, tagged: true,
 			created: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
 		},
-	}, []string{"doc-a", "doc-b"})
+	}, []string{types.FormatWikiSourceRef("doc-a", "doc-a"), types.FormatWikiSourceRef("doc-b", "doc-b")})
 }
 
 func (f *agent24WDFix) withdraw(id string) {
@@ -243,6 +244,25 @@ func (f *agent24WDFix) wikiIDs() (ids []string, body string) {
 		ids = append(ids, item.(map[string]any)["knowledge_id"].(string))
 	}
 	return ids, w.Body.String()
+}
+
+func agent24WDWikiPath(slug string) string {
+	return agent24WDKBPath() + "/wiki/pages/" + slug
+}
+
+// wikiSlugs is wiki.list's slugs, checked against its total.
+func (f *agent24WDFix) wikiSlugs() []string {
+	f.t.Helper()
+	w := f.get(agent24WDKBPath() + "/wiki/pages")
+	require.Equal(f.t, http.StatusOK, w.Code, w.Body.String())
+	parsed := agent24UIJSONMap(f.t, w.Body.Bytes())
+	slugs := []string{}
+	for _, item := range parsed["pages"].([]any) {
+		slugs = append(slugs, item.(map[string]any)["slug"].(string))
+	}
+	require.Equal(f.t, float64(len(slugs)), parsed["total"])
+	slices.Sort(slugs)
+	return slugs
 }
 
 func agent24WDSameGone(t *testing.T, got, missing *httptest.ResponseRecorder) {
@@ -361,10 +381,12 @@ func TestAgent24WithdrawnHiddenFromReadSurfaces(t *testing.T) {
 		f := agent24WDPair(t)
 		ids, _ := f.wikiIDs()
 		require.Equal(t, []string{docA, docB}, ids)
+		require.Equal(t, []string{agent24WDSlug}, f.wikiSlugs())
 
+		// review C1: the page cites A, so its synthesized text may come from A; it is hidden whole
 		f.withdraw(docA)
-		ids, _ = f.wikiIDs()
-		require.Equal(t, []string{docB}, ids)
+		agent24WDSameGone(t, f.get(agent24WDWikiPath(agent24WDSlug)), f.get(agent24WDWikiPath("no-such-page")))
+		require.Empty(t, f.wikiSlugs())
 	})
 }
 
@@ -378,6 +400,7 @@ type agent24WDSurface struct {
 	kbCount  float64
 	tagCount float64
 	wikiIDs  []string
+	wikiList []string
 }
 
 func (f *agent24WDFix) surface(chunkIDs []string) agent24WDSurface {
@@ -389,7 +412,7 @@ func (f *agent24WDFix) surface(chunkIDs []string) agent24WDSurface {
 	wiki, _ := f.wikiIDs()
 	return agent24WDSurface{
 		docs: agent24WDMapKeys(snap.Docs), chunks: agent24WDMapKeys(snap.Chunks), hits: hits,
-		docIDs: ids, docTotal: total, kbCount: kb, tagCount: tag, wikiIDs: wiki,
+		docIDs: ids, docTotal: total, kbCount: kb, tagCount: tag, wikiIDs: wiki, wikiList: f.wikiSlugs(),
 	}
 }
 
@@ -427,7 +450,7 @@ func TestAgent24WithdrawnSentinels(t *testing.T) {
 		id: docB, title: "Doc B", file: "b.txt", content: "body-b", chunkID: chunkB,
 		status: types.ParseStatusCompleted, tagged: true,
 		created: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
-	}}, []string{docB, docW1, docW2})
+	}}, []string{docB})
 	chunkIDs := []string{chunkB, chunkW1, chunkW2}
 	before := f.surface(chunkIDs)
 	require.Equal(t, []string{docB}, before.docs)
@@ -441,6 +464,7 @@ func TestAgent24WithdrawnSentinels(t *testing.T) {
 	require.Equal(t, float64(1), before.kbCount)
 	require.Equal(t, float64(1), before.tagCount)
 	require.Equal(t, []string{docB}, before.wikiIDs)
+	require.Equal(t, []string{agent24WDSlug}, before.wikiList)
 
 	require.NoError(t, apprepo.EnsureAgent24CandidateTables(f.db))
 	for _, status := range []types.Agent24CandidateStatus{
@@ -456,6 +480,7 @@ func TestAgent24WithdrawnSentinels(t *testing.T) {
 		require.Equal(t, status, got.Status)
 		require.Contains(t, got.Body, "sentinel-cand-"+string(status))
 	}
+	agent24WDInsertWiki(t, f.db, "wiki-w1", "sentinel-page", "sentinel-wiki-w1", []string{docW1}, nil)
 	agent24WDInsertDoc(t, f.db, agent24WDDoc{
 		id: docW1, title: "sentinel-w1", file: "sentinel-w1.txt", content: "sentinel-w1",
 		chunkID: chunkW1, status: types.ParseStatusCompleted, tagged: true,
@@ -487,6 +512,8 @@ func TestAgent24WithdrawnSentinels(t *testing.T) {
 	agent24WDForbidSentinel(t, "tag.list", tagBody)
 	_, wikiBody := f.wikiIDs()
 	agent24WDForbidSentinel(t, "wiki.get", wikiBody)
+	agent24WDForbidSentinel(t, "wiki.list", f.get(agent24WDKBPath()+"/wiki/pages").Body.String())
+	agent24WDSameGone(t, f.get(agent24WDWikiPath("sentinel-page")), f.get(agent24WDWikiPath("no-such-page")))
 
 	for _, id := range []string{docW1, docW2} {
 		require.Equal(t, f.read(agent24WDMissing, readAll), f.read(id, readAll), id)
@@ -544,5 +571,73 @@ func TestAgent24WithdrawnTableMissingFailsClosed(t *testing.T) {
 		w := f.get(path)
 		require.GreaterOrEqual(t, w.Code, http.StatusInternalServerError, path+" "+w.Body.String())
 		require.NotContains(t, w.Body.String(), "text-a", path)
+	}
+}
+
+// TestAgent24WithdrawnFactsAsEmpty: the index facts ready and search share (agent24DBIndexReader.Facts) leave out a
+// withdrawn document, so a KB whose only document is withdrawn has the facts of an empty KB. A cancelled document
+// that is not withdrawn still counts.
+func TestAgent24WithdrawnFactsAsEmpty(t *testing.T) {
+	kb := &types.KnowledgeBase{ID: agent24WDKB, TenantID: agent24WDTenant}
+	facts := func(f *agent24WDFix) agent24KBIndexFacts {
+		t.Helper()
+		got, err := agent24DBIndexReader{f.db}.Facts(context.Background(), kb)
+		require.NoError(t, err)
+		return got
+	}
+	empty := facts(agent24WDOpen(t, nil, nil))
+	require.Equal(t, agent24KBIndexFacts{}, empty)
+	for _, status := range []string{types.ParseStatusCancelled, types.ParseStatusCompleted} {
+		f := agent24WDOpen(t, []agent24WDDoc{{
+			id: "doc-only", title: "Only", file: "o.txt", content: "text-o", chunkID: "chunk-o", status: status,
+			created: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
+		}}, nil)
+		require.Equal(t, 1, facts(f).Docs, status)
+		f.withdraw("doc-only")
+		require.Equal(t, empty, facts(f), status)
+	}
+}
+
+// TestAgent24WithdrawnWikiPagesHidden (review C1): a page whose source_refs cite a withdrawn document is hidden whole
+// from wiki.list (and its total), wiki.get and other pages' links, for a bare-id ref and an "id|title" ref; a page
+// citing only live documents is unchanged.
+func TestAgent24WithdrawnWikiPagesHidden(t *testing.T) {
+	f := agent24WDPair(t)
+	agent24WDInsertWiki(t, f.db, "wiki-bare", "bare", "body-bare", []string{"doc-a"}, nil)
+	agent24WDInsertWiki(t, f.db, "wiki-mixed", "mixed", "body-mixed",
+		[]string{types.FormatWikiSourceRef("doc-b", "B"), types.FormatWikiSourceRef("doc-a", "A")}, nil)
+	agent24WDInsertWiki(t, f.db, "wiki-b", "only-b", "body-b", []string{"doc-b"},
+		[]string{"bare", "mixed", agent24WDSlug, "only-b"})
+	links := func() (out, in []string) {
+		w := f.get(agent24WDWikiPath("only-b"))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		page := agent24UIJSONMap(t, w.Body.Bytes())["page"].(map[string]any)
+		for _, s := range page["out_links"].([]any) {
+			out = append(out, s.(string))
+		}
+		for _, l := range page["in_links"].([]any) {
+			in = append(in, l.(map[string]any)["slug"].(string))
+		}
+		return out, in
+	}
+	require.Equal(t, []string{"bare", "mixed", "only-b", agent24WDSlug}, f.wikiSlugs())
+	out, in := links()
+	require.Equal(t, []string{"bare", "mixed", agent24WDSlug, "only-b"}, out)
+	require.Equal(t, []string{"bare", "mixed", "only-b", agent24WDSlug}, in)
+
+	f.withdraw("doc-a")
+	require.Equal(t, []string{"only-b"}, f.wikiSlugs())
+	missing := f.get(agent24WDWikiPath("no-such-page"))
+	for _, slug := range []string{"bare", "mixed", agent24WDSlug} {
+		agent24WDSameGone(t, f.get(agent24WDWikiPath(slug)), missing)
+	}
+	out, in = links()
+	require.Equal(t, []string{"only-b"}, out)
+	require.Equal(t, []string{"only-b"}, in)
+	body := f.get(agent24WDWikiPath("only-b")).Body.String()
+	require.Contains(t, body, "body-b")
+	for _, gone := range []string{"body-bare", "body-mixed", "wiki-body"} {
+		require.NotContains(t, body, gone)
+		require.NotContains(t, f.get(agent24WDKBPath()+"/wiki/pages").Body.String(), gone)
 	}
 }

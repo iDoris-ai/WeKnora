@@ -1130,11 +1130,13 @@
         {
           "id": "A24-KB-47",
           "issue": "iDoris-ai/WeKnora#146",
-          "summary": "读面按下架表过滤已下架条目（KB-SOP-02 S4b）：不按 parse_status；search、read（doc.get 与 chunk.list 共用）、doc.list 及其 total、KB 与 tag 文档计数、wiki 来源；表缺失为存储错误、不放行",
+          "summary": "读面按下架表过滤已下架条目（KB-SOP-02 S4b）：不按 parse_status；search、read（doc.get 与 chunk.list 共用）、doc.list 及其 total、KB 与 tag 文档计数、wiki 来源；引用已下架文档的 wiki 页整页隐藏（评审 C1）；ready/search 的索引事实同样过滤（评审 C2）；表缺失为存储错误、不放行",
           "upstream_commit": null,
           "paths": [
             "internal/handler/agent24_knowledge_read.go",
             "internal/handler/agent24_knowledge_read_db_test.go",
+            "internal/handler/agent24_knowledge_ready_test.go",
+            "internal/handler/agent24_knowledge_scope.go",
             "internal/handler/agent24_knowledge_search_hits.go",
             "internal/handler/agent24_knowledge_search_hits_test.go",
             "internal/handler/agent24_knowledge_ui_documents.go",

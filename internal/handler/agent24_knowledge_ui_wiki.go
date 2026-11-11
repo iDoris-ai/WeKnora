@@ -167,17 +167,25 @@ func (h *Agent24KnowledgeUIReadHandler) ListWikiPages(c *gin.Context) {
 func (h *Agent24KnowledgeUIReadHandler) agent24UIListWikiPages(
 	ctx context.Context, tenantID uint64, kbID string, page, pageSize int,
 ) ([]agent24UIWikiListRow, int64, error) {
+	hidden, err := h.agent24UIWikiHiddenSlugs(ctx, tenantID, kbID) // A24-KB-47
+	if err != nil {
+		return nil, 0, err
+	}
 	base := func() *gorm.DB {
-		return h.db.WithContext(ctx).Model(&types.WikiPage{}).
+		q := h.db.WithContext(ctx).Model(&types.WikiPage{}).
 			Where("tenant_id = ? AND knowledge_base_id = ? AND status = ?",
 				tenantID, kbID, types.WikiPageStatusPublished)
+		if len(hidden) > 0 {
+			q = q.Where("slug NOT IN ?", hidden)
+		}
+		return q
 	}
 	var total int64
 	if err := base().Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []agent24UIWikiListRow
-	err := base().
+	err = base().
 		Select("slug, title, page_type, summary, updated_at").
 		Order("updated_at DESC, slug ASC").
 		Offset((page - 1) * pageSize).
@@ -236,6 +244,14 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIGetWikiPage(
 		return agent24UIWikiGetRow{}, err
 	}
 	if len(rows) == 0 {
+		return agent24UIWikiGetRow{}, gorm.ErrRecordNotFound
+	}
+	// A24-KB-47: a page citing a withdrawn document is a page that does not exist
+	hidden, err := h.agent24UIWikiHiddenSlugs(ctx, tenantID, kbID)
+	if err != nil {
+		return agent24UIWikiGetRow{}, err
+	}
+	if slices.Contains(hidden, rows[0].Slug) {
 		return agent24UIWikiGetRow{}, gorm.ErrRecordNotFound
 	}
 	return rows[0], nil
@@ -320,6 +336,14 @@ func (h *Agent24KnowledgeUIReadHandler) agent24UIWikiPublished(
 		for _, row := range rows {
 			out[row.Slug] = row.Title
 		}
+	}
+	// A24-KB-47: a hidden page is not linked
+	hidden, err := h.agent24UIWikiHiddenSlugs(ctx, tenantID, kbID)
+	if err != nil {
+		return nil, err
+	}
+	for _, slug := range hidden {
+		delete(out, slug)
 	}
 	return out, nil
 }
