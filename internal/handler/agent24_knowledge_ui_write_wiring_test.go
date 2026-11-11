@@ -4,10 +4,12 @@ package handler
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,6 +147,49 @@ func TestAgent24KnowledgeCapabilityUIWriteOps(t *testing.T) {
 			// routes), with or without the UI write routes.
 			assert.Equal(t, slices.Contains(tc.want, "candidate.propose"),
 				NewAgent24KnowledgeReadyHandler(nil, nil, nil).candidates)
+		})
+	}
+}
+
+// P1 through the real Exchange (Codex S5b r1 C1): the response's ops and the signed JWT's Ops are both the read ops
+// plus exactly the write ops C_now holds a capability for, the same list in UIOps order.
+func TestAgent24UIExchangeOpsFollowCredential(t *testing.T) {
+	with := func(extra ...string) []string { return append(slices.Clone(agent24UIReadOpsWant), extra...) }
+	for i, tc := range []struct {
+		name string
+		full bool
+		caps []string
+		want []string
+	}{
+		{"retrieve only", false, []string{"retrieve"}, with()},
+		{"review", false, []string{"retrieve", "kb_candidate_review"}, with("candidate.review")},
+		{"approve", false, []string{"retrieve", "kb_candidate_approve"}, with("candidate.approve")},
+		{"withdraw", false, []string{"retrieve", "kb_entry_withdraw"}, with("entry.withdraw")},
+		{"all three, listed backwards", false,
+			[]string{"kb_entry_withdraw", "kb_candidate_approve", "kb_candidate_review", "retrieve"},
+			with("candidate.review", "candidate.approve", "entry.withdraw")},
+		{"propose only", false, []string{"retrieve", "kb_candidate_propose"}, with()},
+		// full access never reaches the ops: Exchange refuses it as empty_scope (R2.8, agent24UIEffectiveScope)
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, store := agent24UIHandlerDB(t)
+			proof, vph := agent24UIViewSecret()
+			raw := agent24UIRawTicket(byte(40 + i))
+			agent24UISeedTicket(t, store, raw, vph, nil)
+			key := agent24UILiveKey([]string{"kb-b", "kb-a"}, tc.full, tc.caps, nil)
+			h := agent24UIExchangeHandler(store, []*types.TenantAPIKey{key}, nil, nil, nil)
+			got, _ := agent24UIExchangeCall(h, raw, proof, "")
+			require.Equal(t, http.StatusOK, got.Code, got.Body.String())
+			var resp struct {
+				SessionToken string   `json:"session_token"`
+				Ops          []string `json:"ops"`
+			}
+			require.NoError(t, json.Unmarshal(got.Body.Bytes(), &resp))
+			assert.Equal(t, tc.want, resp.Ops, "response ops")
+			claims, err := agent24uisession.Verify(
+				agent24UIExchangeKey(), agent24uisession.DefaultIssuer, resp.SessionToken, time.Now())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, claims.Ops, "JWT ops")
 		})
 	}
 }
