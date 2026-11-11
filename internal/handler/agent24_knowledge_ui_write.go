@@ -307,7 +307,8 @@ func agent24UIWriteJSONStringValue(raw json.RawMessage) (string, bool) {
 // agent24UIWriteScope is E for a write entry: like agent24UIReadScope, except that an empty E is a result, not a
 // refusal. Full access or an empty allow-list on the ticket's credential gives an empty E without Resolve
 // (R2.2–R2.4: never "all"); so does a JWT scope that resolves to nothing. ok is false only when the response has
-// been written (the client went away, which writes nothing, or internal).
+// been written: internal when the resolver is not wired, the error agent24StorageError maps a Resolve failure to,
+// or nothing when the client went away (the request is aborted).
 func (h *Agent24KnowledgeUIReadHandler) agent24UIWriteScope(
 	c *gin.Context, claims *agent24uisession.Claims, scope types.TenantAPIKeyScope,
 ) (e []string, ok bool) {
