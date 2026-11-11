@@ -35,7 +35,10 @@ type agent24CandidateEnv struct {
 func newAgent24CandidateEnv(t *testing.T) *agent24CandidateEnv {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	dsn := filepath.Join(t.TempDir(), "cand.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+	// _txlock=immediate: a transaction takes the write lock at BEGIN, so concurrent writers queue on busy_timeout
+	// the way PostgreSQL's FOR UPDATE queues them; a deferred transaction that reads first fails with "database
+	// is locked" when it upgrades (TestAgent24EntryWithdrawConcurrent, 1 in 20 runs)
+	dsn := filepath.Join(t.TempDir(), "cand.db") + "?_journal_mode=WAL&_busy_timeout=5000&_txlock=immediate"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Agent24IngestJob{}))

@@ -184,6 +184,7 @@ type agent24CandidateAudit struct {
 	Replayed              bool     `json:"replayed,omitempty"`
 	Already               bool     `json:"already,omitempty"`
 	AuthorIsApprover      *bool    `json:"author_is_approver,omitempty"` // W8.12, W2.4; A24-KB-45
+	SourceRevision        string   `json:"source_revision,omitempty"`    // W8.10 entry.withdraw; A24-KB-46
 	StrippedFields        []string `json:"stripped_fields,omitempty"`
 }
 

@@ -102,12 +102,18 @@ type agent24WriteAuthorizer struct {
 	scope  agent24ScopeResolver
 }
 
-// HoldsOn is W1.9 ③(b): propose is InScope; the other three also need AdminHolds. Nil admins grants none.
+// HoldsOn is W1.9 ③(b). propose is InScope, unchanged. review, approve and withdraw first require the
+// credential to carry op (agent24CredentialHoldsWrite): a target inside E needs both C and A to hold op
+// (#163 N1). A credential that does not is not held, with no error. They then require InScope and AdminHolds.
+// Nil admins grants none of those three.
 func (a agent24WriteAuthorizer) HoldsOn(ctx context.Context, op Agent24WriteOp, kbID string) (bool, error) {
 	switch op {
 	case Agent24WriteCandidatePropose:
 		return a.InScope(ctx, kbID)
 	case Agent24WriteCandidateReview, Agent24WriteCandidateApprove, Agent24WriteEntryWithdraw:
+		if !agent24CredentialHoldsWrite(ctx, op) {
+			return false, nil
+		}
 		in, err := a.InScope(ctx, kbID)
 		if err != nil || !in {
 			return false, err

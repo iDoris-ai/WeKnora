@@ -73,6 +73,15 @@ func (s *Agent24IngestJobStore) Create(ctx context.Context, tx *gorm.DB, job *ty
 func (s *Agent24IngestJobStore) SupersedeForKnowledge(
 	ctx context.Context, tx *gorm.DB, tenantID uint64, knowledgeID string, now time.Time,
 ) error {
+	return s.EndForKnowledge(ctx, tx, tenantID, knowledgeID, types.Agent24JobCancelSuperseded, now)
+}
+
+// EndForKnowledge ends, inside tx, all of the knowledge's in-flight work with reason (W5.7): occupying jobs become
+// cancelled/reason and an indexed job's running enrichment stops with reason. superseded for a new revision,
+// document_withdrawn for entry.withdraw (W8.10, A24-KB-46). The caller has locked the knowledge row in tx.
+func (s *Agent24IngestJobStore) EndForKnowledge(
+	ctx context.Context, tx *gorm.DB, tenantID uint64, knowledgeID, reason string, now time.Time,
+) error {
 	if tx == nil {
 		return errors.New("agent24 ingest job: a transaction is required")
 	}
@@ -88,13 +97,11 @@ func (s *Agent24IngestJobStore) SupersedeForKnowledge(
 	store := &Agent24IngestJobStore{db: tx}
 	for _, job := range jobs {
 		change := types.Agent24JobChange{
-			Status: types.Agent24JobCancelled, CancelReason: types.Agent24JobCancelSuperseded,
-			Enrichment: job.Enrichment,
+			Status: types.Agent24JobCancelled, CancelReason: reason, Enrichment: job.Enrichment,
 		}
 		if job.Status == types.Agent24JobIndexed {
 			change = types.Agent24JobChange{
-				Status: types.Agent24JobIndexed, Enrichment: types.Agent24EnrichmentStopped,
-				StopReason: types.Agent24JobCancelSuperseded,
+				Status: types.Agent24JobIndexed, Enrichment: types.Agent24EnrichmentStopped, StopReason: reason,
 			}
 		}
 		applied, err := store.Apply(ctx, job, change, now)

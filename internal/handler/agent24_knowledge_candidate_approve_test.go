@@ -228,6 +228,11 @@ func TestAgent24CandidateApproveCreate(t *testing.T) {
 	require.NotNil(t, a.AuthorIsApprover)
 	assert.False(t, *a.AuthorIsApprover)
 	assert.Equal(t, "approved", a.Outcome)
+	var job types.Agent24IngestJob
+	require.NoError(t, e.db.Where("id = ?", r.body["job_id"]).Take(&job).Error)
+	assert.Equal(t, types.Agent24JobOpCandidateApprove, job.OpClass)
+	assert.Equal(t, agent24Alice.StorageID(), job.PrincipalUserID)
+	assert.Equal(t, uint64(12), job.CredentialID)
 }
 
 func TestAgent24CandidateApproveAuthorIsApprover(t *testing.T) {
@@ -727,4 +732,73 @@ func TestAgent24CandidateApproveRevisionsSerialiseUntilDispatch(t *testing.T) {
 	require.Equal(t, http.StatusOK, replies[0].code, replies[0].raw)
 	assert.Equal(t, "stale/base_revision_changed", replies[1].outcome(), replies[1].raw)
 	assert.Equal(t, types.Agent24ReturnConflicted, e.candidate(t, ids[1]).ReturnReason)
+}
+
+// TestAgent24CandidateApproveNeedsTheApproveGrantOnTarget guards #162 N1. A target inside E needs the credential
+// to hold candidate.approve, not merely candidate.review. Changing adminVisible's op to review turns the first
+// call red: the key carries approve and not review.
+func TestAgent24CandidateApproveNeedsTheApproveGrantOnTarget(t *testing.T) {
+	e := newAgent24CandidateEnv(t)
+	e.installApprove(t)
+	e.grantAdmin(t, agent24Alice, "kbA", false)
+	id := e.submit(t, agent24Proposer(agent24Bob), nil)
+	sha := e.candidate(t, id).ContentSHA256
+	approveOnly := agent24Approver(agent24Alice)
+	r := agent24CandidateCall(t, e.h.ReviewApprove, approveOnly, agent24ApproveDoc(t, id, sha, ""))
+	require.Equal(t, http.StatusOK, r.code, r.raw)
+
+	id2 := e.submit(t, agent24Proposer(agent24Bob), func(m map[string]any) {
+		m["idempotency_key"] = agent24KeyN(2)
+	})
+	reviewOnly := agent24Reviewer(agent24Alice)
+	r = agent24CandidateCall(t, e.h.ReviewApprove, reviewOnly, agent24ApproveDoc(t, id2, sha, "req-review-only"))
+	assert.Equal(t, "forbidden/operation_not_allowed", r.outcome(), r.raw)
+}
+
+// TestAgent24CandidateApproveDedupSkips: a published document with an active build is not a W3.5 hit once it is
+// withdrawn, or once its source revision has moved.
+func TestAgent24CandidateApproveDedupSkips(t *testing.T) {
+	publish := func(t *testing.T) (*agent24CandidateEnv, string, string) {
+		t.Helper()
+		e := newAgent24CandidateEnv(t)
+		e.installApprove(t)
+		e.grantAdmin(t, agent24Alice, "kbA", false)
+		id := e.submit(t, agent24Proposer(agent24Bob), nil)
+		sha := e.candidate(t, id).ContentSHA256
+		first := agent24CandidateCall(
+			t, e.h.ReviewApprove, agent24Approver(agent24Alice), agent24ApproveDoc(t, id, sha, ""))
+		require.Equal(t, http.StatusOK, first.code, first.raw)
+		kid, _ := first.body["knowledge_id"].(string)
+		require.NoError(t, e.db.Model(&types.Knowledge{}).Where("id = ?", kid).
+			Update("parse_status", types.ParseStatusCompleted).Error)
+		return e, sha, kid
+	}
+	t.Run("withdrawn", func(t *testing.T) {
+		e, sha, kid := publish(t)
+		ok, err := e.store.Withdraw(context.Background(), &types.Agent24EntryWithdrawal{
+			TenantID: 1, KnowledgeID: kid, WithdrawnBy: "x", WithdrawnAt: e.clock,
+		})
+		require.NoError(t, err)
+		require.True(t, ok)
+		id := e.submit(t, agent24Proposer(agent24Bob), func(m map[string]any) {
+			m["idempotency_key"] = agent24KeyN(4)
+		})
+		r := agent24CandidateCall(
+			t, e.h.ReviewApprove, agent24Approver(agent24Alice), agent24ApproveDoc(t, id, sha, "req-2"))
+		require.Equal(t, http.StatusOK, r.code, r.raw)
+		assert.NotEmpty(t, r.body["job_id"])
+		assert.NotEqual(t, kid, r.body["knowledge_id"])
+	})
+	t.Run("source revision moved", func(t *testing.T) {
+		e, sha, kid := publish(t)
+		require.NoError(t, e.db.Model(&types.Knowledge{}).Where("id = ?", kid).Update("file_hash", "changed").Error)
+		id := e.submit(t, agent24Proposer(agent24Bob), func(m map[string]any) {
+			m["idempotency_key"] = agent24KeyN(5)
+		})
+		r := agent24CandidateCall(
+			t, e.h.ReviewApprove, agent24Approver(agent24Alice), agent24ApproveDoc(t, id, sha, "req-2"))
+		require.Equal(t, http.StatusOK, r.code, r.raw)
+		assert.NotEmpty(t, r.body["job_id"])
+		assert.NotEqual(t, kid, r.body["knowledge_id"])
+	})
 }

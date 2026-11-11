@@ -602,3 +602,110 @@ func TestAgent24StageGateApproveHolds(t *testing.T) {
 		require.Equal(t, types.Agent24JobSaved, h.jobRow(t).Status)
 	})
 }
+
+// A withdrawn entry document stops at the next stage boundary (W8.10). A missing withdrawal table is unreadable.
+// A document that is not withdrawn goes through.
+func TestAgent24StageGateStopsWithdrawnEntry(t *testing.T) {
+	t.Run("withdrawn", func(t *testing.T) {
+		h := newAgent24GateHarness(t)
+		h.job(t, types.Agent24JobProcessing, types.Agent24JobOpIngestSubmit)
+		require.NoError(t, h.db.Create(&types.Agent24EntryWithdrawal{
+			TenantID: 7, KnowledgeID: "k-1", WithdrawnBy: "x", WithdrawnAt: time.Now().UTC(),
+		}).Error)
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted)
+		require.Equal(t, types.ParseStatusCancelled, status)
+		j := h.jobRow(t)
+		require.Equal(t, types.Agent24JobCancelled, j.Status)
+		require.Equal(t, types.Agent24JobCancelWithdrawn, j.CancelReason)
+	})
+	t.Run("unreadable", func(t *testing.T) {
+		h := newAgent24GateHarness(t)
+		h.job(t, types.Agent24JobProcessing, types.Agent24JobOpIngestSubmit)
+		require.NoError(t, h.db.Migrator().DropTable(&types.Agent24EntryWithdrawal{}))
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted)
+		require.Equal(t, abortStatusUnreadable, status)
+		require.Equal(t, types.Agent24JobProcessing, h.jobRow(t).Status)
+	})
+	t.Run("unmarked upstream document with unreadable withdrawals", func(t *testing.T) {
+		h := newAgent24GateHarness(t)
+		require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").Update("metadata", "").Error)
+		before := *h.knowledge(t)
+		var jobs int64
+		require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Count(&jobs).Error)
+		require.Zero(t, jobs)
+		require.NoError(t, h.db.Migrator().DropTable(&types.Agent24EntryWithdrawal{}))
+		// With no marker or job, an upstream document cannot be distinguished from an entry whose marker
+		// was wiped after withdrawal ended its job. A failed withdrawal read must not fail open (F3).
+		for _, gate := range []func(context.Context, *types.Knowledge) (bool, string){
+			agent24StageGateAborts, agent24PostProcessGateAborts,
+		} {
+			aborted, status := gate(h.ctx, &before)
+			require.True(t, aborted)
+			require.Equal(t, abortStatusUnreadable, status)
+		}
+		ctx := agent24IngestEmbeddingContext(h.ctx, &before)
+		guard := types.ProcessingEmbeddingGuardFromContext(ctx)
+		require.NotNil(t, guard)
+		require.ErrorIs(t, guard.Allow(ctx, types.ProcessingDestination{}), types.ErrProcessingDenied)
+		require.Equal(t, before, *h.knowledge(t))
+		require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Count(&jobs).Error)
+		require.Zero(t, jobs)
+	})
+	// the state entry.withdraw leaves (#S4a Codex C1): the job already cancelled/document_withdrawn, so no occupying
+	// job; the run stops as cancelled with the withdrawn message, not as an orphan (failed)
+	afterWithdraw := func(t *testing.T, status string) *agent24GateHarness {
+		t.Helper()
+		h := newAgent24GateHarness(t)
+		h.job(t, types.Agent24JobProcessing, types.Agent24JobOpCandidateApprove)
+		require.NoError(t, h.db.Model(&types.Agent24IngestJob{}).Where("id = ?", "j-1").Updates(map[string]any{
+			"status": types.Agent24JobCancelled, "cancel_reason": types.Agent24JobCancelWithdrawn,
+		}).Error)
+		require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
+			Update("parse_status", status).Error)
+		require.NoError(t, h.db.Create(&types.Agent24EntryWithdrawal{
+			TenantID: 7, KnowledgeID: "k-1", WithdrawnBy: "x", WithdrawnAt: time.Now().UTC(),
+		}).Error)
+		return h
+	}
+	t.Run("withdrawn with no occupying job", func(t *testing.T) {
+		h := afterWithdraw(t, types.ParseStatusProcessing)
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted)
+		require.Equal(t, types.ParseStatusCancelled, status)
+		k := h.knowledge(t)
+		require.Equal(t, types.ParseStatusCancelled, k.ParseStatus)
+		require.Equal(t, agent24WithdrawnMessage, k.ErrorMessage)
+	})
+	t.Run("withdrawn with the origin marker wiped", func(t *testing.T) {
+		// S4a Codex R2 C1: an upstream whole-row save wiped the marker (G1) and wrote processing back over the
+		// cancelled row; the withdrawal alone makes it an Agent24 ingest, so the next boundary stops it again
+		h := afterWithdraw(t, types.ParseStatusProcessing)
+		require.NoError(t, h.db.Model(&types.Knowledge{}).Where("id = ?", "k-1").
+			Update("metadata", types.JSON(`{}`)).Error)
+		for _, gate := range []func(context.Context, *types.Knowledge) (bool, string){
+			agent24StageGateAborts, agent24PostProcessGateAborts,
+		} {
+			aborted, status := gate(h.ctx, h.knowledge(t))
+			require.True(t, aborted)
+			require.Equal(t, types.ParseStatusCancelled, status)
+		}
+		require.Equal(t, types.ParseStatusCancelled, h.knowledge(t).ParseStatus)
+	})
+	t.Run("withdrawn build stops before its enrichment", func(t *testing.T) {
+		h := afterWithdraw(t, types.ParseStatusFinalizing)
+		aborted, status := agent24PostProcessGateAborts(h.ctx, h.knowledge(t))
+		require.True(t, aborted)
+		require.Equal(t, types.ParseStatusCancelled, status)
+		require.Equal(t, types.ParseStatusFinalizing, h.knowledge(t).ParseStatus)
+	})
+	t.Run("not withdrawn", func(t *testing.T) {
+		h := newAgent24GateHarness(t)
+		h.job(t, types.Agent24JobSaved, types.Agent24JobOpIngestSubmit)
+		aborted, status := agent24StageGateAborts(h.ctx, h.knowledge(t))
+		require.False(t, aborted)
+		require.Empty(t, status)
+		require.Equal(t, types.Agent24JobProcessing, h.jobRow(t).Status)
+	})
+}
