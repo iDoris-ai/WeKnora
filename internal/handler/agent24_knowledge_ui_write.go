@@ -376,17 +376,18 @@ func RegisterAgent24UIWriteRoutes(
 			panic("agent24 ui write route is not under /api/v1: " + rt.Method + " " + rt.Path)
 		}
 		rel := strings.TrimPrefix(rt.Path, "/api/v1")
+		const p = agent24uisession.UIReadPrefix
 		var next gin.HandlerFunc
 		switch {
-		case rt.Method == http.MethodGet && rt.Path == agent24uisession.UIReadPrefix+"/candidates":
+		case rt.Method == http.MethodGet && rt.Path == p+"/candidates":
 			next = candidates.ReviewList
-		case rt.Method == http.MethodGet && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id":
+		case rt.Method == http.MethodGet && rt.Path == p+"/candidates/:candidate_id":
 			next = candidates.ReviewGet
-		case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id/return":
+		case rt.Method == http.MethodPost && rt.Path == p+"/candidates/:candidate_id/return":
 			next = candidates.ReviewReturn
-		case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/candidates/:candidate_id/approve":
+		case rt.Method == http.MethodPost && rt.Path == p+"/candidates/:candidate_id/approve":
 			next = candidates.ReviewApprove
-		case rt.Method == http.MethodPost && rt.Path == agent24uisession.UIReadPrefix+"/documents/:knowledge_id/withdraw":
+		case rt.Method == http.MethodPost && rt.Path == p+"/documents/:knowledge_id/withdraw":
 			next = candidates.EntryWithdraw
 		default:
 			panic("agent24 ui write route has no handler: " + rt.Method + " " + rt.Path)

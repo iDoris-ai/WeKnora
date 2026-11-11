@@ -54,7 +54,8 @@ func newAgent24UIWriteE2E(t *testing.T, caps, ops []string) *agent24UIWriteE2E {
 		ID: 7, TenantID: &tenant, ScopeType: types.APIKeyScopeTenant, Name: "k",
 		KnowledgeBaseIDs: []string{"kbA", "kbB"}, Capabilities: caps,
 	}
-	h := agent24UIReadHandler(nil, store, []*types.TenantAPIKey{key}, agent24UIResolver(agent24UIKBs(1, "kbA", "kbB")...))
+	resolver := agent24UIResolver(agent24UIKBs(1, "kbA", "kbB")...)
+	h := agent24UIReadHandler(nil, store, []*types.TenantAPIKey{key}, resolver)
 	h.deps.stored.tenants = agent24UITenantStub{tenant: &types.Tenant{ID: 1}}
 	gin.SetMode(gin.TestMode)
 	stub := &agent24AuditStub{}

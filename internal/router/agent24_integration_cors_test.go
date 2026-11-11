@@ -81,7 +81,8 @@ func TestAgent24IntegrationModeSendsNoCORSHeaders(t *testing.T) {
 	for _, rt := range agent24uisession.UIReadRoutes {
 		require.True(t, checked[rt.Method+" "+rt.Path], rt.Path)
 	}
-	for _, rt := range agent24uisession.UIWriteRoutes { // A24-KB-50: registered and allowlisted, no CORS without origins
+	// A24-KB-50: the write routes are registered and allowlisted, and send no CORS header without origins.
+	for _, rt := range agent24uisession.UIWriteRoutes {
 		require.True(t, checked[rt.Method+" "+rt.Path], rt.Path)
 	}
 	require.True(t, checked["GET /health"])

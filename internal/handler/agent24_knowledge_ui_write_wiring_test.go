@@ -40,14 +40,20 @@ func TestAgent24UISessionOpsByCapability(t *testing.T) {
 		{"review", []string{"retrieve", "kb_candidate_review"}, false, false, with("candidate.review")},
 		{"approve", []string{"retrieve", "kb_candidate_approve"}, false, false, with("candidate.approve")},
 		{"withdraw", []string{"retrieve", "kb_entry_withdraw"}, false, false, with("entry.withdraw")},
-		{"approve and review, listed backwards", []string{"kb_candidate_approve", "retrieve", "kb_candidate_review"},
-			false, false, with("candidate.review", "candidate.approve")},
+		{
+			"approve and review, listed backwards",
+			[]string{"kb_candidate_approve", "retrieve", "kb_candidate_review"},
+			false, false, with("candidate.review", "candidate.approve"),
+		},
 		{"all three", []string{
 			"retrieve", "kb_candidate_propose", "kb_candidate_review", "kb_candidate_approve", "kb_entry_withdraw",
 		}, false, false, with("candidate.review", "candidate.approve", "entry.withdraw")},
 		{"full access, no write capability", []string{"retrieve"}, true, false, with()},
-		{"platform key with write capabilities", []string{"retrieve", "kb_candidate_review", "kb_entry_withdraw"},
-			false, true, with()},
+		{
+			"platform key with write capabilities",
+			[]string{"retrieve", "kb_candidate_review", "kb_entry_withdraw"},
+			false, true, with(),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			scope := types.TenantAPIKeyScope{
@@ -66,12 +72,13 @@ func TestAgent24UISessionOpsByCapability(t *testing.T) {
 
 // W8.12 (decision 2026-11-12-s5b-audit-ready Q1=A): action by exact method and FullPath, never by op alone.
 func TestAgent24UIWriteAuditAction(t *testing.T) {
+	const p = agent24uisession.UIReadPrefix
 	want := map[string]types.AuditAction{
-		http.MethodGet + " " + agent24uisession.UIReadPrefix + "/candidates":                        agent24AuditActionUIView,
-		http.MethodGet + " " + agent24uisession.UIReadPrefix + "/candidates/:candidate_id":          agent24AuditActionUIView,
-		http.MethodPost + " " + agent24uisession.UIReadPrefix + "/candidates/:candidate_id/return":  agent24AuditActionCandidateReturn,
-		http.MethodPost + " " + agent24uisession.UIReadPrefix + "/candidates/:candidate_id/approve": agent24AuditActionCandidateApprove,
-		http.MethodPost + " " + agent24uisession.UIReadPrefix + "/documents/:knowledge_id/withdraw": agent24AuditActionEntryWithdraw,
+		http.MethodGet + " " + p + "/candidates":                        agent24AuditActionUIView,
+		http.MethodGet + " " + p + "/candidates/:candidate_id":          agent24AuditActionUIView,
+		http.MethodPost + " " + p + "/candidates/:candidate_id/return":  agent24AuditActionCandidateReturn,
+		http.MethodPost + " " + p + "/candidates/:candidate_id/approve": agent24AuditActionCandidateApprove,
+		http.MethodPost + " " + p + "/documents/:knowledge_id/withdraw": agent24AuditActionEntryWithdraw,
 	}
 	require.Len(t, agent24uisession.UIWriteRoutes, len(want))
 	for _, rt := range agent24uisession.UIWriteRoutes {
@@ -115,7 +122,9 @@ func TestAgent24UIBypassesCredentialWriteRoutes(t *testing.T) {
 			"case %s %s", rt.Method, rt.Path)
 	}
 	// the C routes stay behind the gate
-	for _, p := range []string{agent24AuditPathCandidates, agent24AuditPathCandidateWithdraw, agent24AuditPathCandidateGet} {
+	for _, p := range []string{
+		agent24AuditPathCandidates, agent24AuditPathCandidateWithdraw, agent24AuditPathCandidateGet,
+	} {
 		assert.False(t, agent24UIBypassesCredential(http.MethodPost, p, p), p)
 	}
 }
@@ -130,10 +139,14 @@ func TestAgent24KnowledgeCapabilityUIWriteOps(t *testing.T) {
 		name, mode, tag, session string
 		want                     []string
 	}{
-		{"integration with both keys", Agent24KnowledgeModeIntegration, tag, session,
-			append([]string{"search", "read", "candidate.propose"}, writes...)},
-		{"integration without session key", Agent24KnowledgeModeIntegration, tag, "",
-			[]string{"search", "read", "candidate.propose"}},
+		{
+			"integration with both keys", Agent24KnowledgeModeIntegration, tag, session,
+			append([]string{"search", "read", "candidate.propose"}, writes...),
+		},
+		{
+			"integration without session key", Agent24KnowledgeModeIntegration, tag, "",
+			[]string{"search", "read", "candidate.propose"},
+		},
 		{"integration without revision key", Agent24KnowledgeModeIntegration, "", session, []string{}},
 		{"standalone with both keys", "", tag, session, []string{"search", "read"}},
 	} {
@@ -165,9 +178,11 @@ func TestAgent24UIExchangeOpsFollowCredential(t *testing.T) {
 		{"review", false, []string{"retrieve", "kb_candidate_review"}, with("candidate.review")},
 		{"approve", false, []string{"retrieve", "kb_candidate_approve"}, with("candidate.approve")},
 		{"withdraw", false, []string{"retrieve", "kb_entry_withdraw"}, with("entry.withdraw")},
-		{"all three, listed backwards", false,
+		{
+			"all three, listed backwards", false,
 			[]string{"kb_entry_withdraw", "kb_candidate_approve", "kb_candidate_review", "retrieve"},
-			with("candidate.review", "candidate.approve", "entry.withdraw")},
+			with("candidate.review", "candidate.approve", "entry.withdraw"),
+		},
 		{"propose only", false, []string{"retrieve", "kb_candidate_propose"}, with()},
 		// full access never reaches the ops: Exchange refuses it as empty_scope (R2.8, agent24UIEffectiveScope)
 	} {

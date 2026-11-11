@@ -124,7 +124,8 @@ func TestAgent24UIWriteRoutesReachGuard(t *testing.T) {
 		agent24RequireKnowledgeEnvelope(t, w.Body.Bytes(), "unauthorized", "credential_invalid", false)
 		require.Equal(t, "no-store", w.Header().Get("Cache-Control"), rt.Path)
 
-		for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
+		for _, m := range methods {
 			if m == rt.Method {
 				continue
 			}

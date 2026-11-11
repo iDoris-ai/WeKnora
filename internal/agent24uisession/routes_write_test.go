@@ -50,8 +50,10 @@ func TestIsUIWriteRouteRejectsNearMisses(t *testing.T) {
 	}
 	for _, rt := range UIWriteRoutes {
 		// another method on the same template
-		for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete,
-			http.MethodPatch, http.MethodOptions, http.MethodHead} {
+		for _, m := range []string{
+			http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete,
+			http.MethodPatch, http.MethodOptions, http.MethodHead,
+		} {
 			if m != rt.Method {
 				add(m, rt.Path)
 			}
