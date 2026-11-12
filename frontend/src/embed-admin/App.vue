@@ -171,6 +171,29 @@ button.ea-back {
 .ea-chunk-pos {
   font-size: 12px;
 }
+.ea-cite-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.ea-cite,
+.ea-cite-bar button {
+  font: inherit;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.ea-cite-bar button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.ea-cite-pick {
+  margin: 0 6px;
+}
+.ea-cite-result {
+  margin: 4px 0;
+}
 .ea-md {
   overflow-wrap: anywhere;
 }
