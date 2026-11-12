@@ -115,8 +115,9 @@ export interface CiteBridge {
 
 /**
  * What the view shows next to the actions. `sent`: the host ended the message with `done` and no code. `failed`:
- * any other terminal reply except `rejected/cancelled` (the user's own cancel, or dispose: no line, PR-Daemon #170
- * L2); `code` is the reply's `reason` when present, else its `code`. `not_sent`: the bridge
+ * any other terminal reply except `rejected/cancelled`, which only answers the user's own cancel and shows no line
+ * (PR-Daemon #170 L2; replies after dispose() are ignored anyway); `code` is the reply's `reason` when present, else
+ * its `code`. `not_sent`: the bridge
  * refused to send (closed, busy, no activation). `waiting`: an intent is waiting for the user in the chat window.
  */
 export type Outcome =
