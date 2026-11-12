@@ -437,6 +437,7 @@ test('at most IN_FLIGHT_MAX citations and intents pending; status and cancel do 
 
 test('after rejected/unavailable/overloaded nothing goes out until retry_after_ms has passed', () => {
   const { host, bridge } = opened()
+  const statuses = sentOf(host, 'status').length
   const a = bridge.cite(REF, CLICK)!
   host.reply(DOC_A, a.id, 'rejected', { code: 'unavailable', reason: 'overloaded', retry_after_ms: 2500 })
   assert.equal(bridge.canCite, false)
@@ -449,6 +450,8 @@ test('after rejected/unavailable/overloaded nothing goes out until retry_after_m
   assert.equal(bridge.canCite, true)
   assert.ok(bridge.cite(ref(2), CLICK))
   assert.equal(sentOf(host, 'citation').length, 2)
+  // A refused citation is not resent, and it does not make a status go out.
+  assert.equal(sentOf(host, 'status').length, statuses)
 })
 
 test('an overloaded reply without retry_after_ms backs off OVERLOAD_BACKOFF_MS; other rejections do not back off', () => {
@@ -555,6 +558,27 @@ test('C2: a slot freed by a timeout also lets the held status out', () => {
   host.advance(CITATION_TIMEOUT_MS)
   assert.equal(host.sent.length, before + 1)
   assert.equal(host.sent.at(-1)!.type, 'status')
+})
+
+test('r2 C1: a status the host refuses with ⑯ (its slot outlived our timeout) goes out again after the back-off', () => {
+  const { host, bridge } = opened()
+  for (let n = 0; n < IN_FLIGHT_MAX; n++) bridge.cite(ref(n + 1), CLICK)
+  bridge.setStatus({ state: 'ready' })
+  host.advance(CITATION_TIMEOUT_MS)
+  const status = host.sent.at(-1)!
+  assert.equal(status.type, 'status')
+  // The host still holds the four, so it answers the status with ⑯.
+  host.reply(DOC_A, status.id as string, 'rejected', { code: 'unavailable', reason: 'overloaded', retry_after_ms: 1000 })
+  const before = host.sent.length
+  host.advance(999)
+  assert.equal(host.sent.length, before)
+  host.advance(1)
+  assert.equal(host.sent.length, before + 1)
+  assert.equal(host.sent.at(-1)!.type, 'status')
+  assert.deepEqual(host.sent.at(-1)!.payload, { state: 'ready' })
+  host.reply(DOC_A, host.sent.at(-1)!.id as string, 'done')
+  host.advance(10_000)
+  assert.equal(host.sent.length, before + 1)
 })
 
 test('C2: inside a ⑯ back-off the status waits for it to end, then goes out once', () => {

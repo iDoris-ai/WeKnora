@@ -381,12 +381,15 @@ export class PageBridge {
       if (result !== 'accepted' && result !== 'rejected' && result !== 'done') return
       // Back-off first, whether or not the reply names a request: the host's ⑥ rate refusal carries no
       // in_reply_to (U7.1), and ⑯'s names one (Codex r1 C1).
-      if (result === 'rejected' && payload.code === 'unavailable' && payload.reason === 'overloaded') {
-        this.noteOverload(payload.retry_after_ms)
-      }
+      const overloaded = result === 'rejected' && payload.code === 'unavailable' && payload.reason === 'overloaded'
+      if (overloaded) this.noteOverload(payload.retry_after_ms)
       if (typeof env.in_reply_to !== 'string') return
       const pending = this.pending.get(env.in_reply_to)
       if (!pending) return
+      // A local timeout frees a slot here but not at the host, so a status can still meet ⑯. It is held again and
+      // goes out after the back-off; the first message after a back-off opens a new window and is no strike (U6.6)
+      // (Codex r2 C1).
+      if (overloaded && pending.type === 'status') this.statusDirty = true
       // `accepted` ends a cancel. Citation, intent and status wait for a terminal reply.
       if (result === 'accepted' && pending.type !== 'cancel') return
       this.pending.delete(env.in_reply_to)
