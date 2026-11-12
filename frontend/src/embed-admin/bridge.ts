@@ -28,6 +28,8 @@ export const INTENT_TIMEOUT_MS = 120_000
 export const IN_FLIGHT_MAX = 4
 /** Back-off after an `overloaded` reply that carries no retry_after_ms (the host sends 1000). */
 export const OVERLOAD_BACKOFF_MS = 1_000
+/** The longest back-off taken from a reply's retry_after_ms (PR-Daemon #170 L1); the host sends 1000. */
+export const OVERLOAD_BACKOFF_MAX_MS = 10_000
 /** U6.7: one page message is at most 8 KiB on the wire; a bigger one is a soft violation at the host (⑦). */
 export const BRIDGE_MAX_MESSAGE_BYTES = 8 * 1024
 /** U7.2: an intent carries 0–8 citations. */
@@ -202,10 +204,14 @@ export class PageBridge {
     void this.request('status', { ...this.status })
   }
 
-  /** U6.6: after `overloaded`, nothing but cancel goes out for retry_after_ms (OVERLOAD_BACKOFF_MS when missing). */
+  /**
+   * U6.6: after `overloaded`, nothing but cancel goes out for retry_after_ms (OVERLOAD_BACKOFF_MS when missing,
+   * at most OVERLOAD_BACKOFF_MAX_MS). Not reset by a new document: the host keeps its back-off per view across
+   * documents (knowledge-bridge.ts newDocument), so the page does too.
+   */
   private noteOverload(retryAfter: unknown): void {
     const ms = typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter >= 0
-      ? retryAfter
+      ? Math.min(retryAfter, OVERLOAD_BACKOFF_MAX_MS)
       : OVERLOAD_BACKOFF_MS
     this.backoffUntil = Math.max(this.backoffUntil, this.host.now() + ms)
   }

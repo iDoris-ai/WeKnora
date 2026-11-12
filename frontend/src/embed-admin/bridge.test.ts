@@ -11,6 +11,7 @@ import {
   INTENT_CITATIONS_MAX,
   INTENT_TIMEOUT_MS,
   BRIDGE_MAX_MESSAGE_BYTES,
+  OVERLOAD_BACKOFF_MAX_MS,
   OVERLOAD_BACKOFF_MS,
   PageBridge,
   REPLY_TIMEOUT_MS,
@@ -472,6 +473,32 @@ test('an overloaded reply without retry_after_ms backs off OVERLOAD_BACKOFF_MS; 
 async function settled<T>(p: Promise<T>): Promise<T | 'unsettled'> {
   return Promise.race([p, new Promise<'unsettled'>((r) => setTimeout(() => r('unsettled'), 0))])
 }
+
+test('PR-Daemon #170 L1: retry_after_ms is capped at OVERLOAD_BACKOFF_MAX_MS', () => {
+  const { host, bridge } = opened()
+  const a = bridge.cite(REF, CLICK)!
+  host.reply(DOC_A, a.id, 'rejected', { code: 'unavailable', reason: 'overloaded', retry_after_ms: 1e12 })
+  host.advance(OVERLOAD_BACKOFF_MAX_MS - 1)
+  assert.equal(bridge.canCite, false)
+  host.advance(1)
+  assert.equal(bridge.canCite, true)
+})
+
+test('PR-Daemon #170 L1: a new document keeps the back-off, as the host keeps its own per view', () => {
+  const { host, bridge } = opened()
+  const a = bridge.cite(REF, CLICK)!
+  host.reply(DOC_A, a.id, 'rejected', { code: 'unavailable', reason: 'overloaded', retry_after_ms: 1000 })
+  host.hello(DOC_B)
+  assert.equal(bridge.canCite, false)
+  const before = host.sent.length
+  host.advance(999)
+  assert.equal(host.sent.length, before)
+  host.advance(1)
+  assert.equal(bridge.canCite, true)
+  // The new document's status, held through the back-off, goes out now.
+  assert.equal(host.sent.length, before + 1)
+  assert.equal(host.sent.at(-1)!.document_id, DOC_B)
+})
 
 test('cancel: payload is { target_id }, needs no activation, and resolves with its own reply', async () => {
   const { host, bridge } = opened()

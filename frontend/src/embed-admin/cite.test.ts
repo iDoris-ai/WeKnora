@@ -156,6 +156,23 @@ test('a citation that ends in done without a code is sent; with a code or reject
   assert.ok(changes >= 3)
 })
 
+test('only rejected/cancelled is silent: other rejections and done with a code still show failed', async () => {
+  const b = new FakeBridge()
+  const a = new CiteActions(b, () => {})
+  a.cite(REF, CLICK)
+  b.answer('ID1', { result: 'rejected', code: 'cancelled' })
+  await tick()
+  assert.equal(a.outcome, null)
+  a.cite(REF, CLICK)
+  b.answer('ID2', { result: 'done', code: 'cancelled' })
+  await tick()
+  assert.deepEqual(a.outcome, { kind: 'failed', code: 'cancelled' })
+  a.cite(REF, CLICK)
+  b.answer('ID3', { result: 'rejected', code: 'not_found' })
+  await tick()
+  assert.deepEqual(a.outcome, { kind: 'failed', code: 'not_found' })
+})
+
 test('a refused send is not_sent; a null reply clears the outcome', async () => {
   const b = new FakeBridge()
   const a = new CiteActions(b, () => {})
@@ -183,7 +200,8 @@ test('an intent waits, can be cancelled, and is no longer pending after its term
   b.answer('ID1', { result: 'rejected', code: 'cancelled' })
   await tick()
   assert.equal(a.intentPending, false)
-  assert.deepEqual(a.outcome, { kind: 'failed', code: 'cancelled' })
+  // The user's own cancel shows no result line (PR-Daemon #170 L2).
+  assert.equal(a.outcome, null)
   a.cancelIntent()
   assert.deepEqual(b.calls, ['intent:ID1', 'cancel:ID1'])
 })
