@@ -10,6 +10,7 @@ import {
   IN_FLIGHT_MAX,
   INTENT_CITATIONS_MAX,
   INTENT_TIMEOUT_MS,
+  BRIDGE_MAX_MESSAGE_BYTES,
   OVERLOAD_BACKOFF_MS,
   PageBridge,
   REPLY_TIMEOUT_MS,
@@ -464,6 +465,11 @@ test('an overloaded reply without retry_after_ms backs off OVERLOAD_BACKOFF_MS; 
   assert.equal(bridge.canCite, true)
 })
 
+/** Settles to the value, or to 'unsettled' if the promise has not resolved after the microtask queue drains. */
+async function settled<T>(p: Promise<T>): Promise<T | 'unsettled'> {
+  return Promise.race([p, new Promise<'unsettled'>((r) => setTimeout(() => r('unsettled'), 0))])
+}
+
 test('cancel: payload is { target_id }, needs no activation, and resolves with its own reply', async () => {
   const { host, bridge } = opened()
   const i = bridge.returnToChat([REF], CLICK)!
@@ -475,20 +481,115 @@ test('cancel: payload is { target_id }, needs no activation, and resolves with i
   assert.equal(m[0].document_id, DOC_A)
   host.reply(DOC_A, i.id, 'rejected', { code: 'cancelled' })
   host.reply(DOC_A, m[0].id as string, 'accepted')
-  assert.deepEqual(await i.reply, { result: 'rejected', code: 'cancelled' })
+  assert.deepEqual(await settled(i.reply), { result: 'rejected', code: 'cancelled' })
   // A cancel's accepted is its terminal reply (U7.2).
-  assert.deepEqual(await c, { result: 'accepted' })
+  assert.deepEqual(await settled(c), { result: 'accepted' })
+  assert.equal(bridge.pendingCount, 0)
 })
 
 test('cancel sends nothing when closed or when the target is not a ULID', async () => {
   const { host, bridge } = started()
-  assert.equal(await bridge.cancel('01HZZZZZZZZZZZZZZZZZZZZZZZ'), null)
+  const closed = bridge.cancel('01HZZZZZZZZZZZZZZZZZZZZZZZ')
+  assert.equal(host.sent.length, 1)
+  assert.equal(await settled(closed), null)
   host.hello(DOC_A)
   const before = host.sent.length
   for (const t of ['', 'x', '01hzzzzzzzzzzzzzzzzzzzzzzz', '01HZZZZZZZZZZZZZZZZZZZZZZZZ', '01HZZZZZZZZZZZZZZZZZZZZZZI']) {
-    assert.equal(await bridge.cancel(t), null)
+    const p = bridge.cancel(t)
+    assert.equal(host.sent.length, before, t)
+    assert.equal(await settled(p), null, t)
   }
+})
+
+// ── Codex r1 ──────────────────────────────────────────────────────────────────
+
+test('C1: a rate refusal without in_reply_to (⑥) still starts the back-off', () => {
+  const { host, bridge } = opened()
+  host.deliver({
+    v: 3, direction: 'host_to_page', type: 'reply', id: ulid(host.clock, (b) => b.fill(3)), generation: 1,
+    document_id: DOC_A, payload: { result: 'rejected', code: 'unavailable', reason: 'overloaded', retry_after_ms: 1000 },
+  })
+  assert.equal(bridge.canCite, false)
+  assert.equal(bridge.cite(REF, CLICK), null)
+  const before = host.sent.length
+  bridge.setStatus({ state: 'ready' })
   assert.equal(host.sent.length, before)
+  host.advance(1000)
+  assert.equal(bridge.canCite, true)
+  // The held status goes out once the back-off ends.
+  assert.equal(host.sent.length, before + 1)
+  assert.deepEqual(host.sent.at(-1)!.payload, { state: 'ready' })
+})
+
+test('C1: a rate refusal for another document does not back off this one', () => {
+  const { host, bridge } = opened()
+  host.deliver({
+    v: 3, direction: 'host_to_page', type: 'reply', id: ulid(host.clock, (b) => b.fill(3)), generation: 1,
+    document_id: DOC_B, payload: { result: 'rejected', code: 'unavailable', reason: 'overloaded', retry_after_ms: 1000 },
+  })
+  assert.equal(bridge.canCite, true)
+})
+
+test('C2: while IN_FLIGHT_MAX citations are pending a status is held; only the latest goes out when a slot frees', () => {
+  const { host, bridge } = opened()
+  const ids: string[] = []
+  for (let n = 0; n < IN_FLIGHT_MAX; n++) ids.push(bridge.cite(ref(n + 1), CLICK)!.id)
+  const before = host.sent.length
+  bridge.setStatus({ state: 'loading' })
+  bridge.setStatus({ state: 'ready' })
+  assert.equal(host.sent.length, before)
+  host.reply(DOC_A, ids[0], 'done')
+  assert.equal(host.sent.length, before + 1)
+  assert.equal(host.sent.at(-1)!.type, 'status')
+  assert.deepEqual(host.sent.at(-1)!.payload, { state: 'ready' })
+  host.reply(DOC_A, ids[1], 'done')
+  assert.equal(host.sent.length, before + 1)
+})
+
+test('C2: a slot freed by a timeout also lets the held status out', () => {
+  const { host, bridge } = opened()
+  for (let n = 0; n < IN_FLIGHT_MAX; n++) bridge.cite(ref(n + 1), CLICK)
+  const before = host.sent.length
+  bridge.setStatus({ state: 'ready' })
+  assert.equal(host.sent.length, before)
+  host.advance(CITATION_TIMEOUT_MS)
+  assert.equal(host.sent.length, before + 1)
+  assert.equal(host.sent.at(-1)!.type, 'status')
+})
+
+test('C2: inside a ⑯ back-off the status waits for it to end, then goes out once', () => {
+  const { host, bridge } = opened()
+  const a = bridge.cite(REF, CLICK)!
+  host.reply(DOC_A, a.id, 'rejected', { code: 'unavailable', reason: 'overloaded', retry_after_ms: 1000 })
+  const before = host.sent.length
+  bridge.setStatus({ state: 'loading' })
+  bridge.setStatus({ state: 'error', error_code: 'not_found' })
+  host.advance(999)
+  assert.equal(host.sent.length, before)
+  host.advance(1)
+  assert.equal(host.sent.length, before + 1)
+  assert.deepEqual(host.sent.at(-1)!.payload, { state: 'error', error_code: 'not_found' })
+  host.advance(5000)
+  assert.equal(host.sent.length, before + 1)
+})
+
+test('C4: a message over BRIDGE_MAX_MESSAGE_BYTES is neither sent nor registered', () => {
+  const { host, bridge } = opened()
+  // `"` passes the id rules but costs two bytes once escaped.
+  const fat = (n: number): CitationRef => {
+    const v = '"'.repeat(120) + String(n).padStart(8, '0')
+    return { knowledge_base_id: v, knowledge_id: v, chunk_id: v, source_revision: v, index_build_id: v, chunk_revision: n, content_tag: v }
+  }
+  const refs = Array.from({ length: INTENT_CITATIONS_MAX }, (_, i) => fat(i))
+  assert.ok(new TextEncoder().encode(JSON.stringify({ citations: refs })).length > BRIDGE_MAX_MESSAGE_BYTES)
+  const before = host.sent.length
+  assert.equal(bridge.returnToChat(refs, CLICK), null)
+  assert.equal(host.sent.length, before)
+  assert.equal(bridge.pendingCount, 0)
+  assert.equal(bridge.canReturnToChat, true)
+  // One of them alone fits.
+  assert.ok(bridge.cite(refs[0], CLICK))
+  for (const m of host.sent) assert.ok(new TextEncoder().encode(JSON.stringify(m)).length <= BRIDGE_MAX_MESSAGE_BYTES)
 })
 
 test('a new document voids pending citations and intents, and frees their slots', async () => {

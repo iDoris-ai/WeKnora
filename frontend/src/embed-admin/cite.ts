@@ -31,7 +31,9 @@ const CITATION_KEYS = [...REF_ID_FIELDS, 'chunk_revision'].sort()
 
 /**
  * U7.1 reference ID, including the default refusal (decision #21): a string of 1–128 UTF-8 bytes, no control
- * character (U+0000–U+001F, U+007F–U+009F), and no `/`, `\`, `:`, `..` or whitespace.
+ * character (U+0000–U+001F, U+007F–U+009F), and no `/`, `\`, `:`, `..` or whitespace. No lone surrogate either:
+ * TextEncoder would count it as U+FFFD, but JSON.stringify sends it as `\udXXX`, which the host's strict parser
+ * refuses as a soft violation (Codex r1 C3).
  */
 export function refIdOk(v: unknown): v is string {
   if (typeof v !== 'string') return false
@@ -40,12 +42,13 @@ export function refIdOk(v: unknown): v is string {
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f-\u009f]/.test(v)) return false
   if (/[/\\:\s]|\.\./.test(v)) return false
+  if (/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(v)) return false
   return true
 }
 
 /**
- * True only for an object with exactly the seven keys (no prototype tricks: own enumerable keys only), every ID
- * field passing refIdOk, and chunk_revision an integer in 0..2^31−1.
+ * True only for a plain object (its prototype is Object.prototype) whose own enumerable keys are exactly the
+ * seven, every ID field passing refIdOk, and chunk_revision an integer in 0..2^31−1.
  */
 export function isCitationRef(v: unknown): v is CitationRef {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
@@ -125,11 +128,17 @@ export type Outcome =
 /**
  * The document view's citation actions. Keeps the ids still waiting, so a cancel can target the intent and
  * dispose() can withdraw everything when the view goes away. A reply that arrives after dispose() changes nothing.
- * A null reply (timeout, or a new document's hello) clears the pending id and sets the outcome to null.
+ * A null reply (timeout, or a new document's hello) clears the pending id and sets the outcome to null; the id is
+ * kept as unanswered (the last UNANSWERED_KEPT), because the host may still be working on it and dispose() should
+ * still withdraw it (Codex r1 C5). A cancel for an id the host has finished is answered `accepted` with no effect.
  */
+/** How many timed-out ids dispose() still withdraws. */
+export const UNANSWERED_KEPT = 8
+
 export class CiteActions {
   outcome: Outcome = null
   private pending = new Map<string, 'cite' | 'intent'>()
+  private readonly unanswered: string[] = []
   private disposed = false
 
   constructor(
@@ -173,9 +182,13 @@ export class CiteActions {
   }
 
   private settle(id: string, r: ActionReply | null): void {
-    if (this.disposed || !this.pending.has(id)) return
-    this.pending.delete(id)
-    if (r === null) this.outcome = null
+    // dispose() empties pending, so a reply after it ends here.
+    if (!this.pending.delete(id)) return
+    if (r === null) {
+      this.unanswered.push(id)
+      if (this.unanswered.length > UNANSWERED_KEPT) this.unanswered.shift()
+      this.outcome = null
+    }
     else if (r.result === 'done' && r.code === undefined) this.outcome = { kind: 'sent' }
     else this.outcome = { kind: 'failed', code: r.reason ?? r.code ?? r.result }
     this.onChange()
@@ -196,7 +209,8 @@ export class CiteActions {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    for (const id of this.pending.keys()) void this.bridge.cancel(id)
+    for (const id of [...this.pending.keys(), ...this.unanswered]) void this.bridge.cancel(id)
     this.pending.clear()
+    this.unanswered.length = 0
   }
 }

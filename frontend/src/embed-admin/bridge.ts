@@ -28,6 +28,8 @@ export const INTENT_TIMEOUT_MS = 120_000
 export const IN_FLIGHT_MAX = 4
 /** Back-off after an `overloaded` reply that carries no retry_after_ms (the host sends 1000). */
 export const OVERLOAD_BACKOFF_MS = 1_000
+/** U6.7: one page message is at most 8 KiB on the wire; a bigger one is a soft violation at the host (⑦). */
+export const BRIDGE_MAX_MESSAGE_BYTES = 8 * 1024
 /** U7.2: an intent carries 0–8 citations. */
 export const INTENT_CITATIONS_MAX = 8
 
@@ -140,6 +142,9 @@ export class PageBridge {
   private status: PageStatus = { state: 'loading' }
   private readonly pending = new Map<string, Pending>()
   private backoffUntil = 0
+  /** The status recorded but not yet sent: held while the host would answer it with `overloaded` (Codex r1 C2). */
+  private statusDirty = false
+  private statusTimer: unknown = null
   private readonly stateListeners = new Set<(s: HostState) => void>()
   private readonly openListeners = new Set<(open: boolean) => void>()
   private unlisten: (() => void) | null = null
@@ -158,6 +163,8 @@ export class PageBridge {
     this.unlisten = null
     if (this.helloTimer !== null) this.host.clearTimer(this.helloTimer)
     this.helloTimer = null
+    if (this.statusTimer !== null) this.host.clearTimer(this.statusTimer)
+    this.statusTimer = null
     this.dropPending()
   }
 
@@ -166,10 +173,41 @@ export class PageBridge {
     return this.open
   }
 
-  /** Records the page status and reports it if the bridge is open. Not resent: a new hello sends the current one. */
+  /**
+   * Records the page status and reports it if the bridge is open. Not resent: a new hello sends the current one.
+   * The host checks a status against its in-flight table and back-off like any other non-cancel message (U6.4 ⑯),
+   * so while IN_FLIGHT_MAX citations and intents are pending, or inside a back-off, it is held, and only the latest
+   * one goes out once a slot frees or the back-off ends.
+   */
   setStatus(status: PageStatus): void {
     this.status = status.state === 'error' ? { state: 'error', error_code: status.error_code ?? 'internal' } : { state: status.state }
-    if (this.open) void this.request('status', { ...this.status })
+    this.statusDirty = true
+    this.flushStatus()
+  }
+
+  private flushStatus(): void {
+    if (!this.statusDirty || !this.open || this.documentId === null) return
+    const now = this.host.now()
+    if (now < this.backoffUntil) {
+      if (this.statusTimer === null) {
+        this.statusTimer = this.host.setTimer(() => {
+          this.statusTimer = null
+          this.flushStatus()
+        }, this.backoffUntil - now)
+      }
+      return
+    }
+    if (this.contentInFlight() >= IN_FLIGHT_MAX) return
+    this.statusDirty = false
+    void this.request('status', { ...this.status })
+  }
+
+  /** U6.6: after `overloaded`, nothing but cancel goes out for retry_after_ms (OVERLOAD_BACKOFF_MS when missing). */
+  private noteOverload(retryAfter: unknown): void {
+    const ms = typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter >= 0
+      ? retryAfter
+      : OVERLOAD_BACKOFF_MS
+    this.backoffUntil = Math.max(this.backoffUntil, this.host.now() + ms)
   }
 
   onState(fn: (s: HostState) => void): () => void {
@@ -279,11 +317,16 @@ export class PageBridge {
     const reply = new Promise<Reply | null>((r) => {
       resolve = r
     })
+    const body = JSON.stringify(env)
+    // U6.7 ⑦ (Codex r1 C4): checked on the serialised bytes; nothing is sent or registered when it is too big.
+    if (new TextEncoder().encode(body).length > BRIDGE_MAX_MESSAGE_BYTES) return null
     const timer = this.host.setTimer(() => {
-      if (this.pending.delete(id)) resolve(null)
+      if (!this.pending.delete(id)) return
+      resolve(null)
+      this.flushStatus()
     }, timeoutMs)
     this.pending.set(id, { type, timer, resolve })
-    this.host.send(JSON.stringify(env))
+    this.host.send(body)
     return { id, reply }
   }
 
@@ -332,23 +375,24 @@ export class PageBridge {
       for (const fn of this.stateListeners) fn(s)
       return
     }
-    if (env.type === 'reply' && typeof env.in_reply_to === 'string') {
+    if (env.type === 'reply') {
+      const payload = env.payload
+      const result = payload.result
+      if (result !== 'accepted' && result !== 'rejected' && result !== 'done') return
+      // Back-off first, whether or not the reply names a request: the host's ⑥ rate refusal carries no
+      // in_reply_to (U7.1), and ⑯'s names one (Codex r1 C1).
+      if (result === 'rejected' && payload.code === 'unavailable' && payload.reason === 'overloaded') {
+        this.noteOverload(payload.retry_after_ms)
+      }
+      if (typeof env.in_reply_to !== 'string') return
       const pending = this.pending.get(env.in_reply_to)
-      const result = env.payload.result
-      if (!pending || (result !== 'accepted' && result !== 'rejected' && result !== 'done')) return
+      if (!pending) return
       // `accepted` ends a cancel. Citation, intent and status wait for a terminal reply.
       if (result === 'accepted' && pending.type !== 'cancel') return
-      const payload = env.payload
-      if (result === 'rejected' && payload.code === 'unavailable' && payload.reason === 'overloaded') {
-        const retryAfter = payload.retry_after_ms
-        const ms = typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter >= 0
-          ? retryAfter
-          : OVERLOAD_BACKOFF_MS
-        this.backoffUntil = Math.max(this.backoffUntil, this.host.now() + ms)
-      }
       this.pending.delete(env.in_reply_to)
       this.host.clearTimer(pending.timer)
       pending.resolve(payload as unknown as Reply)
+      this.flushStatus()
     }
   }
 
@@ -366,7 +410,10 @@ export class PageBridge {
     const wasOpen = this.open
     this.open = supported.includes(BRIDGE_VERSION)
     if (this.open !== wasOpen) for (const fn of this.openListeners) fn(this.open)
-    if (this.open && changed) void this.request('status', { ...this.status })
+    if (this.open && changed) {
+      this.statusDirty = true
+      this.flushStatus()
+    }
   }
 }
 

@@ -9,6 +9,7 @@ import {
   isCitationRef,
   refIdOk,
   toggleRef,
+  UNANSWERED_KEPT,
   type ActionReply,
   type CitationRef,
   type CiteBridge,
@@ -49,6 +50,14 @@ test('refIdOk: 1–128 UTF-8 bytes, no control character, no / \\ : .. or whites
     'a b', 'a b', 'a\u0000b', 'a\u001fb', 'a\u007fb', 'a\u0085b', 'a\u009fb', 1, null, undefined, {}]) {
     assert.equal(refIdOk(bad), false, JSON.stringify(bad))
   }
+})
+
+test('refIdOk refuses a lone surrogate, which the host parser refuses, and keeps a paired one (Codex r1 C3)', () => {
+  for (const bad of ['\ud800', 'a\ud800', '\ud800b', 'a\udc00', '\udc00\ud800', 'x\udbff']) {
+    assert.equal(refIdOk(bad), false, JSON.stringify(bad))
+  }
+  assert.equal(refIdOk('a\ud83d\ude00b'), true)
+  assert.equal(refIdOk('😀'), true)
 })
 
 test('isCitationRef: exactly the seven keys, valid ids, chunk_revision an integer in 0..2^31−1', () => {
@@ -177,6 +186,51 @@ test('an intent waits, can be cancelled, and is no longer pending after its term
   assert.deepEqual(a.outcome, { kind: 'failed', code: 'cancelled' })
   a.cancelIntent()
   assert.deepEqual(b.calls, ['intent:ID1', 'cancel:ID1'])
+})
+
+test('cancelIntent cancels only the intent, not a citation pending before it', () => {
+  const b = new FakeBridge()
+  const a = new CiteActions(b, () => {})
+  a.cite(REF, CLICK)
+  a.cite(ref(2), CLICK)
+  a.returnToChat([REF], CLICK)
+  a.cancelIntent()
+  assert.deepEqual(b.calls.filter((c) => c.startsWith('cancel:')), ['cancel:ID3'])
+})
+
+test('cancelIntent does nothing when only citations are pending', () => {
+  const b = new FakeBridge()
+  const a = new CiteActions(b, () => {})
+  a.cite(REF, CLICK)
+  a.cancelIntent()
+  assert.deepEqual(b.calls.filter((c) => c.startsWith('cancel:')), [])
+})
+
+test('an id that timed out is still withdrawn by dispose, the last UNANSWERED_KEPT of them (Codex r1 C5)', async () => {
+  const b = new FakeBridge()
+  const a = new CiteActions(b, () => {})
+  a.returnToChat([REF], CLICK)
+  b.answer('ID1', null)
+  await tick()
+  assert.equal(a.intentPending, false)
+  for (let n = 0; n < UNANSWERED_KEPT; n++) a.cite(ref(n), CLICK)
+  for (let n = 0; n < UNANSWERED_KEPT; n++) b.answer(`ID${n + 2}`, null)
+  await tick()
+  a.cite(REF, CLICK)
+  a.dispose()
+  const cancelled = b.calls.filter((c) => c.startsWith('cancel:')).map((c) => c.slice(7)).sort()
+  const want = [`ID${UNANSWERED_KEPT + 2}`, ...Array.from({ length: UNANSWERED_KEPT }, (_, n) => `ID${n + 2}`)].sort()
+  assert.deepEqual(cancelled, want)
+})
+
+test('a citation answered with a terminal reply is not withdrawn by dispose', async () => {
+  const b = new FakeBridge()
+  const a = new CiteActions(b, () => {})
+  a.cite(REF, CLICK)
+  b.answer('ID1', { result: 'done' })
+  await tick()
+  a.dispose()
+  assert.deepEqual(b.calls.filter((c) => c.startsWith('cancel:')), [])
 })
 
 test('dispose cancels every citation and intent still waiting, once, and ignores later replies', async () => {
