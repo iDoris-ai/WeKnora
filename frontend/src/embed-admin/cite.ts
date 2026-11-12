@@ -27,13 +27,20 @@ export const REF_ID_FIELDS = [
   'content_tag',
 ] as const
 
+const CITATION_KEYS = [...REF_ID_FIELDS, 'chunk_revision'].sort()
+
 /**
  * U7.1 reference ID, including the default refusal (decision #21): a string of 1–128 UTF-8 bytes, no control
  * character (U+0000–U+001F, U+007F–U+009F), and no `/`, `\`, `:`, `..` or whitespace.
  */
 export function refIdOk(v: unknown): v is string {
-  void v
-  throw new Error('KB-C2-02d: not implemented')
+  if (typeof v !== 'string') return false
+  const n = new TextEncoder().encode(v).length
+  if (n < 1 || n > 128) return false
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(v)) return false
+  if (/[/\\:\s]|\.\./.test(v)) return false
+  return true
 }
 
 /**
@@ -41,8 +48,16 @@ export function refIdOk(v: unknown): v is string {
  * field passing refIdOk, and chunk_revision an integer in 0..2^31−1.
  */
 export function isCitationRef(v: unknown): v is CitationRef {
-  void v
-  throw new Error('KB-C2-02d: not implemented')
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  if (Object.getPrototypeOf(v) !== Object.prototype) return false
+  const keys = Object.keys(v).sort()
+  if (keys.length !== 7 || keys.some((k, i) => k !== CITATION_KEYS[i])) return false
+  const o = v as Record<string, unknown>
+  for (const field of REF_ID_FIELDS) {
+    if (!refIdOk(o[field])) return false
+  }
+  const rev = o.chunk_revision
+  return Number.isInteger(rev) && (rev as number) >= 0 && (rev as number) <= 2 ** 31 - 1
 }
 
 /**
@@ -51,9 +66,17 @@ export function isCitationRef(v: unknown): v is CitationRef {
  * the seven keys, never the chunk or document object itself.
  */
 export function citationRefOf(doc: DocumentDetail, chunk: Chunk): CitationRef | null {
-  void doc
-  void chunk
-  throw new Error('KB-C2-02d: not implemented')
+  if (doc.revision.index_build_id === null) return null
+  const ref: CitationRef = {
+    knowledge_base_id: doc.knowledge_base_id,
+    knowledge_id: doc.knowledge_id,
+    chunk_id: chunk.chunk_id,
+    source_revision: doc.revision.source_revision,
+    index_build_id: doc.revision.index_build_id,
+    chunk_revision: chunk.chunk_revision,
+    content_tag: chunk.content_tag,
+  }
+  return isCitationRef(ref) ? ref : null
 }
 
 /**
@@ -61,10 +84,9 @@ export function citationRefOf(doc: DocumentDetail, chunk: Chunk): CitationRef | 
  * returns the list unchanged. Order is the order of ticking. Never mutates `list`.
  */
 export function toggleRef(list: readonly CitationRef[], ref: CitationRef, max: number): CitationRef[] {
-  void list
-  void ref
-  void max
-  throw new Error('KB-C2-02d: not implemented')
+  if (list.some((r) => r.chunk_id === ref.chunk_id)) return list.filter((r) => r.chunk_id !== ref.chunk_id)
+  if (list.length >= max) return [...list]
+  return [...list, ref]
 }
 
 // ── the view's actions ────────────────────────────────────────────────────────
@@ -107,6 +129,8 @@ export type Outcome =
  */
 export class CiteActions {
   outcome: Outcome = null
+  private pending = new Map<string, 'cite' | 'intent'>()
+  private disposed = false
 
   constructor(
     private readonly bridge: CiteBridge,
@@ -115,30 +139,64 @@ export class CiteActions {
 
   /** True while an intent is waiting for its terminal reply. */
   get intentPending(): boolean {
-    throw new Error('KB-C2-02d: not implemented')
+    for (const kind of this.pending.values()) if (kind === 'intent') return true
+    return false
   }
 
   /** Sends one citation from a click. `not_sent` when the bridge returns null. */
   cite(ref: CitationRef, trigger: Trigger): void {
-    void ref
-    void trigger
-    throw new Error('KB-C2-02d: not implemented')
+    if (this.disposed) return
+    const s = this.bridge.cite(ref, trigger)
+    if (s === null) {
+      this.outcome = { kind: 'not_sent' }
+      this.onChange()
+      return
+    }
+    this.pending.set(s.id, 'cite')
+    this.onChange()
+    void s.reply.then((r) => this.settle(s.id, r))
   }
 
   /** Sends the intent from a click; `waiting` until its terminal reply. */
   returnToChat(refs: readonly CitationRef[], trigger: Trigger): void {
-    void refs
-    void trigger
-    throw new Error('KB-C2-02d: not implemented')
+    if (this.disposed) return
+    const s = this.bridge.returnToChat(refs, trigger)
+    if (s === null) {
+      this.outcome = { kind: 'not_sent' }
+      this.onChange()
+      return
+    }
+    this.pending.set(s.id, 'intent')
+    this.outcome = { kind: 'waiting' }
+    this.onChange()
+    void s.reply.then((r) => this.settle(s.id, r))
+  }
+
+  private settle(id: string, r: ActionReply | null): void {
+    if (this.disposed || !this.pending.has(id)) return
+    this.pending.delete(id)
+    if (r === null) this.outcome = null
+    else if (r.result === 'done' && r.code === undefined) this.outcome = { kind: 'sent' }
+    else this.outcome = { kind: 'failed', code: r.reason ?? r.code ?? r.result }
+    this.onChange()
   }
 
   /** Cancels the waiting intent, if any. */
   cancelIntent(): void {
-    throw new Error('KB-C2-02d: not implemented')
+    if (this.disposed) return
+    for (const [id, kind] of this.pending) {
+      if (kind === 'intent') {
+        void this.bridge.cancel(id)
+        return
+      }
+    }
   }
 
   /** Cancels every citation and intent still waiting, once; later replies are ignored. */
   dispose(): void {
-    throw new Error('KB-C2-02d: not implemented')
+    if (this.disposed) return
+    this.disposed = true
+    for (const id of this.pending.keys()) void this.bridge.cancel(id)
+    this.pending.clear()
   }
 }

@@ -840,7 +840,7 @@
         {
           "id": "A24-KB-39",
           "issue": "iDoris-ai/WeKnora#134",
-          "summary": "集成模式下 app 自己提供嵌入知识页 /embed-admin/knowledge-bases[/:kb_id] 与 /embed-admin/assets/*（独立 Vite 构建、设计稿 §4 CSP、不要求认证、只有构建产物）；页面只调 ui-routes.json 里的 UI 只读入口，桥信封 v3 带 document_id；b 片加文档、分块与标签视图，分块 markdown 由只产出白名单标签的渲染器加 DOMPurify 显示；c 片加 wiki 页列表与页面，[[slug]] 只在本库已发布页之间跳转，wiki.get 的 slug 按段编码、不出现 %2F，点段与空段不发请求",
+          "summary": "集成模式下 app 自己提供嵌入知识页 /embed-admin/knowledge-bases[/:kb_id] 与 /embed-admin/assets/*（独立 Vite 构建、设计稿 §4 CSP、不要求认证、只有构建产物）；页面只调 ui-routes.json 里的 UI 只读入口，桥信封 v3 带 document_id；b 片加文档、分块与标签视图，分块 markdown 由只产出白名单标签的渲染器加 DOMPurify 显示；c 片加 wiki 页列表与页面，[[slug]] 只在本库已发布页之间跳转，wiki.get 的 slug 按段编码、不出现 %2F，点段与空段不发请求；d 片补页面侧的 citation、return_to_chat_intent 与 cancel：分块旁「引用」、勾选后「回到对话提问」，只在可信点击且持有用户激活时发，引用 ID 按 U7.1 先校验，在途与 overloaded 退避照宿主",
           "upstream_commit": null,
           "paths": [
             ".env.example",
@@ -853,6 +853,8 @@
             "frontend/src/embed-admin/bridge.test.ts",
             "frontend/src/embed-admin/bridge.ts",
             "frontend/src/embed-admin/build.test.ts",
+            "frontend/src/embed-admin/cite.test.ts",
+            "frontend/src/embed-admin/cite.ts",
             "frontend/src/embed-admin/i18n.ts",
             "frontend/src/embed-admin/main.ts",
             "frontend/src/embed-admin/markdown.test.ts",

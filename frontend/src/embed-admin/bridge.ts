@@ -11,7 +11,7 @@
 // applies its own five-second activation rule to the intent (U7.2), which this does not replace.
 
 import type { StatusErrorCode } from './api'
-import { isCitationRef, type CitationRef } from './cite'
+import { isCitationRef, REF_ID_FIELDS, type CitationRef } from './cite'
 
 export const BRIDGE_PATH = '/__agent24/bridge'
 export const BRIDGE_VERSION = 3
@@ -88,6 +88,15 @@ export interface BridgeHost {
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/
+
+/** The seven citation fields and nothing else, so a caller's extra keys never go on the wire. */
+function copyRef(ref: CitationRef): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const key of REF_ID_FIELDS) out[key] = ref[key]
+  out.chunk_revision = ref.chunk_revision
+  return out
+}
 
 /** A ULID (U7.1): 48-bit milliseconds, then 80 random bits. */
 export function ulid(now: number, random: (bytes: Uint8Array<ArrayBuffer>) => void): string {
@@ -130,6 +139,7 @@ export class PageBridge {
   private helloTimer: unknown = null
   private status: PageStatus = { state: 'loading' }
   private readonly pending = new Map<string, Pending>()
+  private backoffUntil = 0
   private readonly stateListeners = new Set<(s: HostState) => void>()
   private readonly openListeners = new Set<(open: boolean) => void>()
   private unlisten: (() => void) | null = null
@@ -180,12 +190,28 @@ export class PageBridge {
    * nothing goes out until now ≥ the reply time + retry_after_ms (OVERLOAD_BACKOFF_MS when the field is missing).
    */
   get canCite(): boolean {
-    throw new Error('KB-C2-02d: not implemented')
+    return this.open && this.documentId !== null && this.contentInFlight() < IN_FLIGHT_MAX && this.host.now() >= this.backoffUntil
   }
 
   /** True when an intent could go out now: canCite, and no intent pending (U6.7: at most one). */
   get canReturnToChat(): boolean {
-    throw new Error('KB-C2-02d: not implemented')
+    if (!this.canCite) return false
+    for (const item of this.pending.values()) {
+      if (item.type === 'return_to_chat_intent') return false
+    }
+    return true
+  }
+
+  private contentInFlight(): number {
+    let n = 0
+    for (const item of this.pending.values()) {
+      if (item.type === 'citation' || item.type === 'return_to_chat_intent') n++
+    }
+    return n
+  }
+
+  private activated(trigger: UserTrigger): boolean {
+    return trigger.isTrusted === true && trigger.type === 'click' && this.host.userActive() === true
   }
 
   /**
@@ -195,9 +221,10 @@ export class PageBridge {
    * canCite is false.
    */
   cite(ref: CitationRef, trigger: UserTrigger): Sent | null {
-    void ref
-    void trigger
-    throw new Error('KB-C2-02d: not implemented')
+    if (!this.activated(trigger)) return null
+    if (!isCitationRef(ref)) return null
+    if (!this.canCite) return null
+    return this.send('citation', copyRef(ref), CITATION_TIMEOUT_MS)
   }
 
   /**
@@ -205,9 +232,11 @@ export class PageBridge {
    * INTENT_CITATIONS_MAX references, every one valid. Given up after INTENT_TIMEOUT_MS.
    */
   returnToChat(refs: readonly CitationRef[], trigger: UserTrigger): Sent | null {
-    void refs
-    void trigger
-    throw new Error('KB-C2-02d: not implemented')
+    if (!this.activated(trigger)) return null
+    if (!Array.isArray(refs) || refs.length > INTENT_CITATIONS_MAX) return null
+    if (!refs.every((r) => isCitationRef(r))) return null
+    if (!this.canReturnToChat) return null
+    return this.send('return_to_chat_intent', { citations: refs.map((r) => copyRef(r)) }, INTENT_TIMEOUT_MS)
   }
 
   /**
@@ -215,8 +244,8 @@ export class PageBridge {
    * reply, or null when the bridge is not open or `targetId` is not a ULID (then nothing is sent).
    */
   cancel(targetId: string): Promise<Reply | null> {
-    void targetId
-    throw new Error('KB-C2-02d: not implemented')
+    if (typeof targetId !== 'string' || !ULID_RE.test(targetId)) return Promise.resolve(null)
+    return this.send('cancel', { target_id: targetId }, REPLY_TIMEOUT_MS)?.reply ?? Promise.resolve(null)
   }
 
   /** Number of requests still waiting for a reply. */
@@ -234,15 +263,8 @@ export class PageBridge {
 
   /** The one place a page→host message with a document_id leaves. Null, and nothing sent, when not open. */
   private send(type: Pending['type'], payload: Record<string, unknown>, timeoutMs: number): Sent | null {
-    void isCitationRef
-    void type
-    void payload
-    void timeoutMs
-    throw new Error('KB-C2-02d: not implemented (generalise the old request body below; keep its behaviour)')
-  }
-
-  private oldRequestBody(type: 'status', payload: Record<string, unknown>): Promise<Reply | null> {
-    if (!this.open || this.documentId === null) return Promise.resolve(null)
+    const documentId = this.documentId
+    if (!this.open || documentId === null) return null
     const id = ulid(this.host.now(), (b) => this.host.random(b))
     const env: Envelope = {
       v: BRIDGE_VERSION,
@@ -250,16 +272,19 @@ export class PageBridge {
       type,
       id,
       generation: this.generation,
-      document_id: this.documentId,
+      document_id: documentId,
       payload,
     }
-    return new Promise((resolve) => {
-      const timer = this.host.setTimer(() => {
-        if (this.pending.delete(id)) resolve(null)
-      }, REPLY_TIMEOUT_MS)
-      this.pending.set(id, { timer, resolve })
-      this.host.send(JSON.stringify(env))
+    let resolve!: (reply: Reply | null) => void
+    const reply = new Promise<Reply | null>((r) => {
+      resolve = r
     })
+    const timer = this.host.setTimer(() => {
+      if (this.pending.delete(id)) resolve(null)
+    }, timeoutMs)
+    this.pending.set(id, { type, timer, resolve })
+    this.host.send(JSON.stringify(env))
+    return { id, reply }
   }
 
   private sendHelloRequest(): void {
@@ -311,11 +336,19 @@ export class PageBridge {
       const pending = this.pending.get(env.in_reply_to)
       const result = env.payload.result
       if (!pending || (result !== 'accepted' && result !== 'rejected' && result !== 'done')) return
-      // `accepted` is not terminal for citation and intent; status only ever gets a terminal reply.
-      if (result === 'accepted') return
+      // `accepted` ends a cancel. Citation, intent and status wait for a terminal reply.
+      if (result === 'accepted' && pending.type !== 'cancel') return
+      const payload = env.payload
+      if (result === 'rejected' && payload.code === 'unavailable' && payload.reason === 'overloaded') {
+        const retryAfter = payload.retry_after_ms
+        const ms = typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter >= 0
+          ? retryAfter
+          : OVERLOAD_BACKOFF_MS
+        this.backoffUntil = Math.max(this.backoffUntil, this.host.now() + ms)
+      }
       this.pending.delete(env.in_reply_to)
       this.host.clearTimer(pending.timer)
-      pending.resolve(env.payload as unknown as Reply)
+      pending.resolve(payload as unknown as Reply)
     }
   }
 
@@ -357,7 +390,8 @@ export function browserBridgeHost(): BridgeHost {
     now: () => Date.now(),
     random: (bytes) => crypto.getRandomValues(bytes),
     userActive: () => {
-      throw new Error('KB-C2-02d: not implemented')
+      const ua = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation
+      return ua?.isActive === true
     },
   }
 }

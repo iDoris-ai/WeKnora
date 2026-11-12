@@ -1,10 +1,13 @@
 // Agent24 fork A24-KB-39 (KB-C2-02a, WeKnora#134). One bridge per page, shared by the views.
 
+import { ref } from 'vue'
 import { ApiError } from './api'
 import { browserBridgeHost, PageBridge, type PageStatus } from './bridge'
 import type { MessageKey } from './i18n'
 
 export const bridge = new PageBridge(browserBridgeHost())
+export const bridgeOpen = ref(bridge.ready)
+bridge.onOpenChange((o) => { bridgeOpen.value = o })
 
 /** The message a view shows for an error. */
 export function errorMessage(err: unknown): MessageKey {

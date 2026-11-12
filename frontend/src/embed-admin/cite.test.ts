@@ -64,6 +64,12 @@ test('isCitationRef: exactly the seven keys, valid ids, chunk_revision an intege
   const proto = Object.create({ chunk_revision: 3 })
   Object.assign(proto, (({ chunk_revision: _r, ...rest }) => rest)(REF))
   assert.equal(isCitationRef(proto), false)
+  // All seven own keys, but not a plain object.
+  const odd = Object.assign(Object.create({ extra: 1 }), REF)
+  assert.deepEqual(Object.keys(odd).sort(), Object.keys(REF).sort())
+  assert.equal(isCitationRef(odd), false)
+  class Ref { constructor() { Object.assign(this, REF) } }
+  assert.equal(isCitationRef(new Ref()), false)
 })
 
 test('citationRefOf takes the ids from doc.get and chunk.list, and copies only the seven fields', () => {
