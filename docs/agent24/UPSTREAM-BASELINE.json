@@ -1198,6 +1198,7 @@
             "internal/agent24uisession/routes.go",
             "internal/agent24uisession/jwt.go",
             "internal/handler/agent24_knowledge_ui_write.go",
+            "internal/handler/agent24_knowledge_ui_write_test.go",
             "docs/agent24/ui-routes.json",
             "docs/agent24/PATCH-LEDGER.md",
             "docs/agent24/UPSTREAM-BASELINE.json"
@@ -1221,6 +1222,11 @@
             "internal/router/agent24_knowledge_routes.go",
             "internal/router/agent24_integration_gate.go",
             "internal/router/agent24_integration_cors.go",
+            "internal/agent24uisession/routes_write_test.go",
+            "internal/handler/agent24_knowledge_ui_write_routes_test.go",
+            "internal/handler/agent24_knowledge_ui_write_wiring_test.go",
+            "internal/middleware/auth_ui_write_test.go",
+            "internal/router/agent24_ui_write_routes_test.go",
             "docs/agent24/PATCH-LEDGER.md",
             "docs/agent24/UPSTREAM-BASELINE.json"
           ],
