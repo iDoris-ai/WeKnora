@@ -52,10 +52,12 @@ type Agent24DefaultKBResult struct {
 }
 
 // Agent24DefaultKBProvisioner makes and removes the KB itself. Create must succeed when a KB with that id already
-// exists (a same-key retry finishing an interrupted request); Remove must succeed when there is none.
+// exists (a same-key retry finishing an interrupted request); Remove must succeed when there is none. Exists
+// reports whether the KB is still there (a ready row whose KB the user deleted is set up again).
 type Agent24DefaultKBProvisioner interface {
 	Create(ctx context.Context, tenantID uint64, kbID string) error
 	Remove(ctx context.Context, tenantID uint64, kbID string) error
+	Exists(ctx context.Context, tenantID uint64, kbID string) (bool, error)
 }
 
 // Agent24DefaultKBInit runs default KB initialization.
@@ -91,6 +93,12 @@ func (s *Agent24DefaultKBInit) Init(
 	if tenantID == 0 || owner == "" || key == "" {
 		return Agent24DefaultKBResult{}, errors.New("agent24 default kb: tenant, owner and key are required")
 	}
+	return s.init(ctx, tenantID, owner, key, configVersion, true)
+}
+
+func (s *Agent24DefaultKBInit) init(
+	ctx context.Context, tenantID uint64, owner, key, configVersion string, again bool,
+) (Agent24DefaultKBResult, error) {
 	now := s.now().UTC()
 	mine := types.Agent24DefaultKB{
 		TenantID: tenantID, Owner: owner, KnowledgeBaseID: s.newID(), State: types.Agent24DefaultKBPending,
@@ -102,7 +110,7 @@ func (s *Agent24DefaultKBInit) Init(
 		return Agent24DefaultKBResult{}, err
 	}
 	if inserted {
-		return s.finish(ctx, mine)
+		return s.finish(ctx, mine, configVersion)
 	}
 	row, err := s.store.Get(ctx, tenantID, owner)
 	if err != nil {
@@ -113,6 +121,17 @@ func (s *Agent24DefaultKBInit) Init(
 		return Agent24DefaultKBResult{}, ErrAgent24DefaultKBInProgress
 	}
 	if row.State == types.Agent24DefaultKBReady {
+		exists, err := s.kbs.Exists(ctx, tenantID, row.KnowledgeBaseID)
+		if err != nil {
+			return Agent24DefaultKBResult{}, err
+		}
+		if !exists && again {
+			// The user deleted the default KB: drop the row (only this ready row, by its claim) and set it up anew.
+			if err := s.store.DropReady(ctx, tenantID, owner, row.Claim); err != nil {
+				return Agent24DefaultKBResult{}, err
+			}
+			return s.init(ctx, tenantID, owner, key, configVersion, false)
+		}
 		return Agent24DefaultKBResult{
 			KnowledgeBaseID: row.KnowledgeBaseID, Outcome: Agent24DefaultKBExisting,
 			ConfigVersion: row.ConfigVersion, ConfigMismatch: row.ConfigVersion != configVersion,
@@ -139,30 +158,47 @@ func (s *Agent24DefaultKBInit) Init(
 			logger.Warnf(ctx, "[agent24 default kb] reclaiming %s failed: %v", row.KnowledgeBaseID, err)
 		}
 	}
-	return s.finish(ctx, mine)
+	return s.finish(ctx, mine, configVersion)
 }
 
-// finish creates the KB of the row the caller holds and marks the row ready. A failed creation removes what it
-// made and releases the row.
-func (s *Agent24DefaultKBInit) finish(ctx context.Context, row types.Agent24DefaultKB) (Agent24DefaultKBResult, error) {
+// finish creates the KB of the row the caller holds and marks the row ready. A failed creation releases the row
+// and, only when this request still held it, removes what it made: a request whose lease ran out must not remove
+// the KB a same-key retry has finished meanwhile. The clean-up and the ready mark do not follow the caller's
+// cancellation. requested is the caller's configuration version, for ConfigMismatch.
+func (s *Agent24DefaultKBInit) finish(
+	ctx context.Context, row types.Agent24DefaultKB, requested string,
+) (Agent24DefaultKBResult, error) {
+	keep := context.WithoutCancel(ctx)
 	if err := s.kbs.Create(ctx, row.TenantID, row.KnowledgeBaseID); err != nil {
-		if rmErr := s.kbs.Remove(ctx, row.TenantID, row.KnowledgeBaseID); rmErr != nil {
-			logger.Warnf(ctx, "[agent24 default kb] removing %s after a failed create: %v", row.KnowledgeBaseID, rmErr)
-		}
-		if relErr := s.store.Release(ctx, row.TenantID, row.Owner, row.Claim); relErr != nil {
+		released, relErr := s.store.Release(keep, row.TenantID, row.Owner, row.Claim)
+		if relErr != nil {
 			logger.Warnf(ctx, "[agent24 default kb] releasing the row after a failed create: %v", relErr)
+		}
+		if released {
+			if rmErr := s.kbs.Remove(keep, row.TenantID, row.KnowledgeBaseID); rmErr != nil {
+				logger.Warnf(ctx, "[agent24 default kb] removing %s after a failed create: %v",
+					row.KnowledgeBaseID, rmErr)
+			}
 		}
 		return Agent24DefaultKBResult{}, err
 	}
-	ready, err := s.store.MarkReady(ctx, row.TenantID, row.Owner, row.Claim, s.now())
+	ready, err := s.store.MarkReady(keep, row.TenantID, row.Owner, row.Claim, s.now())
 	if err != nil {
 		return Agent24DefaultKBResult{}, err
 	}
 	if !ready {
-		// another request took the row over after this one's lease ran out; it owns the outcome
+		// Another request took the row over after this one's lease ran out; it owns the outcome. When it went on
+		// under another KB id (another key), the KB this request just made is no one's: remove it.
+		current, err := s.store.Get(keep, row.TenantID, row.Owner)
+		if err == nil && (current == nil || current.KnowledgeBaseID != row.KnowledgeBaseID) {
+			if rmErr := s.kbs.Remove(keep, row.TenantID, row.KnowledgeBaseID); rmErr != nil {
+				logger.Warnf(ctx, "[agent24 default kb] removing orphan %s: %v", row.KnowledgeBaseID, rmErr)
+			}
+		}
 		return Agent24DefaultKBResult{}, ErrAgent24DefaultKBInProgress
 	}
 	return Agent24DefaultKBResult{
 		KnowledgeBaseID: row.KnowledgeBaseID, Outcome: Agent24DefaultKBCreated, ConfigVersion: row.ConfigVersion,
+		ConfigMismatch: row.ConfigVersion != requested,
 	}, nil
 }

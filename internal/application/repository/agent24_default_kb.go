@@ -84,10 +84,20 @@ func (s *Agent24DefaultKBStore) MarkReady(
 	return res.RowsAffected == 1, res.Error
 }
 
-// Release deletes the pending row held under claim, so the owner can start again.
-func (s *Agent24DefaultKBStore) Release(ctx context.Context, tenantID uint64, owner, claim string) error {
-	return s.db.WithContext(ctx).
+// Release deletes the pending row held under claim, so the owner can start again, and reports whether it did:
+// false means another request holds the row now.
+func (s *Agent24DefaultKBStore) Release(ctx context.Context, tenantID uint64, owner, claim string) (bool, error) {
+	res := s.db.WithContext(ctx).
 		Where("tenant_id = ? AND owner = ? AND state = ? AND claim = ?",
 			tenantID, owner, types.Agent24DefaultKBPending, claim).
+		Delete(&types.Agent24DefaultKB{})
+	return res.RowsAffected == 1, res.Error
+}
+
+// DropReady deletes the ready row read under claim (its KB is gone), so the owner can set one up again.
+func (s *Agent24DefaultKBStore) DropReady(ctx context.Context, tenantID uint64, owner, claim string) error {
+	return s.db.WithContext(ctx).
+		Where("tenant_id = ? AND owner = ? AND state = ? AND claim = ?",
+			tenantID, owner, types.Agent24DefaultKBReady, claim).
 		Delete(&types.Agent24DefaultKB{}).Error
 }
