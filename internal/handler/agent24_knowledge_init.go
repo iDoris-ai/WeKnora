@@ -21,6 +21,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -49,7 +50,10 @@ type Agent24KnowledgeInitHandler struct {
 	provision   func(templateKBID string) service.Agent24DefaultKBProvisioner
 	issue       func(c *gin.Context, tenantID uint64, owner, kbID string) (service.Agent24OnboardKey, error)
 	limit       *agent24UIExchangeLimiter
-	now         func() time.Time
+	// owners serialises init per owner in this process (#173 G2), so two activations of one owner never race on
+	// key issuance; the key service itself keeps the newest key live across processes.
+	owners sync.Map // owner StorageID -> *sync.Mutex
+	now    func() time.Time
 }
 
 // NewAgent24KnowledgeInitHandler returns nil (route not registered) outside integration mode or without the mock
@@ -110,7 +114,8 @@ func agent24IdempotencyKeyOK(key string) bool {
 	}
 	for i := 0; i < len(key); i++ {
 		c := key[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+		urlSafe := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'
+		if !urlSafe {
 			return false
 		}
 	}
@@ -151,6 +156,13 @@ func (h *Agent24KnowledgeInitHandler) Init(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	owner := types.Principal{Type: types.PrincipalAPITenant, ID: strconv.FormatUint(act.TenantID, 10)}.StorageID()
+	lock, _ := h.owners.LoadOrStore(owner, &sync.Mutex{})
+	if !lock.(*sync.Mutex).TryLock() {
+		// another init of this owner is running here: W4.5, the caller retries
+		writeAgent24KnowledgeError(c, agent24Unavailable("request_in_progress"), agent24KnowledgeEcho{})
+		return
+	}
+	defer lock.(*sync.Mutex).Unlock()
 	init := service.NewAgent24DefaultKBInit(h.store, h.provision(act.TemplateKBID))
 	result, err := init.Init(ctx, act.TenantID, owner, req.IdempotencyKey, act.ConfigVersion)
 	if errors.Is(err, service.ErrAgent24DefaultKBInProgress) {

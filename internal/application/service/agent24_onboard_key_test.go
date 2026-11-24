@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,7 +95,7 @@ func TestAgent24OnboardKeyIssueScopedRetrieveIngest(t *testing.T) {
 		string(types.APIKeyCapabilityRetrieve),
 		string(types.APIKeyCapabilityIngest),
 	}, k.Capabilities)
-	require.Equal(t, agent24OnboardKeyPrefix+"api_tenant:1", k.Name)
+	require.Equal(t, agent24OnboardKeyName("api_tenant:1"), k.Name)
 	require.Equal(t, types.APIKeyScopeTenant, k.ScopeType)
 }
 
@@ -135,4 +137,106 @@ func TestAgent24OnboardKeyRevokeError(t *testing.T) {
 	require.Len(t, keys.keys, 2)
 	require.Nil(t, keys.keys[0].RevokedAt)
 	require.Nil(t, keys.keys[1].RevokedAt)
+}
+
+// lockedKeyRepo is an in-memory TenantAPIKeyRepository safe for concurrent use, under the real key service.
+type lockedKeyRepo struct {
+	interfaces.TenantAPIKeyRepository
+	mu   sync.Mutex
+	keys []*types.TenantAPIKey
+	next uint64
+}
+
+func (r *lockedKeyRepo) CreateAPIKey(_ context.Context, key *types.TenantAPIKey) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.next++
+	key.ID = r.next
+	cp := *key
+	r.keys = append(r.keys, &cp)
+	return nil
+}
+
+func (r *lockedKeyRepo) ListAPIKeys(_ context.Context, tenantID uint64) ([]*types.TenantAPIKey, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*types.TenantAPIKey
+	for _, k := range r.keys {
+		if k.TenantID != nil && *k.TenantID == tenantID {
+			cp := *k
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (r *lockedKeyRepo) RevokeAPIKey(_ context.Context, tenantID uint64, id uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, k := range r.keys {
+		if k.ID == id && k.TenantID != nil && *k.TenantID == tenantID && k.RevokedAt == nil {
+			now := time.Now()
+			k.RevokedAt = &now
+		}
+	}
+	return nil
+}
+
+func (r *lockedKeyRepo) live() []*types.TenantAPIKey {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*types.TenantAPIKey
+	for _, k := range r.keys {
+		if k.RevokedAt == nil {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// #173 G1: owners that share a long prefix, or end in a space, keep their own keys under the real key service.
+func TestAgent24OnboardKeyNamesNeverCollideUnderTheRealService(t *testing.T) {
+	repo := &lockedKeyRepo{}
+	svc := NewTenantAPIKeyService(repo)
+	ctx, now := context.Background(), time.Now()
+	long := strings.Repeat("x", 120)
+	a, b, spaced := long+"-a", long+"-b", "owner-with-space "
+	for _, owner := range []string{a, b, spaced, spaced} {
+		_, err := IssueAgent24OnboardKey(ctx, svc, 7, owner, "kb-1", time.Hour, now)
+		require.NoError(t, err)
+	}
+	live := repo.live()
+	require.Len(t, live, 3, "one live key per owner: a, b, and the second key of the spaced owner")
+	names := map[string]bool{}
+	for _, k := range live {
+		names[k.Name] = true
+	}
+	require.Len(t, names, 3)
+}
+
+// #173 G2: two concurrent issues for one owner never leave it without a live key.
+func TestAgent24OnboardKeyConcurrentIssuesKeepTheNewest(t *testing.T) {
+	repo := &lockedKeyRepo{}
+	svc := NewTenantAPIKeyService(repo)
+	ctx, now := context.Background(), time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := IssueAgent24OnboardKey(ctx, svc, 7, "api_tenant:7", "kb-1", time.Hour, now)
+			require.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+	live := repo.live()
+	require.NotEmpty(t, live)
+	require.Equal(t, uint64(2), live[len(live)-1].ID, "the newest key stays live")
+}
+
+// #173 G3: a key that never expires is refused.
+func TestAgent24OnboardKeyNeedsAPositiveLifetime(t *testing.T) {
+	_, err := IssueAgent24OnboardKey(context.Background(), NewTenantAPIKeyService(&lockedKeyRepo{}), 7,
+		"api_tenant:7", "kb-1", 0, time.Now())
+	require.Error(t, err)
 }
