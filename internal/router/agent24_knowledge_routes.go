@@ -90,6 +90,15 @@ func RegisterAgent24KnowledgeRoutes(r *gin.RouterGroup, h *handler.Agent24Knowle
 	}
 }
 
+// RegisterAgent24KnowledgeInitRoute registers the mock init.default_kb (A24-KB-53). No API key and no role: the
+// activation code in the body is the credential. A nil handler (not integration mode, or no mock activation file)
+// registers nothing.
+func RegisterAgent24KnowledgeInitRoute(r *gin.RouterGroup, h *handler.Agent24KnowledgeInitHandler) {
+	if h != nil {
+		r.POST("/agent24/knowledge/init", h.Init)
+	}
+}
+
 func agent24UIReadDispatch(read *handler.Agent24KnowledgeUIReadHandler, op string) gin.HandlerFunc {
 	switch op {
 	case "kb.list":

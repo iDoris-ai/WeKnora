@@ -31,6 +31,8 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	// A24-KB-33: exact method. The other method on each path stays off the list.
 	"POST /api/v1/agent24/knowledge/ui/exchange": {},
 	"GET /api/v1/agent24/knowledge/ui/session":   {},
+	// A24-KB-53: the mock init.default_kb. Registered only with the mock activation file.
+	"POST /api/v1/agent24/knowledge/init": {},
 	// A24-KB-43: candidate.propose. Registered only in integration mode (handler.NewAgent24KnowledgeCandidatesHandler).
 	"POST /api/v1/agent24/knowledge/candidates":          {},
 	"POST /api/v1/agent24/knowledge/candidates/withdraw": {},

@@ -105,7 +105,7 @@ func agent24UIBypassesCredential(method, path, fullPath string) bool {
 	}
 	switch method {
 	case http.MethodPost:
-		return path == agent24AuditPathUIExchange
+		return path == agent24AuditPathUIExchange || path == agent24InitPath // A24-KB-53: the code is the credential
 	case http.MethodGet:
 		return path == agent24AuditPathUISession
 	default:
