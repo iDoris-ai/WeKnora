@@ -39,6 +39,7 @@ func agent24CORSRouter(t *testing.T, mode string) *gin.Engine {
 		Agent24KnowledgeUISessionHandler:     &handler.Agent24KnowledgeUISessionHandler{},
 		Agent24KnowledgeUIReadHandler:        &handler.Agent24KnowledgeUIReadHandler{},
 		Agent24KnowledgeCandidatesHandler:    &handler.Agent24KnowledgeCandidatesHandler{}, // A24-KB-43
+		Agent24KnowledgeInitHandler:          &handler.Agent24KnowledgeInitHandler{},       // A24-KB-53
 	})
 }
 

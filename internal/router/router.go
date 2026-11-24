@@ -108,6 +108,7 @@ type RouterParams struct {
 	// A24-KB-33: nil when the UI session key is unset, same gate as the ticket routes.
 	Agent24KnowledgeUIExchangeHandler *handler.Agent24KnowledgeUIExchangeHandler
 	Agent24KnowledgeUISessionHandler  *handler.Agent24KnowledgeUISessionHandler
+	Agent24KnowledgeInitHandler       *handler.Agent24KnowledgeInitHandler // A24-KB-53
 	// A24-KB-34: nil when the UI session key is unset, same gate as the session probe.
 	Agent24KnowledgeUIReadHandler *handler.Agent24KnowledgeUIReadHandler
 	// A24-KB-43: nil outside integration mode, so the candidate.propose routes stay unregistered.
@@ -373,6 +374,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.Agent24KnowledgeUIRevocationsHandler, params.Agent24KnowledgeUIExchangeHandler,
 			params.Agent24KnowledgeUISessionHandler, params.Agent24KnowledgeUIReadHandler,
 			params.Agent24KnowledgeCandidatesHandler, rbacGuards) // A24-KB-32, A24-KB-33, A24-KB-34, A24-KB-43
+		RegisterAgent24KnowledgeInitRoute(v1, params.Agent24KnowledgeInitHandler) // A24-KB-53
 		RegisterAgent24KnowledgeAuditRoutes(v1, params.AuditLogHandler, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route

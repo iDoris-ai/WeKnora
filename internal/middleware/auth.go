@@ -70,6 +70,9 @@ var noAuthAPI = map[string][]string{
 	// Exact method only. GET exchange and POST session stay authenticated, and unregistered.
 	"/api/v1/agent24/knowledge/ui/exchange": {"POST"},
 	"/api/v1/agent24/knowledge/ui/session":  {"GET"},
+	// A24-KB-53: the mock init is authenticated by the activation code in its body. Registered only in
+	// integration mode with the mock activation file.
+	"/api/v1/agent24/knowledge/init": {"POST"},
 }
 
 // 检查请求是否在无需认证的API列表中
