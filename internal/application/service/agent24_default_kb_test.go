@@ -327,3 +327,60 @@ func TestAgent24DefaultKBSameKeyRetryReportsConfigMismatch(t *testing.T) {
 	require.Equal(t, "cfg-1", got.ConfigVersion)
 	require.True(t, got.ConfigMismatch)
 }
+
+// #172 N1: a request whose lease ran out and whose Create then succeeds must not remove the KB a same-key retry made
+// ready meanwhile (same id: it is not an orphan).
+func TestAgent24DefaultKBLateSuccessKeepsTheSameKeyRetrysKB(t *testing.T) {
+	h := newDefaultKBHarness(t)
+	ctx := context.Background()
+	entered, release := make(chan struct{}), make(chan struct{})
+	h.kbs.onCreate = func(n int, _ string) error {
+		if n == 1 {
+			close(entered)
+			<-release
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.init.Init(ctx, 7, defaultKBOwner, "key-a", "cfg-1")
+		done <- err
+	}()
+	<-entered
+	h.now = h.now.Add(3 * time.Minute)
+	got, err := h.init.Init(ctx, 7, defaultKBOwner, "key-a", "cfg-1")
+	require.NoError(t, err)
+	close(release)
+	require.ErrorIs(t, <-done, ErrAgent24DefaultKBInProgress)
+	exists, _ := h.kbs.Exists(ctx, 7, got.KnowledgeBaseID)
+	require.True(t, exists, "the ready row's KB is still there")
+}
+
+// #172 N2: a request that lost the row to another key and whose Create then fails leaves no half-made KB.
+func TestAgent24DefaultKBOvertakenFailureLeavesNoOrphan(t *testing.T) {
+	h := newDefaultKBHarness(t)
+	ctx := context.Background()
+	entered, release := make(chan struct{}), make(chan struct{})
+	h.kbs.onCreate = func(n int, _ string) error {
+		if n == 1 {
+			close(entered)
+			<-release
+			return errors.New("late failure")
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.init.Init(ctx, 7, defaultKBOwner, "key-a", "cfg-1")
+		done <- err
+	}()
+	<-entered
+	h.now = h.now.Add(3 * time.Minute)
+	got, err := h.init.Init(ctx, 7, defaultKBOwner, "key-b", "cfg-1")
+	require.NoError(t, err)
+	close(release)
+	require.Error(t, <-done)
+	require.Equal(t, 1, h.kbs.count(), "only the winner's KB is left")
+	exists, _ := h.kbs.Exists(ctx, 7, got.KnowledgeBaseID)
+	require.True(t, exists)
+}
