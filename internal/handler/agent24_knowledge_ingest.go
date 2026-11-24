@@ -321,7 +321,7 @@ func (h *Agent24KnowledgeIngestHandler) GetJob(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	caller, _, kerr := agent24IngestCaller(ctx)
+	caller, scope, kerr := agent24IngestCaller(ctx)
 	if kerr != nil {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
@@ -331,7 +331,7 @@ func (h *Agent24KnowledgeIngestHandler) GetJob(c *gin.Context) {
 		h.writeStorage(ctx, c, echo, err)
 		return
 	}
-	if job == nil || job.PrincipalUserID != caller.author {
+	if !agent24IngestJobVisible(job, caller, scope) {
 		writeAgent24KnowledgeError(c, agent24NotFound(), echo)
 		return
 	}
@@ -355,7 +355,7 @@ func (h *Agent24KnowledgeIngestHandler) CancelJob(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	caller, _, kerr := agent24IngestCaller(ctx)
+	caller, scope, kerr := agent24IngestCaller(ctx)
 	if kerr != nil {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
@@ -365,7 +365,7 @@ func (h *Agent24KnowledgeIngestHandler) CancelJob(c *gin.Context) {
 		h.writeStorage(ctx, c, echo, err)
 		return
 	}
-	if job == nil || job.PrincipalUserID != caller.author {
+	if !agent24IngestJobVisible(job, caller, scope) {
 		writeAgent24KnowledgeError(c, agent24NotFound(), echo)
 		return
 	}
@@ -373,7 +373,7 @@ func (h *Agent24KnowledgeIngestHandler) CancelJob(c *gin.Context) {
 		agent24NoteCancelled(c, echo, nil)
 		return
 	}
-	effect, view, err := h.cancelJob(ctx, caller, job)
+	effect, view, err := h.cancelJob(ctx, caller, scope, job)
 	if err != nil {
 		if errors.Is(err, errAgent24IngestJobGone) {
 			writeAgent24KnowledgeError(c, agent24NotFound(), echo)
@@ -392,7 +392,7 @@ func (h *Agent24KnowledgeIngestHandler) CancelJob(c *gin.Context) {
 }
 
 func (h *Agent24KnowledgeIngestHandler) cancelJob(
-	ctx context.Context, caller agent24CandidateCaller, job *types.Agent24IngestJob,
+	ctx context.Context, caller agent24CandidateCaller, scope types.TenantAPIKeyScope, job *types.Agent24IngestJob,
 ) (string, agent24IngestJobView, error) {
 	var effect string
 	var view agent24IngestJobView
@@ -404,7 +404,7 @@ func (h *Agent24KnowledgeIngestHandler) cancelJob(
 		if err != nil {
 			return err
 		}
-		if cur == nil || cur.PrincipalUserID != caller.author {
+		if !agent24IngestJobVisible(cur, caller, scope) {
 			return errAgent24IngestJobGone
 		}
 		for attempt := 0; attempt < 2; attempt++ {
@@ -418,12 +418,21 @@ func (h *Agent24KnowledgeIngestHandler) cancelJob(
 			if err != nil {
 				return err
 			}
+			if ok && change.Status == types.Agent24JobCancelled {
+				// As the gate's revoke and withdraw do: the knowledge stops in the same transaction, so a build
+				// past the last stage gate cannot finish and publish it.
+				if err := tx.MoveKnowledge(ctx, caller.tenant, cur.KnowledgeID,
+					[]string{types.ParseStatusPending, types.ParseStatusProcessing}, types.ParseStatusCancelled,
+					agent24CancelledByUserMessage, h.clock()); err != nil {
+					return err
+				}
+			}
 			if ok {
 				fresh, err := tx.Get(ctx, caller.tenant, job.ID)
 				if err != nil {
 					return err
 				}
-				if fresh == nil || fresh.PrincipalUserID != caller.author {
+				if !agent24IngestJobVisible(fresh, caller, scope) {
 					return errAgent24IngestJobGone
 				}
 				effect = eff
@@ -434,13 +443,26 @@ func (h *Agent24KnowledgeIngestHandler) cancelJob(
 			if err != nil {
 				return err
 			}
-			if cur == nil || cur.PrincipalUserID != caller.author {
+			if !agent24IngestJobVisible(cur, caller, scope) {
 				return errAgent24IngestJobGone
 			}
 		}
 		return errAgent24IngestMoving
 	})
 	return effect, view, err
+}
+
+// agent24CancelledByUserMessage is the error_message of a knowledge row stopped by job.cancel.
+const agent24CancelledByUserMessage = "Agent24: the job was cancelled by the user"
+
+// agent24IngestJobVisible is W1.9 ③(b) for job.read and job.cancel: the job is the caller's own, and its knowledge
+// base is in the caller's key scope now (another key of the same tenant principal does not see it). Anything else is
+// the same not_found as a missing job.
+func agent24IngestJobVisible(
+	job *types.Agent24IngestJob, caller agent24CandidateCaller, scope types.TenantAPIKeyScope,
+) bool {
+	return job != nil && job.PrincipalUserID == caller.author &&
+		slices.Contains([]string(scope.KnowledgeBaseIDs), job.KnowledgeBaseID)
 }
 
 // agent24IngestCancelDecision is W5.9. apply is false when the job is left unchanged (effect none).

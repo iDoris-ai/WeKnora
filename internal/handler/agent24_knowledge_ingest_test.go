@@ -638,3 +638,37 @@ func TestAgent24KnowledgeIngestJobView(t *testing.T) {
 	require.Equal(t, float64(3), items[1].(map[string]any)["units"])
 	require.Nil(t, items[2].(map[string]any)["units"])
 }
+
+// #175 F1: a key of the same tenant principal whose scope is another knowledge base neither reads nor cancels a
+// job of kbA: the same not_found as a missing job, and the job is left alone.
+func TestAgent24KnowledgeIngestJobOutsideTheKeysScopeIsNotFound(t *testing.T) {
+	e := newAgent24IngestEnv(t)
+	now := time.Now().UTC()
+	e.ensureDoc(t, "doc-a", types.ParseStatusPending)
+	e.insertJob(t, types.Agent24IngestJob{
+		ID: "job-a", KnowledgeID: "doc-a", Status: types.Agent24JobSaved, SavedAt: now, UpdatedAt: now,
+	})
+	other := agent24IngestAs([]string{"ingest"}, "kbOther")
+	got := e.call(t, e.h.GetJob, other, agent24IngestJobBody("job-a"))
+	require.Equal(t, http.StatusNotFound, got.code, got.raw)
+	cancelled := e.call(t, e.h.CancelJob, other, agent24IngestJobBody("job-a"))
+	require.Equal(t, http.StatusNotFound, cancelled.code, cancelled.raw)
+	row, err := e.h.jobs.Get(context.Background(), 1, "job-a")
+	require.NoError(t, err)
+	require.Equal(t, types.Agent24JobSaved, row.Status)
+}
+
+// #175 M1: cancelling a saved or processing job stops its knowledge in the same transaction.
+func TestAgent24KnowledgeIngestCancelStopsTheKnowledge(t *testing.T) {
+	e := newAgent24IngestEnv(t)
+	now := time.Now().UTC()
+	e.ensureDoc(t, "doc-p", types.ParseStatusProcessing)
+	e.insertJob(t, types.Agent24IngestJob{
+		ID: "job-p", KnowledgeID: "doc-p", Status: types.Agent24JobProcessing, SavedAt: now, UpdatedAt: now,
+	})
+	r := e.call(t, e.h.CancelJob, agent24IngestAs([]string{"ingest"}), agent24IngestJobBody("job-p"))
+	require.Equal(t, http.StatusOK, r.code, r.raw)
+	var k types.Knowledge
+	require.NoError(t, e.db.Where("id = ?", "doc-p").Take(&k).Error)
+	require.Equal(t, types.ParseStatusCancelled, k.ParseStatus)
+}
