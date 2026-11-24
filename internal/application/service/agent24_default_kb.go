@@ -4,12 +4,16 @@
 // An owner gets at most one default KB (W4.2): the first request inserts the owner's row (pending), creates the KB
 // under an id it chose beforehand, and marks the row ready. The row's primary key, not a read before the write,
 // keeps a concurrent request from creating a second one; that request hears ErrAgent24DefaultKBInProgress
-// (W4.5 request_in_progress). A request that stops midway holds the row only until its lease runs out: a retry
-// with the same idempotency key then takes the row over and finishes the same KB, and a request under another key
-// reclaims it, removing the half-made KB first. A creation that fails removes what it made and releases the row.
-// A ready row is only reported (existing), never changed (W4.4): a newer configuration version sets
-// ConfigMismatch and creates nothing. Initialization does not wait for readiness and readiness does not depend on
-// it (W4.6). This service binds no authorization; the init route (F2) issues the caller's credential for the KB.
+// (W4.5 request_in_progress). A request holds the row only until its lease runs out, even while it is still
+// working: a retry with the same idempotency key then takes the row over and finishes the same KB, and a request
+// under another key reclaims it, removing the half-made KB first. The design relies on a taken-over request
+// staying harmless: every row write is conditional on its claim, and a KB is removed only by the request holding
+// the row, or when the row no longer points at it (an orphan). A failed creation releases the row and then
+// removes what it made. A ready row is reported as existing and its KB is not changed (W4.4): a newer
+// configuration version sets ConfigMismatch. Only when the ready row's KB is gone (the user deleted it) is the row
+// dropped, by its claim, and the default set up again; a replay of the first idempotency key then answers created
+// with the new id. Initialization does not wait for readiness and readiness does not depend on it (W4.6). This
+// service binds no authorization; the init route issues the caller's credential for the KB.
 
 package service
 
@@ -27,8 +31,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// agent24DefaultKBLease is how long a request holds the owner's pending row; it is well above the time a KB
-// creation takes, so a live request is never taken over.
+// agent24DefaultKBLease is how long a request holds the owner's pending row. It is meant to be well above the time
+// a KB creation takes; a request still running past it may be taken over, which the claim checks keep safe.
 const agent24DefaultKBLease = 2 * time.Minute
 
 // ErrAgent24DefaultKBInProgress is returned while another request holds the owner's pending row.
@@ -125,7 +129,11 @@ func (s *Agent24DefaultKBInit) init(
 		if err != nil {
 			return Agent24DefaultKBResult{}, err
 		}
-		if !exists && again {
+		if !exists && !again {
+			// Gone again right after it was set up anew: let the caller retry rather than report a missing KB.
+			return Agent24DefaultKBResult{}, ErrAgent24DefaultKBInProgress
+		}
+		if !exists {
 			// The user deleted the default KB: drop the row (only this ready row, by its claim) and set it up anew.
 			if err := s.store.DropReady(ctx, tenantID, owner, row.Claim); err != nil {
 				return Agent24DefaultKBResult{}, err
@@ -153,12 +161,25 @@ func (s *Agent24DefaultKBInit) init(
 		return Agent24DefaultKBResult{}, ErrAgent24DefaultKBInProgress
 	}
 	if !sameKey {
-		if err := s.kbs.Remove(ctx, tenantID, row.KnowledgeBaseID); err != nil {
-			// the half-made KB has no documents and no row points at it any more; creating ours goes on
+		// The row no longer points at the old KB, so no one can use it; creating ours goes on whatever this says.
+		if err := s.kbs.Remove(context.WithoutCancel(ctx), tenantID, row.KnowledgeBaseID); err != nil {
 			logger.Warnf(ctx, "[agent24 default kb] reclaiming %s failed: %v", row.KnowledgeBaseID, err)
 		}
 	}
 	return s.finish(ctx, mine, configVersion)
+}
+
+// removeIfOrphan removes the KB a request made after losing the row, when the row no longer points at it (another
+// key took over, or the row is gone). A same-key takeover keeps the id, so its KB is never removed here. Once the
+// row has left this id nothing writes it back, so the check does not go stale.
+func (s *Agent24DefaultKBInit) removeIfOrphan(ctx context.Context, row types.Agent24DefaultKB) {
+	current, err := s.store.Get(ctx, row.TenantID, row.Owner)
+	if err != nil || (current != nil && current.KnowledgeBaseID == row.KnowledgeBaseID) {
+		return
+	}
+	if rmErr := s.kbs.Remove(ctx, row.TenantID, row.KnowledgeBaseID); rmErr != nil {
+		logger.Warnf(ctx, "[agent24 default kb] removing orphan %s: %v", row.KnowledgeBaseID, rmErr)
+	}
 }
 
 // finish creates the KB of the row the caller holds and marks the row ready. A failed creation releases the row
@@ -179,6 +200,8 @@ func (s *Agent24DefaultKBInit) finish(
 				logger.Warnf(ctx, "[agent24 default kb] removing %s after a failed create: %v",
 					row.KnowledgeBaseID, rmErr)
 			}
+		} else if relErr == nil {
+			s.removeIfOrphan(keep, row)
 		}
 		return Agent24DefaultKBResult{}, err
 	}
@@ -189,12 +212,7 @@ func (s *Agent24DefaultKBInit) finish(
 	if !ready {
 		// Another request took the row over after this one's lease ran out; it owns the outcome. When it went on
 		// under another KB id (another key), the KB this request just made is no one's: remove it.
-		current, err := s.store.Get(keep, row.TenantID, row.Owner)
-		if err == nil && (current == nil || current.KnowledgeBaseID != row.KnowledgeBaseID) {
-			if rmErr := s.kbs.Remove(keep, row.TenantID, row.KnowledgeBaseID); rmErr != nil {
-				logger.Warnf(ctx, "[agent24 default kb] removing orphan %s: %v", row.KnowledgeBaseID, rmErr)
-			}
-		}
+		s.removeIfOrphan(keep, row)
 		return Agent24DefaultKBResult{}, ErrAgent24DefaultKBInProgress
 	}
 	return Agent24DefaultKBResult{
