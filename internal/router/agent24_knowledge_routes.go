@@ -99,6 +99,20 @@ func RegisterAgent24KnowledgeInitRoute(r *gin.RouterGroup, h *handler.Agent24Kno
 	}
 }
 
+// RegisterAgent24KnowledgeIngestRoutes registers ingest.submit, job read and job cancel (A24-KB-54). A nil
+// handler registers nothing. The routes ask for no capability: the handler checks ingest itself, after the
+// shape (W1.9 ② before ③).
+func RegisterAgent24KnowledgeIngestRoutes(
+	r *gin.RouterGroup, h *handler.Agent24KnowledgeIngestHandler, g *rbacGuards,
+) {
+	if h == nil {
+		return
+	}
+	g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/ingest", apiKeyAny(), g.Viewer(), h.Submit)
+	g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/jobs/get", apiKeyAny(), g.Viewer(), h.GetJob)
+	g.apiKeyRoute(r, http.MethodPost, "/agent24/knowledge/jobs/cancel", apiKeyAny(), g.Viewer(), h.CancelJob)
+}
+
 func agent24UIReadDispatch(read *handler.Agent24KnowledgeUIReadHandler, op string) gin.HandlerFunc {
 	switch op {
 	case "kb.list":

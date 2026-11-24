@@ -134,6 +134,37 @@ var agent24CandidateRoutePaths = []string{
 	"/api/v1/agent24/knowledge/candidates/get",
 }
 
+func TestAgent24KnowledgeIngestRoutePolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	engine := gin.New()
+	RegisterAgent24KnowledgeIngestRoutes(engine.Group("/api/v1"), &handler.Agent24KnowledgeIngestHandler{}, g)
+	for _, path := range []string{
+		"/api/v1/agent24/knowledge/ingest",
+		"/api/v1/agent24/knowledge/jobs/get",
+		"/api/v1/agent24/knowledge/jobs/cancel",
+	} {
+		n := 0
+		for _, rt := range engine.Routes() {
+			if rt.Method == http.MethodPost && rt.Path == path {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("POST %s count = %d", path, n)
+		}
+		policy := mustLookupAPIKeyPolicy(t, g, http.MethodPost, path)
+		if len(policy.Capabilities) != 0 || policy.RequireFullAccess || policy.PlatformOnly {
+			t.Fatalf("%s policy = %#v, want none", path, policy)
+		}
+	}
+	empty := gin.New()
+	RegisterAgent24KnowledgeIngestRoutes(empty.Group("/api/v1"), nil, &rbacGuards{})
+	if len(empty.Routes()) != 0 {
+		t.Fatalf("nil handler registered %#v", empty.Routes())
+	}
+}
+
 func TestAgent24KnowledgeRouteNilHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ready, search := &handler.Agent24KnowledgeReadyHandler{}, &handler.Agent24KnowledgeSearchHandler{}
