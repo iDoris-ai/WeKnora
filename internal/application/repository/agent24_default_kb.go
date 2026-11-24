@@ -45,7 +45,9 @@ func (s *Agent24DefaultKBStore) Insert(ctx context.Context, row *types.Agent24De
 }
 
 // Get returns the owner's row, or nil when there is none.
-func (s *Agent24DefaultKBStore) Get(ctx context.Context, tenantID uint64, owner string) (*types.Agent24DefaultKB, error) {
+func (s *Agent24DefaultKBStore) Get(
+	ctx context.Context, tenantID uint64, owner string,
+) (*types.Agent24DefaultKB, error) {
 	var row types.Agent24DefaultKB
 	err := s.db.WithContext(ctx).Where("tenant_id = ? AND owner = ?", tenantID, owner).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
