@@ -12,6 +12,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -68,7 +69,9 @@ func IssueAgent24OnboardKey(
 		if k == nil || k.ID >= created.APIKey.ID || k.Name != name || k.RevokedAt != nil {
 			continue
 		}
-		if err := keys.RevokeAPIKey(ctx, tenantID, k.ID); err != nil {
+		// Already revoked by a concurrent issue for the same owner: not an error.
+		err := keys.RevokeAPIKey(ctx, tenantID, k.ID)
+		if err != nil && !errors.Is(err, repository.ErrTenantAPIKeyNotFound) {
 			// The new key stays valid; the caller fails the request.
 			return Agent24OnboardKey{}, err
 		}

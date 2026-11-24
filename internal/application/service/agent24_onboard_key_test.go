@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -145,27 +146,52 @@ type lockedKeyRepo struct {
 	mu   sync.Mutex
 	keys []*types.TenantAPIKey
 	next uint64
+	// listAfter, when set, makes ListAPIKeys wait until that many keys were created (a deterministic interleave).
+	listAfter int
+	created   chan struct{}
+	// listers, when set, makes each ListAPIKeys wait until that many lists have read (both see the same keys).
+	listers int
+	listed  int
+	read    chan struct{}
 }
 
 func (r *lockedKeyRepo) CreateAPIKey(_ context.Context, key *types.TenantAPIKey) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.next++
 	key.ID = r.next
 	cp := *key
 	r.keys = append(r.keys, &cp)
+	n := len(r.keys)
+	r.mu.Unlock()
+	if r.created != nil && n == r.listAfter {
+		close(r.created)
+	}
 	return nil
 }
 
 func (r *lockedKeyRepo) ListAPIKeys(_ context.Context, tenantID uint64) ([]*types.TenantAPIKey, error) {
+	if r.created != nil {
+		<-r.created
+	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	var out []*types.TenantAPIKey
-	for _, k := range r.keys {
+	for i := len(r.keys) - 1; i >= 0; i-- { // newest first, as the real repository orders by created_at DESC
+		k := r.keys[i]
 		if k.TenantID != nil && *k.TenantID == tenantID {
 			cp := *k
 			out = append(out, &cp)
 		}
+	}
+	if r.read != nil {
+		r.listed++
+		if r.listed == r.listers {
+			close(r.read)
+		}
+	}
+	read := r.read
+	r.mu.Unlock()
+	if read != nil {
+		<-read // both callers saw the same keys before either revokes
 	}
 	return out, nil
 }
@@ -177,9 +203,11 @@ func (r *lockedKeyRepo) RevokeAPIKey(_ context.Context, tenantID uint64, id uint
 		if k.ID == id && k.TenantID != nil && *k.TenantID == tenantID && k.RevokedAt == nil {
 			now := time.Now()
 			k.RevokedAt = &now
+			return nil
 		}
 	}
-	return nil
+	// as the real repository: zero rows is not found
+	return repository.ErrTenantAPIKeyNotFound
 }
 
 func (r *lockedKeyRepo) live() []*types.TenantAPIKey {
@@ -214,24 +242,31 @@ func TestAgent24OnboardKeyNamesNeverCollideUnderTheRealService(t *testing.T) {
 	require.Len(t, names, 3)
 }
 
-// #173 G2: two concurrent issues for one owner never leave it without a live key.
+// #173 G2 / #174: two concurrent issues for one owner, both seeing the same older key, both succeed and leave the
+// newest key live (deterministic: both list only after both created; a second revoke of the old key is not found).
 func TestAgent24OnboardKeyConcurrentIssuesKeepTheNewest(t *testing.T) {
 	repo := &lockedKeyRepo{}
 	svc := NewTenantAPIKeyService(repo)
 	ctx, now := context.Background(), time.Now()
+	_, err := IssueAgent24OnboardKey(ctx, svc, 7, "api_tenant:7", "kb-1", time.Hour, now) // the older key X
+	require.NoError(t, err)
+	repo.listAfter, repo.created = 3, make(chan struct{})
+	repo.listers, repo.read = 2, make(chan struct{})
 	var wg sync.WaitGroup
+	errs := make([]error, 2)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			_, err := IssueAgent24OnboardKey(ctx, svc, 7, "api_tenant:7", "kb-1", time.Hour, now)
-			require.NoError(t, err)
-		}()
+			_, errs[i] = IssueAgent24OnboardKey(ctx, svc, 7, "api_tenant:7", "kb-1", time.Hour, now)
+		}(i)
 	}
 	wg.Wait()
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
 	live := repo.live()
-	require.NotEmpty(t, live)
-	require.Equal(t, uint64(2), live[len(live)-1].ID, "the newest key stays live")
+	require.Len(t, live, 1)
+	require.Equal(t, uint64(3), live[0].ID, "the newest key stays live")
 }
 
 // #173 G3: a key that never expires is refused.

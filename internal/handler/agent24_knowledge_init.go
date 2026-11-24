@@ -51,7 +51,8 @@ type Agent24KnowledgeInitHandler struct {
 	issue       func(c *gin.Context, tenantID uint64, owner, kbID string) (service.Agent24OnboardKey, error)
 	limit       *agent24UIExchangeLimiter
 	// owners serialises init per owner in this process (#173 G2), so two activations of one owner never race on
-	// key issuance; the key service itself keeps the newest key live across processes.
+	// key issuance. This mock assumes one integration process (as the fork's ledger does); across processes the
+	// newest key stays in the store, but an earlier caller may hold a key a later one revoked (it retries).
 	owners sync.Map // owner StorageID -> *sync.Mutex
 	now    func() time.Time
 }
@@ -137,7 +138,7 @@ func (h *Agent24KnowledgeInitHandler) Init(c *gin.Context) {
 	var req agent24InitRequest
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || req.ActivationCode == "" {
+	if err := dec.Decode(&req); err != nil || req.ActivationCode == "" || dec.Decode(&struct{}{}) != io.EOF {
 		writeAgent24KnowledgeError(c, agent24InvalidRequest(), agent24KnowledgeEcho{})
 		return
 	}

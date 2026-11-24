@@ -90,7 +90,7 @@ func newAgent24InitHarness(t *testing.T) *agent24InitHarness {
 		provision: func(string) service.Agent24DefaultKBProvisioner { return x.kbs },
 		limit:     newAgent24UIExchangeLimiter(), now: time.Now,
 	}
-	x.h.issue = func(_ *gin.Context, tenantID uint64, owner, kbID string) (service.Agent24OnboardKey, error) {
+	x.h.issue = func(_ *gin.Context, _ uint64, owner, kbID string) (service.Agent24OnboardKey, error) {
 		x.issued = append(x.issued, owner+"|"+kbID)
 		return service.Agent24OnboardKey{Token: "sk-test-" + kbID, KeyID: uint64(len(x.issued))}, nil
 	}
@@ -237,4 +237,41 @@ func TestAgent24KnowledgeInitRouteExistsOnlyInIntegrationModeWithTheFile(t *test
 	require.NoError(t, err)
 	require.NotNil(t, h)
 	require.True(t, db.Migrator().HasTable("agent24_default_kbs"))
+}
+
+// #174: two inits of one owner whose KB already exists (no lease to collide on) are serialised in this process:
+// while one is issuing a key the other hears request_in_progress.
+func TestAgent24KnowledgeInitSerialisesOneOwnerInThisProcess(t *testing.T) {
+	x := newAgent24InitHarness(t)
+	require.Equal(t, http.StatusOK, x.post(agent24InitBody(agent24InitTestCode, agent24InitKeyA)).Code)
+	entered, release := make(chan struct{}), make(chan struct{})
+	ok := x.h.issue
+	var once sync.Once
+	x.h.issue = func(c *gin.Context, tenantID uint64, owner, kbID string) (service.Agent24OnboardKey, error) {
+		blocked := false
+		once.Do(func() { blocked = true })
+		if blocked {
+			close(entered)
+			<-release
+		}
+		return ok(c, tenantID, owner, kbID)
+	}
+	done := make(chan int, 1)
+	go func() { done <- x.post(agent24InitBody(agent24InitTestCode, agent24InitKeyB)).Code }()
+	<-entered
+	w := x.post(agent24InitBody(agent24InitTestCode, "cccccccccccccccccccccccc"))
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Equal(t, "unavailable/request_in_progress", agent24InitErrorReason(t, w))
+	close(release)
+	require.Equal(t, http.StatusOK, <-done)
+}
+
+// #174 Nit: a body with anything after the one JSON object is refused.
+func TestAgent24KnowledgeInitRefusesTrailingContent(t *testing.T) {
+	x := newAgent24InitHarness(t)
+	for _, tail := range []string{`{"x":1}`, `garbage`} {
+		w := x.post(agent24InitBody(agent24InitTestCode, agent24InitKeyA) + tail)
+		require.Equal(t, http.StatusBadRequest, w.Code, tail)
+	}
+	require.Empty(t, x.kbs.kbs)
 }
