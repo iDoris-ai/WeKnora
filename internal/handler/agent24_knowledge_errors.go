@@ -50,9 +50,11 @@ var (
 	agent24InvalidRequestWriteReasons = map[string]bool{
 		"idempotency_key_missing": true, "idempotency_key_reused": true, "content_hash_mismatch": true,
 		"unsupported_format": true, "too_large": true,
+		"unsupported_knowledge": true, // A24-KB-54
 	}
 	agent24StaleWriteReasons = map[string]bool{
 		"candidate_not_submitted": true, "base_revision_changed": true,
+		"policy_changed": true, // A24-KB-54
 	}
 	// Value: retryable.
 	agent24UnavailableReasons = map[string]bool{

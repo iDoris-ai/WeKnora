@@ -37,6 +37,10 @@ var agent24IntegrationAllowlist = map[string]struct{}{
 	"POST /api/v1/agent24/knowledge/candidates":          {},
 	"POST /api/v1/agent24/knowledge/candidates/withdraw": {},
 	"POST /api/v1/agent24/knowledge/candidates/get":      {},
+	// A24-KB-54: ingest.submit, job read and job cancel. Registered only in integration mode.
+	"POST /api/v1/agent24/knowledge/ingest":      {},
+	"POST /api/v1/agent24/knowledge/jobs/get":    {},
+	"POST /api/v1/agent24/knowledge/jobs/cancel": {},
 	// A24-KB-39: the embed knowledge page. Registered only with the UI read routes and a page directory.
 	"GET " + agent24EmbedAdminListPath:   {},
 	"GET " + agent24EmbedAdminDetailPath: {},
