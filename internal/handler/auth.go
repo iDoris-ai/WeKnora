@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 
@@ -25,9 +26,17 @@ import (
 
 var liteSetupToken string
 
+// managedMode is written once at startup by SetManagedMode, before requests
+// are served, and read on every registration-mode lookup.
+var managedMode atomic.Bool
+
 // SetLiteSetupToken is called by the native desktop host before serving requests.
 // Web deployments leave it empty and cannot issue anonymous administrator tokens.
 func SetLiteSetupToken(token string) { liteSetupToken = token }
+
+// SetManagedMode records whether this process is the headless managed host.
+// It is called once at startup, before the server accepts requests.
+func SetManagedMode(on bool) { managedMode.Store(on) }
 
 const (
 	oidcNonceCookieName   = "weknora_oidc_nonce"
@@ -86,12 +95,21 @@ func NewAuthHandler(configInfo *config.Config,
 }
 
 // resolveRegistrationMode returns the currently active registration mode.
-// Priority: DB system_settings > cfg (which already absorbed the legacy
-// DISABLE_REGISTRATION env coerce at startup) > "self_serve" hard default.
+// A managed host always returns invite_only and does not read
+// system_settings. Otherwise the priority is DB system_settings > cfg
+// (which already absorbed the legacy DISABLE_REGISTRATION env coerce at
+// startup) > "self_serve" hard default.
 //
 // Centralised here so /auth/register and /auth/config stay in lock-step —
 // otherwise a SystemAdmin's UI edit could affect one path and not the other.
 func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
+	// Managed hosts stay invite-only for the life of the process. A
+	// SystemAdmin can write auth.registration_mode=self_serve into
+	// system_settings; that row must not reopen public registration, so
+	// the DB is not consulted.
+	if managedMode.Load() {
+		return config.AuthRegistrationModeInviteOnly
+	}
 	// cfg-derived default: empty is impossible after applyAuthAndTenantDefaults,
 	// but be defensive in case AuthHandler was constructed before that ran
 	// (the NewAuthHandler guard already logged in that case).

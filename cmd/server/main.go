@@ -25,13 +25,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/agent24managed"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
@@ -49,6 +52,16 @@ func main() {
 	if handleVersionFlag(os.Args[1:], os.Stdout) {
 		return
 	}
+	// Agent24 A24-KB-60: --managed is the headless host. Standalone ignores flags.
+	opts, err := agent24managed.ParseArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "managed mode: %v\n", err)
+		os.Exit(2)
+	}
+	if opts.Managed && handler.Edition != "lite" {
+		fmt.Fprintf(os.Stderr, "managed mode requires the lite edition\n")
+		os.Exit(2)
+	}
 	// Load dotenv configuration before any container provider reads it.
 	// Explicit ENV_FILE is honored on every build; automatic .env.lite
 	// discovery is scoped to Lite builds (internal/handler.Edition is
@@ -56,6 +69,12 @@ func main() {
 	// never picks up Lite defaults. Process variables remain authoritative.
 	if err := envfile.Load(handler.Edition == "lite"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+	if opts.Managed {
+		if err := agent24managed.PrepareSecrets(opts.StateDir); err != nil {
+			fmt.Fprintf(os.Stderr, "managed secrets: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	// Dotenv loading happens after the logger package initialized, so
 	// re-apply file-based LOG_LEVEL / LOG_PATH (mirrors cmd/desktop).
@@ -74,6 +93,24 @@ func main() {
 	runtime.LogStartupEnv(context.Background())
 	runtime.MarkServerStarted()
 
+	var hs *agent24managed.Handshake
+	var setupToken string
+	if opts.Managed {
+		var hsErr error
+		hs, hsErr = agent24managed.OpenHandshake(opts.HandshakeFD)
+		if hsErr != nil {
+			fmt.Fprintf(os.Stderr, "managed handshake: %v\n", hsErr)
+			os.Exit(1)
+		}
+		setupToken, hsErr = agent24managed.NewSetupToken()
+		if hsErr != nil {
+			fmt.Fprintf(os.Stderr, "managed setup token: %v\n", hsErr)
+			os.Exit(1)
+		}
+		handler.SetLiteSetupToken(setupToken)
+		handler.SetManagedMode(true)
+	}
+
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
 
@@ -82,12 +119,14 @@ func main() {
 	runStartupBootstrap(c)
 
 	// Run application
-	err := c.Invoke(func(
+	err = c.Invoke(func(
 		cfg *config.Config,
 		router *gin.Engine,
 		resourceCleaner interfaces.ResourceCleaner,
 		systemSettingSvc interfaces.SystemSettingService,
 		modelCatalogSvc *service.ModelCatalogService,
+		db *gorm.DB,
+		modelSvc interfaces.ModelService,
 	) error {
 		// Create HTTP server
 		server := &http.Server{
@@ -95,9 +134,18 @@ func main() {
 		}
 
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-		listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
+		var listener net.Listener
+		var err error
+		if opts.Managed {
+			listener, err = agent24managed.Listen(opts.Port)
+		} else {
+			listener, err = listenWithRetry(addr, 10, 300*time.Millisecond)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to start server: %v", err)
+		}
+		if opts.Managed {
+			addr = listener.Addr().String()
 		}
 
 		ctx, done := context.WithCancel(context.Background())
@@ -155,6 +203,27 @@ func main() {
 
 		runtime.LogGinRouteCount(context.Background())
 		logger.Infof(context.Background(), "Server is running at %s", addr)
+		if opts.Managed {
+			if err := hs.WriteProcess(agent24managed.ProcessReady{
+				Type:       "ready",
+				Protocol:   1,
+				Phase:      "process",
+				Origin:     "http://" + listener.Addr().String(),
+				PID:        os.Getpid(),
+				Version:    handler.Version,
+				Commit:     handler.CommitID,
+				Edition:    handler.Edition,
+				SetupToken: setupToken,
+			}); err != nil {
+				return err
+			}
+			go func() {
+				probe := &agent24managed.BuiltinModelProbe{DB: db, Models: modelSvc}
+				if merr := hs.WriteModels(probe.Probe(ctx)); merr != nil {
+					logger.Warnf(context.Background(), "managed models handshake: %v", merr)
+				}
+			}()
+		}
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			return fmt.Errorf("server error: %v", err)
 		}

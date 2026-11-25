@@ -234,7 +234,9 @@ func Logger() gin.HandlerFunc {
 			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser") ||
 			// A24-KB-33: UI session bodies carry the one-time ticket and the session JWT, whose field names
 			// the redaction pattern does not cover in every spelling. Never read or buffer them.
-			strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/")
+			strings.HasPrefix(path, "/api/v1/agent24/knowledge/ui/") ||
+			// A24-KB-60: auto-setup responses carry the managed host's tokens.
+			path == "/api/v1/auth/auto-setup"
 		// 读取请求体（在Next之前读取，因为Next会消费body）。默认不读、不缓存正文。
 		var requestBody string
 		if logBodies && !browserTraffic &&
