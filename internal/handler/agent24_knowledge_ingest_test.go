@@ -585,7 +585,9 @@ func TestAgent24KnowledgeIngestCancelJob(t *testing.T) {
 	require.Equal(t, types.Agent24EnrichmentNone, still.Enrichment)
 }
 
-const agent24IngestMockConfig = `{"activations":[{"code_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","tenant_id":1,"template_kb_id":"template","config_version":"fixture"}]}`
+const agent24IngestMockConfig = `{"activations":[{"code_sha256":` +
+	`"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",` +
+	`"tenant_id":1,"template_kb_id":"template","config_version":"fixture"}]}`
 
 func agent24IngestMockFile(t *testing.T, body string) string {
 	t.Helper()
@@ -608,9 +610,18 @@ func TestAgent24KnowledgeIngestConstructor(t *testing.T) {
 		{name: "default"},
 		{name: "non-integration ignores configured file", path: valid},
 		{name: "invalid mode", mode: "nope", path: valid, wantErr: true},
-		{name: "missing file", mode: Agent24KnowledgeModeIntegration, path: filepath.Join(t.TempDir(), "missing"), wantErr: true},
-		{name: "empty allowlist", mode: Agent24KnowledgeModeIntegration, path: agent24IngestMockFile(t, `{"activations":[]}`), wantErr: true},
-		{name: "trailing invalid data", mode: Agent24KnowledgeModeIntegration, path: agent24IngestMockFile(t, agent24IngestMockConfig+` {`), wantErr: true},
+		{
+			name: "missing file", mode: Agent24KnowledgeModeIntegration,
+			path: filepath.Join(t.TempDir(), "missing"), wantErr: true,
+		},
+		{
+			name: "empty allowlist", mode: Agent24KnowledgeModeIntegration,
+			path: agent24IngestMockFile(t, `{"activations":[]}`), wantErr: true,
+		},
+		{
+			name: "trailing invalid data", mode: Agent24KnowledgeModeIntegration,
+			path: agent24IngestMockFile(t, agent24IngestMockConfig+` {`), wantErr: true,
+		},
 		{name: "valid mock", mode: Agent24KnowledgeModeIntegration, path: valid, wantOpen: true},
 		{name: "unset after enabled", mode: Agent24KnowledgeModeIntegration},
 	} {
