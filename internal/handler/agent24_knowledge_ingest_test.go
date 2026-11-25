@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -51,8 +53,11 @@ func newAgent24IngestEnv(t *testing.T) *agent24IngestEnv {
 	fake := &agent24IngestFake{savedAt: time.Date(2026, 11, 24, 1, 2, 3, 0, time.UTC)}
 	clock := time.Date(2026, 11, 24, 3, 0, 0, 0, time.UTC)
 	e := &agent24IngestEnv{db: db, fake: fake}
+	activations, err := service.LoadAgent24MockActivations(agent24IngestMockFile(t, agent24IngestMockConfig))
+	require.NoError(t, err)
+	require.NotNil(t, activations)
 	e.h = &Agent24KnowledgeIngestHandler{
-		ingest: fake, jobs: repository.NewAgent24IngestJobStore(db),
+		activations: activations, ingest: fake, jobs: repository.NewAgent24IngestJobStore(db),
 		candidates: repository.NewAgent24CandidateStore(db), db: db,
 		key: bytes.Repeat([]byte{9}, 32), now: func() time.Time { return clock },
 		visible: func(_ context.Context, tenant uint64, kbID string) (bool, error) {
@@ -580,34 +585,94 @@ func TestAgent24KnowledgeIngestCancelJob(t *testing.T) {
 	require.Equal(t, types.Agent24EnrichmentNone, still.Enrichment)
 }
 
+const agent24IngestMockConfig = `{"activations":[{"code_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","tenant_id":1,"template_kb_id":"template","config_version":"fixture"}]}`
+
+func agent24IngestMockFile(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "mock-activations.json")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	return path
+}
+
 func TestAgent24KnowledgeIngestConstructor(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
 	ingest := &service.Agent24Ingest{}
 	jobs := &repository.Agent24IngestJobStore{}
 	candidates := &repository.Agent24CandidateStore{}
+	valid := agent24IngestMockFile(t, agent24IngestMockConfig)
+	t.Setenv(Agent24KnowledgeTagKeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 
-	h, err := NewAgent24KnowledgeIngestHandler(ingest, jobs, candidates, db)
-	require.NoError(t, err)
-	require.Nil(t, h)
-
-	t.Run("invalid mode", func(t *testing.T) {
-		t.Setenv(Agent24KnowledgeModeEnv, "nope")
-		_, err := NewAgent24KnowledgeIngestHandler(ingest, jobs, candidates, db)
-		require.Error(t, err)
-	})
+	for _, tc := range []struct {
+		name, mode, path  string
+		wantOpen, wantErr bool
+	}{
+		{name: "default"},
+		{name: "non-integration ignores configured file", path: valid},
+		{name: "invalid mode", mode: "nope", path: valid, wantErr: true},
+		{name: "missing file", mode: Agent24KnowledgeModeIntegration, path: filepath.Join(t.TempDir(), "missing"), wantErr: true},
+		{name: "empty allowlist", mode: Agent24KnowledgeModeIntegration, path: agent24IngestMockFile(t, `{"activations":[]}`), wantErr: true},
+		{name: "trailing invalid data", mode: Agent24KnowledgeModeIntegration, path: agent24IngestMockFile(t, agent24IngestMockConfig+` {`), wantErr: true},
+		{name: "valid mock", mode: Agent24KnowledgeModeIntegration, path: valid, wantOpen: true},
+		{name: "unset after enabled", mode: Agent24KnowledgeModeIntegration},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(Agent24KnowledgeModeEnv, tc.mode)
+			t.Setenv(Agent24MockActivationFileEnv, tc.path)
+			h, err := NewAgent24KnowledgeIngestHandler(ingest, jobs, candidates, nil)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.wantOpen, h != nil)
+		})
+	}
 
 	t.Setenv(Agent24KnowledgeModeEnv, Agent24KnowledgeModeIntegration)
-	h, err = NewAgent24KnowledgeIngestHandler(nil, jobs, candidates, db)
+	t.Setenv(Agent24MockActivationFileEnv, valid)
+	h, err := NewAgent24KnowledgeIngestHandler(nil, jobs, candidates, nil)
 	require.NoError(t, err)
 	require.Nil(t, h)
-	_, err = NewAgent24KnowledgeIngestHandler(ingest, jobs, candidates, db)
+	t.Setenv(Agent24KnowledgeTagKeyEnv, "")
+	h, err = NewAgent24KnowledgeIngestHandler(ingest, jobs, candidates, nil)
 	require.Error(t, err)
+	require.Nil(t, h)
+}
 
-	t.Setenv(Agent24KnowledgeTagKeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
-	h, err = NewAgent24KnowledgeIngestHandler(ingest, jobs, candidates, db)
+func TestAgent24KnowledgeIngestDeniesUnlistedTenantBeforeTargetAccess(t *testing.T) {
+	e := newAgent24IngestEnv(t)
+	as := agent24IngestAs([]string{"ingest"})
+	as.tenant = 2
+	as.principal.ID = "2:fixture"
+	e.insertJob(t, types.Agent24IngestJob{
+		ID: "job-unlisted", TenantID: as.tenant, KnowledgeID: "doc-unlisted",
+		PrincipalUserID: as.principal.StorageID(), Status: types.Agent24JobSaved,
+	})
+	kbLookups, dbQueries := 0, 0
+	e.h.visible = func(context.Context, uint64, string) (bool, error) {
+		kbLookups++
+		return true, nil
+	}
+	require.NoError(t, e.db.Callback().Query().Before("gorm:query").Register("count_target_queries", func(*gorm.DB) {
+		dbQueries++
+	}))
+
+	r := e.call(t, e.h.Submit, as, agent24IngestBody(t, nil, nil))
+	require.Equal(t, "forbidden/operation_not_allowed", r.outcome(), r.raw)
+	for _, serve := range []func(*gin.Context){e.h.GetJob, e.h.CancelJob} {
+		own := e.call(t, serve, as, agent24IngestJobBody("job-unlisted"))
+		missing := e.call(t, serve, as, agent24IngestJobBody("job-missing"))
+		require.Equal(t, "forbidden/operation_not_allowed", own.outcome(), own.raw)
+		require.Equal(t, own.raw, missing.raw)
+	}
+	require.Zero(t, kbLookups)
+	require.Zero(t, dbQueries)
+	prep, stage, dispatch, abandon := e.fake.counts()
+	require.Equal(t, [4]int{}, [4]int{prep, stage, dispatch, abandon})
+	require.Zero(t, e.rows(t, &types.Agent24WriteIdempotency{}))
+	require.EqualValues(t, 1, e.rows(t, &types.Agent24IngestJob{}))
+	job, err := e.h.jobs.Get(context.Background(), as.tenant, "job-unlisted")
 	require.NoError(t, err)
-	require.NotNil(t, h)
+	require.Equal(t, types.Agent24JobSaved, job.Status)
 }
 
 func TestAgent24KnowledgeIngestJobView(t *testing.T) {

@@ -69,7 +69,11 @@ func LoadAgent24MockActivations(path string) (*Agent24MockActivations, error) {
 	dec.DisallowUnknownFields()
 	var body agent24MockActivationFile
 	if err := dec.Decode(&body); err != nil {
-		return nil, fmt.Errorf("agent24 mock activations: %w", err)
+		// Decoder errors can quote configuration data; this error reaches startup logs.
+		return nil, errors.New("agent24 mock activations: invalid JSON activation table")
+	}
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		return nil, errors.New("agent24 mock activations: unexpected data after the activation table")
 	}
 	if len(body.Activations) == 0 {
 		return nil, errors.New("agent24 mock activations: activations must not be empty")
@@ -96,6 +100,18 @@ func LoadAgent24MockActivations(path string) (*Agent24MockActivations, error) {
 		}
 	}
 	return &Agent24MockActivations{byHash: byHash}, nil
+}
+
+// AllowsTenant reports whether the operator explicitly included this tenant in the mock table.
+func (a *Agent24MockActivations) AllowsTenant(tenantID uint64) bool {
+	if a != nil {
+		for _, activation := range a.byHash {
+			if activation.TenantID == tenantID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Lookup returns the activation for code. A nil receiver or empty code misses. The code and its hash are not logged.

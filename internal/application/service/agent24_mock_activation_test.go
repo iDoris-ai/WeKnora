@@ -64,12 +64,37 @@ func TestAgent24MockActivationRejectsUnknownField(t *testing.T) {
 	hash := sha256Hex("activation-secret")
 	body := fmt.Sprintf(
 		`{"activations":[{"code_sha256":%q,"tenant_id":10001,"template_kb_id":"tmpl-kb","config_version":"cfg-1"}],`+
-			`"extra":true}`,
+			`"synthetic-secret-field":true}`,
 		hash,
 	)
 	path := writeMockActivationFile(t, dir, "extra.json", 0o600, body)
-	_, err := LoadAgent24MockActivations(path)
-	require.Error(t, err)
+	loaded, err := LoadAgent24MockActivations(path)
+	require.Nil(t, loaded)
+	require.EqualError(t, err, "agent24 mock activations: invalid JSON activation table")
+}
+
+func TestAgent24MockActivationRequiresSingleJSONValue(t *testing.T) {
+	body := mockActivationJSON(sha256Hex("synthetic-activation"), 1, "")
+	for _, tc := range []struct {
+		name, suffix string
+		valid        bool
+	}{
+		{name: "whitespace", suffix: " \r\n\t", valid: true},
+		{name: "second value", suffix: ` {"synthetic-secret-field":true}`},
+		{name: "malformed suffix", suffix: ` {`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeMockActivationFile(t, t.TempDir(), "config.json", 0o600, body+tc.suffix)
+			loaded, err := LoadAgent24MockActivations(path)
+			if tc.valid {
+				require.NoError(t, err)
+				require.NotNil(t, loaded)
+				return
+			}
+			require.Nil(t, loaded)
+			require.EqualError(t, err, "agent24 mock activations: unexpected data after the activation table")
+		})
+	}
 }
 
 func TestAgent24MockActivationRejectsBadHash(t *testing.T) {
