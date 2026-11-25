@@ -57,9 +57,17 @@ func OpenHandshake(fd int) (*Handshake, error) {
 	if f == nil {
 		return nil, fmt.Errorf("invalid handshake fd %d", fd)
 	}
-	if _, err := f.Stat(); err != nil {
+	info, err := f.Stat()
+	if err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("invalid handshake fd %d", fd)
+	}
+	// Only a pipe or socket from the host counts. When the host passed nothing,
+	// the fd number can already belong to something this process opened (a log
+	// file, a device); writing the setup token there would leak it.
+	// Not closed: the fd may be one this process still uses.
+	if info.Mode()&(os.ModeNamedPipe|os.ModeSocket) == 0 {
+		return nil, fmt.Errorf("handshake fd %d is not a pipe or socket", fd)
 	}
 	return NewHandshake(f), nil
 }

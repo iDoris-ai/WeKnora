@@ -474,3 +474,31 @@ func insertModel(t *testing.T, db *gorm.DB, m types.Model) {
 		t.Fatal(err)
 	}
 }
+
+// TestOpenHandshakeRejectsNonPipe: without a host pipe the fd number can belong to a file this process
+// opened (a log file); the setup token must never be written there.
+func TestOpenHandshakeRejectsNonPipe(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "not-a-pipe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := OpenHandshake(int(f.Fd())); err == nil {
+		t.Fatal("regular file accepted as handshake channel")
+	}
+	if _, err := f.WriteString("still open"); err != nil {
+		t.Fatalf("rejected fd was closed: %v", err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	hs, err := OpenHandshake(int(w.Fd()))
+	if err != nil {
+		t.Fatalf("pipe rejected: %v", err)
+	}
+	if err := hs.WriteModels(ModelsReady{Type: "models", Protocol: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
