@@ -37,7 +37,8 @@ env:
 jobs:
   verify:
     name: Python tests and Go client tests
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, which has no prebuilt Python 3.10.18 for setup-python.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
