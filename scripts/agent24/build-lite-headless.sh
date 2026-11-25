@@ -170,6 +170,15 @@ if ! go build -trimpath -buildvcs=false -tags sqlite_fts5 -ldflags "${ldflags}" 
     die "go build failed"
 fi
 
+# go-m1cpu v0.1.x (reached via milvus -> gopsutil/v3/cpu) runs cgo in package init
+# and segfaults on Apple M5 before main starts; v0.2.x initializes lazily and knows M5.
+if ! deps=$(go version -m "${stage_dir}/WeKnora-lite"); then
+    die "go version -m failed"
+fi
+if printf '%s\n' "$deps" | grep -E 'github.com/shoenig/go-m1cpu[[:space:]]+v0\.1\.' >/dev/null; then
+    die "binary links go-m1cpu v0.1.x, which crashes at startup on Apple M5; need v0.2.4 or later"
+fi
+
 # gojieba loads its dictionary at process start. Ship it next to the binary;
 # internal/types finds <exe dir>/dict without JIEBA_DICT_DIR.
 if ! jieba_dir=$(go list -m -f '{{.Dir}}' github.com/yanyiwu/gojieba); then

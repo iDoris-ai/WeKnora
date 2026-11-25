@@ -25,7 +25,7 @@ Windows installers place them next to the installed executable.
 
 ## go-m1cpu
 
-- Component: `github.com/shoenig/go-m1cpu`, version `v0.1.6`.
+- Component: `github.com/shoenig/go-m1cpu`, version `v0.2.4`.
 - Used by the macOS backend/desktop dependency chain through gopsutil. It is
   absent from Linux backend build dependencies. Its source is included in all
   notice bundles for consistent packaging; this does not imply Linux linkage.
@@ -35,9 +35,9 @@ Windows installers place them next to the installed executable.
   source and notices are preserved in the accompanying archive.
 - Modifications by WeKnora: none.
 - Corresponding source, available under MPL-2.0, is included in binary releases
-  as `licenses/sources/go-m1cpu-v0.1.6.zip`. Source repository users can obtain it from the
-  [Go module proxy](https://proxy.golang.org/github.com/shoenig/go-m1cpu/@v/v0.1.6.zip)
-  and [upstream repository](https://github.com/shoenig/go-m1cpu/tree/v0.1.6).
+  as `licenses/sources/go-m1cpu-v0.2.4.zip`. Source repository users can obtain it from the
+  [Go module proxy](https://proxy.golang.org/github.com/shoenig/go-m1cpu/@v/v0.2.4.zip)
+  and [upstream repository](https://github.com/shoenig/go-m1cpu/tree/v0.2.4).
 
 ## OpenCC dictionary data
 
