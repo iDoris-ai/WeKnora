@@ -33,6 +33,7 @@ on:
       - "internal/models/providers/assets/**"
       - "scripts/model-catalog/**"
       - "scripts/*license*.sh"
+      - "scripts/agent24/*lite*.sh"
       - "scripts/git-hooks/**"
       - "scripts/test-git-hooks.sh"
       - "cmd/desktop/build/windows/installer/project.nsi"
@@ -65,6 +66,7 @@ on:
       - "internal/models/providers/assets/**"
       - "scripts/model-catalog/**"
       - "scripts/*license*.sh"
+      - "scripts/agent24/*lite*.sh"
       - "scripts/git-hooks/**"
       - "scripts/test-git-hooks.sh"
       - "cmd/desktop/build/windows/installer/project.nsi"
@@ -106,6 +108,8 @@ jobs:
 
       - name: Test Docker entrypoint permissions
         run: bash scripts/docker-entrypoint_test.sh
+      - name: Test Agent24 Lite headless manifest
+        run: bash scripts/agent24/test-lite-headless.sh
       - name: Verify third-party notices and source bundle
         run: |
           bash ./scripts/check-license-bundle.sh

@@ -15,6 +15,9 @@ var Jieba *gojieba.Jieba = newJieba()
 func newJieba() *gojieba.Jieba {
 	dictDir := os.Getenv("JIEBA_DICT_DIR")
 	if dictDir == "" {
+		dictDir = bundledJiebaDictDir()
+	}
+	if dictDir == "" {
 		return gojieba.NewJieba()
 	}
 
@@ -25,6 +28,26 @@ func newJieba() *gojieba.Jieba {
 		filepath.Join(dictDir, "idf.utf8"),
 		filepath.Join(dictDir, "stop_words.utf8"),
 	)
+}
+
+// bundledJiebaDictDir returns <executable dir>/dict when it holds the jieba
+// dictionary. Agent24 A24-KB-61: the headless Lite artifact ships the
+// dictionary next to the binary; without it gojieba looks in the build
+// machine's module cache and panics on any other machine.
+func bundledJiebaDictDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return jiebaDictDirBeside(exe)
+}
+
+func jiebaDictDirBeside(exe string) string {
+	dir := filepath.Join(filepath.Dir(exe), "dict")
+	if _, err := os.Stat(filepath.Join(dir, "jieba.dict.utf8")); err != nil {
+		return ""
+	}
+	return dir
 }
 
 // EvaluationStatue represents the status of an evaluation task
