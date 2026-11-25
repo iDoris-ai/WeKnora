@@ -672,3 +672,60 @@ func TestAgent24KnowledgeIngestCancelStopsTheKnowledge(t *testing.T) {
 	require.NoError(t, e.db.Where("id = ?", "doc-p").Take(&k).Error)
 	require.Equal(t, types.ParseStatusCancelled, k.ParseStatus)
 }
+
+// #175 round 2: what lands between job.cancel's first read and its knowledge lock is decided on the locked row.
+// The handler's cancelJob is called with the job as read before the change, as a concurrent worker would leave it.
+func TestAgent24KnowledgeIngestCancelDecidesOnTheLockedRow(t *testing.T) {
+	as := agent24IngestAs([]string{"ingest"})
+	caller, ok := agent24CandidateCallerOf(as.ctx())
+	require.True(t, ok)
+	for _, c := range []struct {
+		name       string
+		change     func(e *agent24IngestEnv)
+		wantEffect string
+		wantErr    error
+		wantParse  string
+	}{
+		{"a worker finalized it", func(e *agent24IngestEnv) {
+			require.NoError(t, e.db.Model(&types.Knowledge{}).Where("id = ?", "doc-x").
+				Update("parse_status", types.ParseStatusFinalizing).Error)
+		}, agent24CancelEffectEnrichmentStopped, nil, types.ParseStatusFinalizing},
+		{"a worker completed it", func(e *agent24IngestEnv) {
+			require.NoError(t, e.db.Model(&types.Knowledge{}).Where("id = ?", "doc-x").
+				Update("parse_status", types.ParseStatusCompleted).Error)
+		}, agent24CancelEffectNone, nil, types.ParseStatusCompleted},
+		{"a newer revision started", func(e *agent24IngestEnv) {
+			require.NoError(t, e.db.Create(&types.KnowledgeProcessingSpan{
+				KnowledgeID: "doc-x", Attempt: 2,
+				SpanID: "s2", Name: "attempt", Kind: "attempt", Status: "running",
+			}).Error)
+		}, agent24CancelEffectNone, nil, types.ParseStatusProcessing},
+		{"the document moved to another knowledge base", func(e *agent24IngestEnv) {
+			require.NoError(t, e.db.Model(&types.Knowledge{}).Where("id = ?", "doc-x").
+				Updates(map[string]any{"knowledge_base_id": "kbB", "parse_status": types.ParseStatusPending}).Error)
+		}, "", errAgent24IngestJobGone, types.ParseStatusPending},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newAgent24IngestEnv(t)
+			now := time.Now().UTC()
+			e.ensureDoc(t, "doc-x", types.ParseStatusProcessing)
+			e.insertJob(t, types.Agent24IngestJob{
+				ID: "job-x", KnowledgeID: "doc-x", Status: types.Agent24JobProcessing, Attempt: 1,
+				SavedAt: now, UpdatedAt: now,
+			})
+			stale, err := e.h.jobs.Get(context.Background(), 1, "job-x")
+			require.NoError(t, err)
+			c.change(e)
+			effect, _, err := e.h.cancelJob(context.Background(), caller, as.scope, stale)
+			if c.wantErr != nil {
+				require.ErrorIs(t, err, c.wantErr)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, c.wantEffect, effect)
+			}
+			var k types.Knowledge
+			require.NoError(t, e.db.Where("id = ?", "doc-x").Take(&k).Error)
+			require.Equal(t, c.wantParse, k.ParseStatus, "the knowledge is never cancelled by a stale decision")
+		})
+	}
+}

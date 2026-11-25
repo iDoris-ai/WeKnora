@@ -100,6 +100,42 @@ func (r *Agent24JobReconciler) reconcile(ctx context.Context, job types.Agent24I
 	})
 }
 
+// ReconcileLocked brings job up to its knowledge row inside tx, where the caller already holds that row's lock
+// (A24-KB-54 job.cancel): a decision taken right after it sees a worker's finalizing or completed, or a newer
+// revision, that landed after the caller's first read. It returns the job as stored afterwards (nil when gone).
+func (r *Agent24JobReconciler) ReconcileLocked(
+	ctx context.Context, tx *repository.Agent24IngestJobStore, job types.Agent24IngestJob,
+) (*types.Agent24IngestJob, error) {
+	view, err := tx.KnowledgeView(ctx, job.TenantID, job.KnowledgeID)
+	if err != nil {
+		return nil, err
+	}
+	if job.Attempt == 0 {
+		view.LatestAttempt = 0
+	}
+	now := r.now()
+	change, ok := types.Agent24ReconcileJob(job, view, now, r.limits)
+	if ok {
+		applied, err := tx.Apply(ctx, job, change, now)
+		if err != nil {
+			return nil, err
+		}
+		if applied && change.FailKnowledge {
+			cur, err := tx.Occupying(ctx, job.TenantID, job.KnowledgeID)
+			if err != nil {
+				return nil, err
+			}
+			if cur == nil || cur.ID == job.ID {
+				if err := tx.FailPendingKnowledge(ctx, job.TenantID, job.KnowledgeID,
+					"Agent24: no worker picked the job up in time", now); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	return tx.Get(ctx, job.TenantID, job.ID)
+}
+
 // Sweep reconciles one batch of unsettled jobs and purges jobs settled longer ago than the retention. It returns
 // how many jobs it looked at.
 func (r *Agent24JobReconciler) Sweep(ctx context.Context) (int, error) {

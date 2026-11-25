@@ -397,10 +397,24 @@ func (h *Agent24KnowledgeIngestHandler) cancelJob(
 	var effect string
 	var view agent24IngestJobView
 	err := h.jobs.Transaction(ctx, func(tx *repository.Agent24IngestJobStore) error {
-		if _, err := tx.LockKnowledge(ctx, caller.tenant, job.KnowledgeID); err != nil {
+		row, err := tx.LockKnowledge(ctx, caller.tenant, job.KnowledgeID)
+		if err != nil {
 			return err
 		}
 		cur, err := tx.Get(ctx, caller.tenant, job.ID)
+		if err != nil {
+			return err
+		}
+		if !agent24IngestJobVisible(cur, caller, scope) {
+			return errAgent24IngestJobGone
+		}
+		// Decide on the locked row, not on the read before the lock (#175 round 2): a knowledge that is gone or
+		// moved to another knowledge base is not this job's any more (the key's scope was checked against the job's
+		// base); and a worker's finalizing/completed or a newer revision that landed meanwhile is reconciled first.
+		if row == nil || row.KnowledgeBaseID != cur.KnowledgeBaseID {
+			return errAgent24IngestJobGone
+		}
+		cur, err = service.NewAgent24JobReconciler(h.jobs).ReconcileLocked(ctx, tx, *cur)
 		if err != nil {
 			return err
 		}
