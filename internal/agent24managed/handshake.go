@@ -24,7 +24,8 @@ type ProcessReady struct {
 
 // ModelState is the readiness of one built-in model.
 type ModelState struct {
-	State string `json:"state"` // "ready" | "missing" | "unreachable"
+	// Embedding: "ready" | "missing" | "unreachable". Chat: "configured" | "missing" | "unreachable".
+	State string `json:"state"`
 	Model string `json:"model,omitempty"`
 }
 

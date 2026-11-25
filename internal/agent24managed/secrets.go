@@ -124,7 +124,13 @@ func applyManagedEnv(s managedSecretsFile) error {
 	if err := os.Setenv("SYSTEM_AES_KEY", s.SystemAESKey); err != nil {
 		return err
 	}
-	return os.Setenv("DISABLE_REGISTRATION", "true")
+	if err := os.Setenv("DISABLE_REGISTRATION", "true"); err != nil {
+		return err
+	}
+	// OIDC first login provisions an account without consulting the registration mode
+	// (service.LoginWithOIDC -> provisionOIDCUser), so a managed host turns OIDC off.
+	// The env override wins over config.yaml (config.applyOIDCEnvOverrides).
+	return os.Setenv("OIDC_AUTH_ENABLE", "false")
 }
 
 func ensureEnvMatches(key, want string) error {

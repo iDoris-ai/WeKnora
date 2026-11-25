@@ -24,8 +24,10 @@ const (
 	modelStateReady       = "ready"
 	modelStateMissing     = "missing"
 	modelStateUnreachable = "unreachable"
-	defaultProbeTimeout   = 15 * time.Second
-	embedProbeText        = "ping"
+	// modelStateConfigured: an active built-in chat row exists. Chat is not called, so it is not "ready".
+	modelStateConfigured = "configured"
+	defaultProbeTimeout  = 15 * time.Second
+	embedProbeText       = "ping"
 )
 
 // Options is the managed-host command line. The zero value is standalone.
@@ -153,7 +155,8 @@ type BuiltinModelProbe struct {
 
 // Probe returns one models handshake record. Embedding is ready only when a
 // live built-in row is active and Embed("ping") returns a non-empty vector
-// before Timeout. Chat is ready when a live built-in KnowledgeQA row is active.
+// before Timeout. Chat is only "configured" when a live built-in KnowledgeQA row is
+// active: it is not called, so a stopped chat backend is not detected here.
 func (p *BuiltinModelProbe) Probe(ctx context.Context) ModelsReady {
 	out := ModelsReady{
 		Type:      "models",
@@ -232,7 +235,7 @@ func (p *BuiltinModelProbe) probeEmbedding(ctx context.Context, m types.Model) M
 func chatModelState(m types.Model) ModelState {
 	state := ModelState{State: modelStateUnreachable, Model: m.Name}
 	if m.Status == types.ModelStatusActive {
-		state.State = modelStateReady
+		state.State = modelStateConfigured
 	}
 	return state
 }

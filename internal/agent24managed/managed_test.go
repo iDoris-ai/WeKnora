@@ -132,6 +132,10 @@ func TestSecretsPersistAcrossRestart(t *testing.T) {
 	if os.Getenv("DISABLE_REGISTRATION") != "true" {
 		t.Fatalf("DISABLE_REGISTRATION = %q", os.Getenv("DISABLE_REGISTRATION"))
 	}
+	// OIDC first login provisions accounts outside the registration mode, so it must be off too.
+	if os.Getenv("OIDC_AUTH_ENABLE") != "false" {
+		t.Fatalf("OIDC_AUTH_ENABLE = %q", os.Getenv("OIDC_AUTH_ENABLE"))
+	}
 	assertSecretModes(t, dir)
 
 	clearSecretEnv(t)
@@ -188,6 +192,7 @@ func clearSecretEnv(t *testing.T) {
 	t.Setenv("JWT_SECRET", "")
 	t.Setenv("SYSTEM_AES_KEY", "")
 	t.Setenv("DISABLE_REGISTRATION", "")
+	t.Setenv("OIDC_AUTH_ENABLE", "true")
 }
 
 func assertSecretModes(t *testing.T, dir string) {
@@ -438,7 +443,7 @@ func TestBuiltinModelProbe(t *testing.T) {
 			Source: types.ModelSourceRemote, IsBuiltin: true, Status: types.ModelStatusActive, TenantID: 7,
 		})
 		got := (&BuiltinModelProbe{DB: db, Models: &fakeModelService{}}).Probe(context.Background())
-		if got.Chat.State != modelStateReady || got.Chat.Model != "chat-a" {
+		if got.Chat.State != modelStateConfigured || got.Chat.Model != "chat-a" {
 			t.Fatalf("chat = %+v", got.Chat)
 		}
 		if got.Embedding.State != modelStateMissing {
@@ -482,7 +487,7 @@ func TestOpenHandshakeRejectsNonPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := OpenHandshake(int(f.Fd())); err == nil {
 		t.Fatal("regular file accepted as handshake channel")
 	}
@@ -493,7 +498,7 @@ func TestOpenHandshakeRejectsNonPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	hs, err := OpenHandshake(int(w.Fd()))
 	if err != nil {
 		t.Fatalf("pipe rejected: %v", err)
