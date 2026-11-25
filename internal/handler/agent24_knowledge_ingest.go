@@ -64,18 +64,19 @@ var _ agent24IngestEntry = (*service.Agent24Ingest)(nil)
 
 // Agent24KnowledgeIngestHandler serves ingest.submit, job read and job cancel.
 type Agent24KnowledgeIngestHandler struct {
-	ingest     agent24IngestEntry
-	jobs       *repository.Agent24IngestJobStore
-	candidates *repository.Agent24CandidateStore
-	db         *gorm.DB
-	key        []byte
-	now        func() time.Time
+	activations *service.Agent24MockActivations
+	ingest      agent24IngestEntry
+	jobs        *repository.Agent24IngestJobStore
+	candidates  *repository.Agent24CandidateStore
+	db          *gorm.DB
+	key         []byte
+	now         func() time.Time
 	// visible reports whether the tenant can see the knowledge base (W1.9 ③(b)). Nil asks the database.
 	visible func(ctx context.Context, tenant uint64, kbID string) (bool, error)
 }
 
-// NewAgent24KnowledgeIngestHandler returns nil, nil outside integration mode or when a dependency is missing, so
-// the routes stay unregistered. The tag key is read once, and only after that gate: an unusable key is an error.
+// NewAgent24KnowledgeIngestHandler only opens these routes in integration mode with a valid mock activation
+// file and all required services. Like init, it snapshots the table at startup; invalid configuration is an error.
 func NewAgent24KnowledgeIngestHandler(
 	ingest *service.Agent24Ingest, jobs *repository.Agent24IngestJobStore,
 	candidates *repository.Agent24CandidateStore, db *gorm.DB,
@@ -87,12 +88,16 @@ func NewAgent24KnowledgeIngestHandler(
 	if mode != Agent24KnowledgeModeIntegration || ingest == nil || jobs == nil || candidates == nil {
 		return nil, nil
 	}
+	activations, err := agent24MockActivationsFromEnv()
+	if err != nil || activations == nil {
+		return nil, err
+	}
 	key, err := Agent24KnowledgeTagKeyFromEnv()
 	if err != nil {
 		return nil, err
 	}
 	return &Agent24KnowledgeIngestHandler{
-		ingest: ingest, jobs: jobs, candidates: candidates, db: db, key: key, now: time.Now,
+		activations: activations, ingest: ingest, jobs: jobs, candidates: candidates, db: db, key: key, now: time.Now,
 	}, nil
 }
 
@@ -126,7 +131,7 @@ func (h *Agent24KnowledgeIngestHandler) Submit(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	caller, scope, kerr := agent24IngestCaller(ctx)
+	caller, scope, kerr := h.ingestCaller(ctx)
 	if kerr != nil {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
@@ -321,7 +326,7 @@ func (h *Agent24KnowledgeIngestHandler) GetJob(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	caller, scope, kerr := agent24IngestCaller(ctx)
+	caller, scope, kerr := h.ingestCaller(ctx)
 	if kerr != nil {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
@@ -355,7 +360,7 @@ func (h *Agent24KnowledgeIngestHandler) CancelJob(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	caller, scope, kerr := agent24IngestCaller(ctx)
+	caller, scope, kerr := h.ingestCaller(ctx)
 	if kerr != nil {
 		writeAgent24KnowledgeError(c, kerr, echo)
 		return
@@ -592,15 +597,15 @@ func agent24IngestMapErr(err error) *agent24KnowledgeError {
 	}
 }
 
-// agent24IngestCaller is W1.9 ③(a) for a key that must currently hold ingest. Platform, full access and a key
-// without the capability are the same forbidden answer.
-func agent24IngestCaller(
+// ingestCaller applies W1.9 ③(a) before any target lookup. The mock tenant grant is required in addition
+// to a scoped ingest key; neither grant can substitute for the other.
+func (h *Agent24KnowledgeIngestHandler) ingestCaller(
 	ctx context.Context,
 ) (agent24CandidateCaller, types.TenantAPIKeyScope, *agent24KnowledgeError) {
 	caller, ok := agent24CandidateCallerOf(ctx)
 	scope, scopeOK := types.TenantAPIKeyScopeFromContext(ctx)
 	if !ok || caller.tenant == 0 || !scopeOK || scope.IsPlatform() || scope.FullAccess ||
-		!scope.HasCapability(types.APIKeyCapabilityIngest) {
+		!scope.HasCapability(types.APIKeyCapabilityIngest) || !h.activations.AllowsTenant(caller.tenant) {
 		return caller, scope, agent24Forbidden("operation_not_allowed")
 	}
 	return caller, scope, nil

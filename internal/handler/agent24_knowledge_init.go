@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	// Agent24MockActivationFileEnv names the mock activation table; unset means no init route.
+	// Agent24MockActivationFileEnv names the mock activation table; unset disables the mock routes.
 	Agent24MockActivationFileEnv = "AGENT24_KNOWLEDGE_MOCK_ACTIVATION_FILE"
 	agent24InitPath              = "/api/v1/agent24/knowledge/init"
 	agent24InitMaxBody           = 4 * 1024
@@ -57,6 +57,10 @@ type Agent24KnowledgeInitHandler struct {
 	now    func() time.Time
 }
 
+func agent24MockActivationsFromEnv() (*service.Agent24MockActivations, error) {
+	return service.LoadAgent24MockActivations(strings.TrimSpace(os.Getenv(Agent24MockActivationFileEnv)))
+}
+
 // NewAgent24KnowledgeInitHandler returns nil (route not registered) outside integration mode or without the mock
 // activation file. A file that is set but unusable is an error, so the container fails closed.
 func NewAgent24KnowledgeInitHandler(
@@ -67,7 +71,7 @@ func NewAgent24KnowledgeInitHandler(
 	if err != nil || mode != Agent24KnowledgeModeIntegration {
 		return nil, err
 	}
-	activations, err := service.LoadAgent24MockActivations(strings.TrimSpace(os.Getenv(Agent24MockActivationFileEnv)))
+	activations, err := agent24MockActivationsFromEnv()
 	if err != nil || activations == nil {
 		return nil, err
 	}
