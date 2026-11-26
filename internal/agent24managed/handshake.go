@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-62 (KB-LITE-02a, G1): JSON-line handshake on an inherited fd.
+// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-62 (KB-LITE-02a, G1): JSON-line handshake.
 
 package agent24managed
 
