@@ -3,8 +3,8 @@ package agent24managed
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
