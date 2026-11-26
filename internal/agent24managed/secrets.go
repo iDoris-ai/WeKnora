@@ -16,16 +16,19 @@ import (
 const (
 	managedSecretsFilename = "managed-secrets.json"
 	managedSecretsTempGlob = managedSecretsFilename + ".tmp-"
+	// managedTagKeyEnv is the integration-mode HMAC key (handler.Agent24KnowledgeTagKeyEnv).
+	managedTagKeyEnv = "AGENT24_KNOWLEDGE_TAG_KEY"
 )
 
 type managedSecretsFile struct {
 	Version      int    `json:"version"`
 	JWTSecret    string `json:"jwt_secret"`
 	SystemAESKey string `json:"system_aes_key"`
+	TagKey       string `json:"agent24_tag_key"`
 }
 
 // PrepareSecrets creates or reads <stateDir>/managed-secrets.json and copies
-// those values into JWT_SECRET and SYSTEM_AES_KEY.
+// those values into JWT_SECRET, SYSTEM_AES_KEY and AGENT24_KNOWLEDGE_TAG_KEY.
 // An existing file is never rewritten. A non-empty environment value that
 // differs from the file is an error, and the error text does not include
 // any secret. The caller holds the instance lock (AcquireInstanceLock).
@@ -132,7 +135,14 @@ func newManagedSecrets() (managedSecretsFile, error) {
 	if err != nil {
 		return managedSecretsFile{}, err
 	}
-	return managedSecretsFile{Version: 1, JWTSecret: jwtSecret, SystemAESKey: aesKey}, nil
+	tagKey := make([]byte, 32)
+	if _, err := rand.Read(tagKey); err != nil {
+		return managedSecretsFile{}, err
+	}
+	return managedSecretsFile{
+		Version: 1, JWTSecret: jwtSecret, SystemAESKey: aesKey,
+		TagKey: base64.StdEncoding.EncodeToString(tagKey),
+	}, nil
 }
 
 func randomRawURL(nBytes int) (string, error) {
@@ -169,7 +179,9 @@ func loadManagedSecrets(path string) (managedSecretsFile, error) {
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return managedSecretsFile{}, fmt.Errorf("invalid managed secrets file %s", path)
 	}
-	if parsed.Version != 1 || len(parsed.JWTSecret) < 32 || len(parsed.SystemAESKey) != 32 {
+	tag, terr := base64.StdEncoding.DecodeString(parsed.TagKey)
+	if parsed.Version != 1 || len(parsed.JWTSecret) < 32 || len(parsed.SystemAESKey) != 32 ||
+		terr != nil || len(tag) < 32 {
 		return managedSecretsFile{}, fmt.Errorf("invalid managed secrets file %s", path)
 	}
 	return parsed, nil
@@ -179,7 +191,10 @@ func checkManagedEnv(s managedSecretsFile) error {
 	if err := ensureEnvMatches("JWT_SECRET", s.JWTSecret); err != nil {
 		return err
 	}
-	return ensureEnvMatches("SYSTEM_AES_KEY", s.SystemAESKey)
+	if err := ensureEnvMatches("SYSTEM_AES_KEY", s.SystemAESKey); err != nil {
+		return err
+	}
+	return ensureEnvMatches(managedTagKeyEnv, s.TagKey)
 }
 
 func applyManagedEnv(s managedSecretsFile) error {
@@ -187,7 +202,7 @@ func applyManagedEnv(s managedSecretsFile) error {
 		return err
 	}
 	for _, kv := range [][2]string{
-		{"JWT_SECRET", s.JWTSecret}, {"SYSTEM_AES_KEY", s.SystemAESKey},
+		{"JWT_SECRET", s.JWTSecret}, {"SYSTEM_AES_KEY", s.SystemAESKey}, {managedTagKeyEnv, s.TagKey},
 	} {
 		if err := os.Setenv(kv[0], kv[1]); err != nil {
 			return err

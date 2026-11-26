@@ -114,7 +114,6 @@ func main() {
 	runtime.MarkServerStarted()
 
 	var hs *agent24managed.Handshake
-	var setupToken string
 	var host *agent24managed.HostWatch
 	if opts.Managed {
 		var hsErr error
@@ -134,13 +133,11 @@ func main() {
 		// A host that died also closed our stdout/stderr pipes; a log write must not kill the process with
 		// SIGPIPE before the graceful shutdown (#181 F1).
 		signal.Ignore(syscall.SIGPIPE)
-		setupToken, hsErr = agent24managed.NewSetupToken()
-		if hsErr != nil {
-			fmt.Fprintf(os.Stderr, "managed setup token: %v\n", hsErr)
-			os.Exit(1)
-		}
-		handler.SetLiteSetupToken(setupToken)
+		// No setup token (A24-KB-62, G4): the credential is provisioned in-process and goes out on the
+		// handshake only. SetManagedMode must precede BuildContainer: it keeps background work and the
+		// inline ingest executor on in integration mode.
 		handler.SetManagedMode(true)
+		service.EnableAgent24LiteIngestFormats()
 	}
 
 	// Build dependency injection container
@@ -149,6 +146,11 @@ func main() {
 	// One-shot bootstrap hooks (e.g. promote env-named user to system
 	// admin). Best-effort: never aborts startup — see bootstrap.go.
 	runStartupBootstrap(c)
+
+	var credential agent24managed.Credential
+	if opts.Managed {
+		credential = provisionManaged(c)
+	}
 
 	// Run application
 	err = c.Invoke(func(
@@ -256,7 +258,7 @@ func main() {
 				Version:    handler.Version,
 				Commit:     handler.CommitID,
 				Edition:    handler.Edition,
-				SetupToken: setupToken,
+				Credential: credential,
 			}); err != nil {
 				return err
 			}

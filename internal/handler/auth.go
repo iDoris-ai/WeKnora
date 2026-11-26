@@ -38,6 +38,10 @@ func SetLiteSetupToken(token string) { liteSetupToken = token }
 // It is called once at startup, before the server accepts requests.
 func SetManagedMode(on bool) { managedMode.Store(on) }
 
+// ManagedMode reports whether this process is the headless managed host (A24-KB-62): one process that serves the
+// integration routes and also runs its own ingestion.
+func ManagedMode() bool { return managedMode.Load() }
+
 const (
 	oidcNonceCookieName   = "weknora_oidc_nonce"
 	oidcNonceCookieMaxAge = 600

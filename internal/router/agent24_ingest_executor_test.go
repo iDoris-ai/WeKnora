@@ -42,3 +42,11 @@ func TestAgent24LiteIngestExecutorByMode(t *testing.T) {
 	t.Setenv(handler.Agent24KnowledgeModeEnv, "")
 	require.NoError(t, NewAgent24LiteIngestExecutor().Available(ctx))
 }
+
+// A24-KB-62 (G6): the managed host is integration mode and still ingests inline in its own process.
+func TestAgent24LiteIngestExecutorManaged(t *testing.T) {
+	t.Setenv(handler.Agent24KnowledgeModeEnv, "integration")
+	handler.SetManagedMode(true)
+	t.Cleanup(func() { handler.SetManagedMode(false) })
+	require.NoError(t, NewAgent24LiteIngestExecutor().Available(context.Background()))
+}

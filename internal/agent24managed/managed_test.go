@@ -197,6 +197,7 @@ func clearSecretEnv(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", "")
 	t.Setenv("DISABLE_REGISTRATION", "")
 	t.Setenv("OIDC_AUTH_ENABLE", "true")
+	t.Setenv(managedTagKeyEnv, "")
 }
 
 func assertSecretModes(t *testing.T, dir string) {
@@ -272,13 +273,7 @@ func TestHandshakeTokenNotLogged(t *testing.T) {
 		_ = errW.Close()
 	}()
 
-	token, err := NewSetupToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(token) < 32 {
-		t.Fatalf("token length = %d", len(token))
-	}
+	token := "a24k_test-credential-that-must-not-reach-a-log-line"
 	buf := &handshakeBuffer{}
 	hs := NewHandshake(buf)
 	if err := hs.WriteProcess(ProcessReady{
@@ -290,7 +285,7 @@ func TestHandshakeTokenNotLogged(t *testing.T) {
 		Version:    "test",
 		Commit:     "abc",
 		Edition:    "lite",
-		SetupToken: token,
+		Credential: Credential{APIKey: token, KnowledgeBaseID: "kb-1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +327,7 @@ func TestHandshakeTokenNotLogged(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &ready); err != nil {
 		t.Fatal(err)
 	}
-	if ready.Type != "ready" || ready.Phase != "process" || ready.SetupToken != token {
+	if ready.Type != "ready" || ready.Phase != "process" || ready.Credential.APIKey != token || ready.Protocol != 2 {
 		t.Fatalf("ready line = %+v", ready)
 	}
 	var models ModelsReady

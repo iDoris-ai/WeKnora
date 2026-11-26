@@ -1,12 +1,18 @@
 package agent24managed
 
 import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // G2: a conflicting env value is refused before anything is written, so a refused start leaves no
@@ -48,6 +54,47 @@ func TestSecretsRecoverFromInterruptedWrite(t *testing.T) {
 	assertSecretModes(t, dir)
 }
 
+// The integration tag key is generated once, kept with the other secrets and exported.
+func TestSecretsTagKeyPersisted(t *testing.T) {
+	dir := t.TempDir()
+	clearSecretEnv(t)
+	if err := PrepareSecrets(dir); err != nil {
+		t.Fatal(err)
+	}
+	tag := os.Getenv(managedTagKeyEnv)
+	raw, err := base64.StdEncoding.DecodeString(tag)
+	if err != nil || len(raw) < 32 {
+		t.Fatalf("tag key: decoded %d bytes, err %v", len(raw), err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, managedSecretsFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed managedSecretsFile
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.TagKey != tag {
+		t.Fatal("tag key in the file differs from the env")
+	}
+	clearSecretEnv(t)
+	if err := PrepareSecrets(dir); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv(managedTagKeyEnv) != tag {
+		t.Fatal("tag key changed across restart")
+	}
+	clearSecretEnv(t)
+	t.Setenv(managedTagKeyEnv, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	err = PrepareSecrets(dir)
+	if err == nil {
+		t.Fatal("conflicting tag key accepted")
+	}
+	if strings.Contains(err.Error(), tag) {
+		t.Fatal("error text contains the tag key")
+	}
+}
+
 func TestParseArgsRequiresHostFDs(t *testing.T) {
 	base := []string{"--managed", "--state-dir", "x"}
 	cases := map[string][]string{
@@ -74,7 +121,7 @@ func TestParseArgsRequiresHostFDs(t *testing.T) {
 func TestApplyManagedEnvPinsStorage(t *testing.T) {
 	dir := t.TempDir()
 	for _, k := range []string{
-		"DB_DRIVER", "DB_PATH", "STORAGE_TYPE", "LOCAL_STORAGE_BASE_DIR",
+		"DB_DRIVER", "DB_PATH", "STORAGE_TYPE", "LOCAL_STORAGE_BASE_DIR", "AGENT24_KNOWLEDGE_MODE",
 		"RETRIEVE_DRIVER", "STREAM_MANAGER_TYPE", "NEO4J_ENABLE", "WEKNORA_SANDBOX_MODE",
 		"ENABLE_GRAPH_RAG", "GIN_MODE",
 	} {
@@ -88,6 +135,7 @@ func TestApplyManagedEnvPinsStorage(t *testing.T) {
 		"DB_PATH":                filepath.Join(dir, ManagedDBFilename),
 		"STORAGE_TYPE":           "local",
 		"LOCAL_STORAGE_BASE_DIR": filepath.Join(dir, ManagedFilesDirname),
+		"AGENT24_KNOWLEDGE_MODE": "integration",
 		"RETRIEVE_DRIVER":        "sqlite",
 		"STREAM_MANAGER_TYPE":    "memory",
 		"NEO4J_ENABLE":           "false",
@@ -109,6 +157,7 @@ func TestApplyManagedEnvPinsStorage(t *testing.T) {
 		"LOCAL_STORAGE_BASE_DIR": "/somewhere/else",
 		"DB_DRIVER":              "postgres",
 		"STORAGE_TYPE":           "minio",
+		"AGENT24_KNOWLEDGE_MODE": "standalone",
 	} {
 		t.Run(k, func(t *testing.T) {
 			if err := ApplyManagedEnv(dir); err != nil {
@@ -164,5 +213,22 @@ func TestLoopbackGuard(t *testing.T) {
 		if !c.pass && rec.Code != http.StatusForbidden {
 			t.Errorf("Host %q Origin %q: status %d, want 403", c.host, c.origin, rec.Code)
 		}
+	}
+}
+
+// Codex C3: without a built-in embedding model provisioning fails (no handshake), instead of creating a default
+// KB that could never ingest even after the model is added.
+func TestProvisionRefusesWithoutBuiltinEmbedding(t *testing.T) {
+	db := openProbeDB(t)
+	p := &Provisioner{DB: db}
+	if _, _, err := p.Provision(context.Background()); !errors.Is(err, errNoBuiltinEmbedding) {
+		t.Fatalf("provision without embedding: %v", err)
+	}
+	insertModel(t, db, types.Model{
+		ID: "emb-1", Type: types.ModelTypeEmbedding, IsBuiltin: true, Status: types.ModelStatusActive,
+	})
+	id, err := p.builtinEmbeddingID(context.Background())
+	if err != nil || id != "emb-1" {
+		t.Fatalf("builtin embedding = %q, %v", id, err)
 	}
 }

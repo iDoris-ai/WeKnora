@@ -18,7 +18,8 @@ const (
 // ApplyManagedEnv pins storage to stateDir and fills the Lite defaults that .env.lite used to
 // supply (a managed host never loads a dotenv file):
 //   - forced: DB_DRIVER=sqlite, DB_PATH=<stateDir>/weknora.db, STORAGE_TYPE=local,
-//     LOCAL_STORAGE_BASE_DIR=<stateDir>/files.
+//     LOCAL_STORAGE_BASE_DIR=<stateDir>/files, AGENT24_KNOWLEDGE_MODE=integration (G6: only the
+//     allowlisted integration routes are served; /auth/auto-setup and the rest answer 404).
 //     A non-empty process value that differs is an error (the error names the variable, never its value).
 //   - default when unset: RETRIEVE_DRIVER=sqlite, STREAM_MANAGER_TYPE=memory, NEO4J_ENABLE=false,
 //     WEKNORA_SANDBOX_MODE=disabled, ENABLE_GRAPH_RAG=false, GIN_MODE=release.
@@ -30,6 +31,7 @@ func ApplyManagedEnv(stateDir string) error {
 		{"DB_PATH", filepath.Join(stateDir, ManagedDBFilename)},
 		{"STORAGE_TYPE", "local"},
 		{"LOCAL_STORAGE_BASE_DIR", filepath.Join(stateDir, ManagedFilesDirname)},
+		{"AGENT24_KNOWLEDGE_MODE", "integration"},
 	}
 	for _, kv := range forced {
 		if got := os.Getenv(kv[0]); got != "" && got != kv[1] {
