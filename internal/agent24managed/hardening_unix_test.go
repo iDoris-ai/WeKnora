@@ -34,15 +34,40 @@ func rawPipe(t *testing.T) (r, w int) {
 	return p[0], p[1]
 }
 
+const fdProbeChildEnv = "AGENT24_MANAGED_TEST_FD_PROBE"
+
+// TestHelperFDProbe is the child for childSeesFD: it exits 0 when the fd named in the env is open, 1 otherwise.
+// (A shell probe is not portable: dash only redirects single-digit fds.)
+func TestHelperFDProbe(t *testing.T) {
+	v := os.Getenv(fdProbeChildEnv)
+	if v == "" {
+		t.Skip("helper process only")
+	}
+	var fd int
+	if _, err := fmt.Sscan(v, &fd); err != nil {
+		os.Exit(2)
+	}
+	if _, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 // childSeesFD reports whether a child process started now inherits fd.
 func childSeesFD(t *testing.T, fd int) bool {
 	t.Helper()
-	script := fmt.Sprintf("if : >&%d 2>/dev/null; then echo open; else echo closed; fi", fd)
-	out, err := exec.Command("/bin/sh", "-c", script).Output()
-	if err != nil {
-		t.Fatal(err)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperFDProbe$")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%d", fdProbeChildEnv, fd))
+	err := cmd.Run()
+	if err == nil {
+		return true
 	}
-	return strings.TrimSpace(string(out)) == "open"
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false
+	}
+	t.Fatal(err)
+	return false
 }
 
 // G1: after OpenHandshake / OpenLifeline, child processes no longer inherit the host's fds.
