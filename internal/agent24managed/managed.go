@@ -35,7 +35,8 @@ type Options struct {
 	Managed     bool
 	StateDir    string // required when Managed
 	Port        int    // default 0 = OS picks
-	HandshakeFD int    // default 3
+	HandshakeFD int    // required: write end of the host's handshake pipe
+	LifelineFD  int    // required: read end of a pipe the host holds open; EOF means exit
 }
 
 // ParseArgs reads managed-mode flags. Without --managed it returns the zero
@@ -44,7 +45,7 @@ func ParseArgs(args []string) (Options, error) {
 	if !hasExactArg(args, "--managed") {
 		return Options{}, nil
 	}
-	opts := Options{Managed: true, HandshakeFD: 3}
+	opts := Options{Managed: true}
 	var stateDir string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -56,7 +57,7 @@ func ParseArgs(args []string) (Options, error) {
 			continue
 		}
 		switch name {
-		case "--state-dir", "--port", "--handshake-fd":
+		case "--state-dir", "--port", "--handshake-fd", "--lifeline-fd":
 			value, next, err := takeFlagValue(args, i, name, inline, hasEq)
 			if err != nil {
 				return Options{}, err
@@ -71,6 +72,16 @@ func ParseArgs(args []string) (Options, error) {
 	}
 	if stateDir == "" {
 		return Options{}, fmt.Errorf("--state-dir is required in managed mode")
+	}
+	// G1: the host passes both fds explicitly; nothing is assumed about fd 3.
+	if opts.HandshakeFD == 0 {
+		return Options{}, fmt.Errorf("--handshake-fd is required in managed mode")
+	}
+	if opts.LifelineFD == 0 {
+		return Options{}, fmt.Errorf("--lifeline-fd is required in managed mode")
+	}
+	if opts.HandshakeFD == opts.LifelineFD {
+		return Options{}, fmt.Errorf("--lifeline-fd must differ from --handshake-fd")
 	}
 	abs, err := filepath.Abs(stateDir)
 	if err != nil {
@@ -128,6 +139,12 @@ func applyManagedFlag(opts *Options, stateDir *string, name, value string) error
 			return fmt.Errorf("invalid --handshake-fd %q", value)
 		}
 		opts.HandshakeFD = n
+	case "--lifeline-fd":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 3 {
+			return fmt.Errorf("invalid --lifeline-fd %q", value)
+		}
+		opts.LifelineFD = n
 	default:
 		return fmt.Errorf("unknown argument %s", name)
 	}
@@ -160,7 +177,7 @@ type BuiltinModelProbe struct {
 func (p *BuiltinModelProbe) Probe(ctx context.Context) ModelsReady {
 	out := ModelsReady{
 		Type:      "models",
-		Protocol:  1,
+		Protocol:  HandshakeProtocol,
 		Embedding: ModelState{State: modelStateMissing},
 		Chat:      ModelState{State: modelStateMissing},
 	}

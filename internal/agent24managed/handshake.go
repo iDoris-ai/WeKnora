@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-60 (KB-LITE-01a): one-line JSON handshake on an inherited fd.
+// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-62 (KB-LITE-02a, G1): JSON-line handshake.
 
 package agent24managed
 
@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 )
 
 // ProcessReady is the first handshake line, sent once the TCP listener is bound.
@@ -21,6 +20,9 @@ type ProcessReady struct {
 	Edition    string `json:"edition"`
 	SetupToken string `json:"setup_token"`
 }
+
+// HandshakeProtocol is the protocol number of both handshake lines.
+const HandshakeProtocol = 1
 
 // ModelState is the readiness of one built-in model.
 type ModelState struct {
@@ -48,27 +50,12 @@ type Handshake struct {
 	w io.WriteCloser
 }
 
-// OpenHandshake wraps fd. An fd that is not open returns an error.
-// The name is fixed so the channel is not confused with a log file.
+// OpenHandshake wraps fd: only a pipe or socket, marked close-on-exec so no child process inherits it.
+// A refused fd never gets an *os.File, so no finalizer can later close an fd this process still uses.
 func OpenHandshake(fd int) (*Handshake, error) {
-	if fd < 0 {
-		return nil, fmt.Errorf("invalid handshake fd %d", fd)
-	}
-	f := os.NewFile(uintptr(fd), "agent24-handshake")
-	if f == nil {
-		return nil, fmt.Errorf("invalid handshake fd %d", fd)
-	}
-	info, err := f.Stat()
+	f, err := openInheritedPipe(fd, "agent24-handshake")
 	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("invalid handshake fd %d", fd)
-	}
-	// Only a pipe or socket from the host counts. When the host passed nothing,
-	// the fd number can already belong to something this process opened (a log
-	// file, a device); writing the setup token there would leak it.
-	// Not closed: the fd may be one this process still uses.
-	if info.Mode()&(os.ModeNamedPipe|os.ModeSocket) == 0 {
-		return nil, fmt.Errorf("handshake fd %d is not a pipe or socket", fd)
+		return nil, err
 	}
 	return NewHandshake(f), nil
 }

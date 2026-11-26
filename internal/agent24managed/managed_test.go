@@ -38,26 +38,30 @@ func TestParseArgsStandaloneUnchanged(t *testing.T) {
 }
 
 func TestParseArgsManagedValidation(t *testing.T) {
+	fds := []string{"--handshake-fd", "3", "--lifeline-fd", "4"}
+	with := func(args ...string) []string { return append(append([]string{}, fds...), args...) }
 	if _, err := ParseArgs([]string{"--managed"}); err == nil || !strings.Contains(err.Error(), "state-dir") {
 		t.Fatalf("missing --state-dir: %v", err)
 	}
-	if _, err := ParseArgs([]string{"--managed", "--state-dir", "x", "--handshake-fd", "2"}); err == nil ||
+	badFD := []string{"--managed", "--state-dir", "x", "--lifeline-fd", "4", "--handshake-fd", "2"}
+	if _, err := ParseArgs(badFD); err == nil ||
 		!strings.Contains(err.Error(), "handshake-fd") {
 		t.Fatalf("handshake fd 2: %v", err)
 	}
-	if _, err := ParseArgs([]string{"--managed", "--state-dir", "x", "--port", "70000"}); err == nil ||
+	if _, err := ParseArgs(with("--managed", "--state-dir", "x", "--port", "70000")); err == nil ||
 		!strings.Contains(err.Error(), "port") {
 		t.Fatalf("port 70000: %v", err)
 	}
-	if _, err := ParseArgs([]string{"--managed", "--state-dir", "x", "--foo"}); err == nil ||
+	if _, err := ParseArgs(with("--managed", "--state-dir", "x", "--foo")); err == nil ||
 		!strings.Contains(err.Error(), "--foo") {
 		t.Fatalf("unknown --foo: %v", err)
 	}
-	opts, err := ParseArgs([]string{"--managed", "--port=0", "--state-dir=x"})
+	opts, err := ParseArgs(with("--managed", "--port=0", "--state-dir=x"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.Managed || opts.Port != 0 || opts.HandshakeFD != 3 || !filepath.IsAbs(opts.StateDir) {
+	if !opts.Managed || opts.Port != 0 || opts.HandshakeFD != 3 || opts.LifelineFD != 4 ||
+		!filepath.IsAbs(opts.StateDir) {
 		t.Fatalf("options = %+v", opts)
 	}
 	if filepath.Base(opts.StateDir) != "x" {
@@ -279,7 +283,7 @@ func TestHandshakeTokenNotLogged(t *testing.T) {
 	hs := NewHandshake(buf)
 	if err := hs.WriteProcess(ProcessReady{
 		Type:       "ready",
-		Protocol:   1,
+		Protocol:   HandshakeProtocol,
 		Phase:      "process",
 		Origin:     "http://127.0.0.1:1",
 		PID:        1,
@@ -292,7 +296,7 @@ func TestHandshakeTokenNotLogged(t *testing.T) {
 	}
 	probe := fakeProbe{ready: ModelsReady{
 		Type:      "models",
-		Protocol:  1,
+		Protocol:  HandshakeProtocol,
 		Embedding: ModelState{State: modelStateMissing},
 		Chat:      ModelState{State: modelStateMissing},
 	}}
@@ -392,7 +396,7 @@ func TestBuiltinModelProbe(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := (&BuiltinModelProbe{DB: db, Models: &fakeModelService{}}).Probe(context.Background())
-		if got.Type != "models" || got.Protocol != 1 {
+		if got.Type != "models" || got.Protocol != HandshakeProtocol {
 			t.Fatalf("record = %+v", got)
 		}
 		if got.Embedding.State != modelStateMissing || got.Chat.State != modelStateMissing {
@@ -494,16 +498,6 @@ func TestOpenHandshakeRejectsNonPipe(t *testing.T) {
 	if _, err := f.WriteString("still open"); err != nil {
 		t.Fatalf("rejected fd was closed: %v", err)
 	}
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = r.Close() }()
-	hs, err := OpenHandshake(int(w.Fd()))
-	if err != nil {
-		t.Fatalf("pipe rejected: %v", err)
-	}
-	if err := hs.WriteModels(ModelsReady{Type: "models", Protocol: 1}); err != nil {
-		t.Fatal(err)
-	}
+	// The accepting path is in hardening_unix_test.go (TestOpenHandshakeAcceptsPipe): wrapping an *os.File's
+	// fd a second time would leave two finalizers on one fd number.
 }
