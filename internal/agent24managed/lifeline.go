@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a): exit when the host's lifeline pipe closes.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a): exit when the host's lifeline pipe closes.
 
 package agent24managed
 

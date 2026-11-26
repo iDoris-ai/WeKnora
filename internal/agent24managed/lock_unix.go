@@ -1,6 +1,6 @@
 //go:build unix
 
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G2): flock-based instance lock.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G2): flock-based instance lock.
 
 package agent24managed
 

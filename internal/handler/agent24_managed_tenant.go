@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G6): the managed host's provisioned tenant.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G6): the managed host's provisioned tenant.
 
 package handler
 

@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G4/G6): provision the managed host before serving.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G4/G6): provision the managed host before serving.
 
 package main
 

@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-61 (KB-LITE-02a, G2): persist managed-host secrets.
+// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-62 (KB-LITE-02a, G2): persist managed-host secrets.
 
 package agent24managed
 

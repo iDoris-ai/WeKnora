@@ -57,7 +57,7 @@ func NewAgent24AsynqIngestExecutor(inspector *asynq.Inspector) service.Agent24In
 // NewAgent24LiteIngestExecutor is the executor without Redis: inline in standalone and on the managed host, none
 // in integration mode (and none when the mode cannot be read; startup refuses that mode later).
 func NewAgent24LiteIngestExecutor() service.Agent24IngestExecutor {
-	// A24-KB-61: the managed host runs its own ingestion inline, as standalone Lite does.
+	// A24-KB-62: the managed host runs its own ingestion inline, as standalone Lite does.
 	if handler.ManagedMode() {
 		return agent24InlineIngestExecutor{}
 	}

@@ -63,7 +63,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "managed mode requires the lite edition\n")
 		os.Exit(2)
 	}
-	// Agent24 A24-KB-61 (G2): one managed instance per state dir. The OS drops the lock when this process
+	// Agent24 A24-KB-62 (G2): one managed instance per state dir. The OS drops the lock when this process
 	// exits, crash included; the lifeline below makes the process exit when its host goes away.
 	if opts.Managed {
 		lock, lerr := agent24managed.AcquireInstanceLock(opts.StateDir)
@@ -82,7 +82,7 @@ func main() {
 	// discovery is scoped to Lite builds (internal/handler.Edition is
 	// injected at build time), so a standard binary built in the repo root
 	// never picks up Lite defaults. Process variables remain authoritative.
-	// A managed host loads no dotenv file at all (A24-KB-61, G3).
+	// A managed host loads no dotenv file at all (A24-KB-62, G3).
 	if err := loadDotenv(opts.Managed, handler.Edition == "lite"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
@@ -127,7 +127,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "managed lifeline: %v\n", hsErr)
 			os.Exit(1)
 		}
-		// No setup token (A24-KB-61, G4): the credential is provisioned in-process and goes out on the
+		// No setup token (A24-KB-62, G4): the credential is provisioned in-process and goes out on the
 		// handshake only. SetManagedMode must precede BuildContainer: it keeps background work and the
 		// inline ingest executor on in integration mode.
 		handler.SetManagedMode(true)

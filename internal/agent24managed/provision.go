@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G4/G6): in-process provisioning for the managed host.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G4/G6): in-process provisioning for the managed host.
 //
 // The managed host serves only the integration routes (AGENT24_KNOWLEDGE_MODE=integration), so neither
 // /auth/auto-setup nor any other route that mints an administrator credential is reachable over HTTP.

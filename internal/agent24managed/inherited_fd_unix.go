@@ -1,6 +1,6 @@
 //go:build unix
 
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G1): inherited host fds on Unix.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G1): inherited host fds on Unix.
 
 package agent24managed
 

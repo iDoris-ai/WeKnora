@@ -26,7 +26,7 @@ import (
 // background work: integration mode, or a mode value that cannot be read
 // (startup refuses it later; until then nothing is started).
 func agent24BackgroundJobsDisabled() bool {
-	// A24-KB-61: the managed Lite host is a single process that owns its own database; nothing else
+	// A24-KB-62: the managed Lite host is a single process that owns its own database; nothing else
 	// ingests, so it runs its background work even in integration mode.
 	if handler.ManagedMode() {
 		return false

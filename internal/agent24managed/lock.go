@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G2): one managed instance per state directory.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G2): one managed instance per state directory.
 
 package agent24managed
 

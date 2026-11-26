@@ -18,7 +18,7 @@ import (
 const agent24DefaultKBName = "默认知识库"
 
 // Agent24DefaultKBTemplate names the source KB and the created default KB. With no TemplateKBID
-// (the Lite managed host, A24-KB-61) the default KB is a fresh one on EmbeddingModelID.
+// (the Lite managed host, A24-KB-62) the default KB is a fresh one on EmbeddingModelID.
 type Agent24DefaultKBTemplate struct {
 	TemplateKBID     string
 	Name             string

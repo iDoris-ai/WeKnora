@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G1): inherited host fds.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G1): inherited host fds.
 
 package agent24managed
 

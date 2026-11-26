@@ -92,7 +92,7 @@ func NewAgent24KnowledgeIngestHandler(
 	if err != nil {
 		return nil, err
 	}
-	// A24-KB-61: the managed host has no activation table; its one provisioned tenant may ingest.
+	// A24-KB-62: the managed host has no activation table; its one provisioned tenant may ingest.
 	if activations == nil && !ManagedMode() {
 		return nil, nil
 	}

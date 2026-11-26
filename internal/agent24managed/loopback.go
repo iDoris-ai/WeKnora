@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G5): Host/Origin allowlist on the loopback port.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G5): Host/Origin allowlist on the loopback port.
 
 package agent24managed
 

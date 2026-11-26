@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-61 (KB-LITE-02a): JSON-line handshake on an inherited fd.
+// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-62 (KB-LITE-02a): JSON-line handshake on an inherited fd.
 
 package agent24managed
 
@@ -9,7 +9,7 @@ import (
 )
 
 // ProcessReady is the first handshake line, sent once the TCP listener is bound and provisioning is done.
-// Protocol 2 (A24-KB-61) replaces protocol 1's setup_token with the credential itself.
+// Protocol 2 (A24-KB-62) replaces protocol 1's setup_token with the credential itself.
 type ProcessReady struct {
 	Type       string     `json:"type"`     // "ready"
 	Protocol   int        `json:"protocol"` // 2

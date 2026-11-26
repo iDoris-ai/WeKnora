@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-61 (KB-LITE-02a, G3): a managed host loads no dotenv file.
+// Agent24 fork product patch A24-KB-62 (KB-LITE-02a, G3): a managed host loads no dotenv file.
 
 package main
 
