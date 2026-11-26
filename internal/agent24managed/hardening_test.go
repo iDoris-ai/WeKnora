@@ -116,9 +116,11 @@ func TestParseArgsRequiresHostFDs(t *testing.T) {
 // G3: storage is pinned to the state dir; a conflicting process value is refused by name only.
 func TestApplyManagedEnvPinsStorage(t *testing.T) {
 	dir := t.TempDir()
-	for _, k := range []string{"DB_DRIVER", "DB_PATH", "STORAGE_TYPE", "LOCAL_STORAGE_BASE_DIR", "AGENT24_KNOWLEDGE_MODE",
+	for _, k := range []string{
+		"DB_DRIVER", "DB_PATH", "STORAGE_TYPE", "LOCAL_STORAGE_BASE_DIR", "AGENT24_KNOWLEDGE_MODE",
 		"RETRIEVE_DRIVER", "STREAM_MANAGER_TYPE", "NEO4J_ENABLE", "WEKNORA_SANDBOX_MODE",
-		"ENABLE_GRAPH_RAG", "GIN_MODE"} {
+		"ENABLE_GRAPH_RAG", "GIN_MODE",
+	} {
 		t.Setenv(k, "")
 	}
 	if err := ApplyManagedEnv(dir); err != nil {
