@@ -56,6 +56,10 @@ type Provisioner struct {
 // key and revokes the older ones. It returns the tenant id (for the ingest check) and the credential.
 // Errors never carry the key.
 func (p *Provisioner) Provision(ctx context.Context) (uint64, Credential, error) {
+	embeddingID, err := p.builtinEmbeddingID(ctx)
+	if err != nil {
+		return 0, Credential{}, err
+	}
 	user, err := p.ensureUser(ctx)
 	if err != nil {
 		return 0, Credential{}, err
@@ -67,10 +71,6 @@ func (p *Provisioner) Provision(ctx context.Context) (uint64, Credential, error)
 	owner := types.Principal{Type: types.PrincipalAPITenant, ID: strconv.FormatUint(tenantID, 10)}.StorageID()
 	if err := repository.EnsureAgent24DefaultKBTable(p.DB); err != nil {
 		return 0, Credential{}, fmt.Errorf("managed provisioning: %w", err)
-	}
-	embeddingID, err := p.builtinEmbeddingID(ctx)
-	if err != nil {
-		return 0, Credential{}, err
 	}
 	prov := service.NewAgent24DefaultKBProvisioner(p.KBs, p.Tenants,
 		service.Agent24DefaultKBTemplate{EmbeddingModelID: embeddingID})
@@ -120,8 +120,11 @@ func (p *Provisioner) ensureUser(ctx context.Context) (*types.User, error) {
 	return user, nil
 }
 
-// builtinEmbeddingID is the oldest built-in embedding model, or "" when builtin_models.yaml has none (the KB is
-// then created without one and ingestion fails until the host supplies a model).
+// errNoBuiltinEmbedding: the host supplied no built-in embedding model. Provisioning refuses rather than create a
+// default KB without one: a ready default KB is never rebound, so it could not ingest even after the model appears.
+var errNoBuiltinEmbedding = errors.New("managed provisioning: no built-in embedding model (BUILTIN_MODELS_CONFIG)")
+
+// builtinEmbeddingID is the oldest built-in embedding model; none is errNoBuiltinEmbedding.
 func (p *Provisioner) builtinEmbeddingID(ctx context.Context) (string, error) {
 	var m types.Model
 	err := p.DB.WithContext(ctx).
@@ -129,7 +132,7 @@ func (p *Provisioner) builtinEmbeddingID(ctx context.Context) (string, error) {
 		Order("created_at ASC").
 		First(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", nil
+		return "", errNoBuiltinEmbedding
 	}
 	if err != nil {
 		return "", fmt.Errorf("managed provisioning: read built-in models: %w", err)

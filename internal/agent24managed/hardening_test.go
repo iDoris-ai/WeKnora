@@ -1,7 +1,9 @@
 package agent24managed
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // G2: a conflicting env value is refused before anything is written, so a refused start leaves no
@@ -209,5 +213,22 @@ func TestLoopbackGuard(t *testing.T) {
 		if !c.pass && rec.Code != http.StatusForbidden {
 			t.Errorf("Host %q Origin %q: status %d, want 403", c.host, c.origin, rec.Code)
 		}
+	}
+}
+
+// Codex C3: without a built-in embedding model provisioning fails (no handshake), instead of creating a default
+// KB that could never ingest even after the model is added.
+func TestProvisionRefusesWithoutBuiltinEmbedding(t *testing.T) {
+	db := openProbeDB(t)
+	p := &Provisioner{DB: db}
+	if _, _, err := p.Provision(context.Background()); !errors.Is(err, errNoBuiltinEmbedding) {
+		t.Fatalf("provision without embedding: %v", err)
+	}
+	insertModel(t, db, types.Model{
+		ID: "emb-1", Type: types.ModelTypeEmbedding, IsBuiltin: true, Status: types.ModelStatusActive,
+	})
+	id, err := p.builtinEmbeddingID(context.Background())
+	if err != nil || id != "emb-1" {
+		t.Fatalf("builtin embedding = %q, %v", id, err)
 	}
 }
