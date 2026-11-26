@@ -242,3 +242,17 @@ func inDisabledElse(stack []ast.Node) bool {
 	}
 	return false
 }
+
+// A24-KB-61 (G6): the managed Lite host is integration mode but the only process on its database, so its
+// background work (task consumer, recovery) runs.
+func TestBackgroundRunsOnManagedHost(t *testing.T) {
+	t.Setenv(handler.Agent24KnowledgeModeEnv, handler.Agent24KnowledgeModeIntegration)
+	if !agent24BackgroundJobsDisabled() {
+		t.Fatal("control: integration mode alone must disable background work")
+	}
+	handler.SetManagedMode(true)
+	t.Cleanup(func() { handler.SetManagedMode(false) })
+	if agent24BackgroundJobsDisabled() {
+		t.Fatal("managed host has its background work disabled")
+	}
+}

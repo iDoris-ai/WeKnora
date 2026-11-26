@@ -89,8 +89,12 @@ func NewAgent24KnowledgeIngestHandler(
 		return nil, nil
 	}
 	activations, err := agent24MockActivationsFromEnv()
-	if err != nil || activations == nil {
+	if err != nil {
 		return nil, err
+	}
+	// A24-KB-61: the managed host has no activation table; its one provisioned tenant may ingest.
+	if activations == nil && !ManagedMode() {
+		return nil, nil
 	}
 	key, err := Agent24KnowledgeTagKeyFromEnv()
 	if err != nil {
@@ -99,6 +103,11 @@ func NewAgent24KnowledgeIngestHandler(
 	return &Agent24KnowledgeIngestHandler{
 		activations: activations, ingest: ingest, jobs: jobs, candidates: candidates, db: db, key: key, now: time.Now,
 	}, nil
+}
+
+// tenantMayIngest: a tenant in the mock activation table, or the managed host's provisioned tenant.
+func (h *Agent24KnowledgeIngestHandler) tenantMayIngest(tenant uint64) bool {
+	return h.activations.AllowsTenant(tenant) || Agent24ManagedTenantIs(tenant)
 }
 
 func (h *Agent24KnowledgeIngestHandler) clock() time.Time {
@@ -605,7 +614,7 @@ func (h *Agent24KnowledgeIngestHandler) ingestCaller(
 	caller, ok := agent24CandidateCallerOf(ctx)
 	scope, scopeOK := types.TenantAPIKeyScopeFromContext(ctx)
 	if !ok || caller.tenant == 0 || !scopeOK || scope.IsPlatform() || scope.FullAccess ||
-		!scope.HasCapability(types.APIKeyCapabilityIngest) || !h.activations.AllowsTenant(caller.tenant) {
+		!scope.HasCapability(types.APIKeyCapabilityIngest) || !h.tenantMayIngest(caller.tenant) {
 		return caller, scope, agent24Forbidden("operation_not_allowed")
 	}
 	return caller, scope, nil

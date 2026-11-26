@@ -25,8 +25,8 @@
 | 12 | 鉴权前路由 | 有 10 组路由注册在 Auth 之前，另有 noAuthAPI 白名单（含默认开放的注册；v0.8.3 起只有 `self_serve` 放行公开注册） | 集成模式无法整体关闭这些路由 | KB-C1-01 |
 | 13 | 日志记正文 | 请求体、响应体各最多 10KB 写入访问日志，鉴权前路由也一样（v0.8.3 起请求体只读 10KB+1）；完整 `path?query` 只对少数参数脱敏；启用 Langfuse 时 query 和命中预览进追踪 | 正文、query、HMAC 明文、query 与路径里的 bearer 凭据落日志；Lite 默认 debug 级 | KB-OBS-01 |
 | 14 | RBAC 可配成放行 | `WEKNORA_TENANT_ENABLE_RBAC=false` 后只记日志不拒绝，非成员按 Admin 放行 | 任何成员都能管理 key、主体配置并签发主体 token；集成模式必须禁止这样配置 | KB-C1-01、KB-C1-03 |
-| 15 | Lite 无头默认监听 | `0.0.0.0:8080`；端口 0 通不过配置校验；默认开放自助注册 | 没有 loopback 默认、端口回报、ready 握手、--version；同网段任何人可注册 | KB-LITE-01a、KB-C1-01b-a |
-| 16 | auto-setup 范围 | 仅 Wails 桌面版能用；只建默认用户和空间并签发令牌 | 无头版不能用；不建 KB、不配模型 | KB-LITE-01a、KB-C4-02a/02b |
+| 15 | Lite 无头默认监听 | 非托管仍是 `0.0.0.0:8080`；托管档（`--managed`，01a/02a）只听 `127.0.0.1`、端口可为 0 并经握手回报、关闭注册、有 `--version`，Host/Origin 只认 `127.0.0.1:<port>`/`localhost:<port>`，一个 state dir 只起一个实例，宿主管道关闭即退出 | 非托管默认仍对外监听并开放注册（不在托管路径上） | KB-LITE-01a、KB-LITE-02a |
+| 16 | auto-setup 范围 | 仅 Wails 桌面版能用；托管档强制 integration 模式，auto-setup 404，开通在进程内完成（建用户、默认 KB、签限库 retrieve+ingest key），key 只经握手下发、每次启动换发 | 托管档不配模型：内置 embedding 由宿主的 `builtin_models.yaml` 提供 | KB-LITE-02a、KB-C4-02a/02b |
 
 ## 逐项
 
@@ -226,6 +226,7 @@
   - 对照：Wails 桌面版默认 `127.0.0.1:0`（`cmd/desktop/main.go:594-603`）。
 - **缺口**：没有 loopback 默认、`:0` 端口回报、受控握手、密钥持久化；托管模式下没有关闭注册的默认值。
 - **任务**：KB-LITE-01a（loopback、端口回报、握手、密钥持久化）、KB-C1-01b-a（`--version`）、KB-C1-01（注册入口）。
+- **托管档现状（KB-LITE-01a、02a 之后，2026-11-26）**：`--managed --state-dir <d> --handshake-fd <n> --lifeline-fd <m>` 只监听 `127.0.0.1`（`internal/agent24managed/managed.go` `Listen`），端口 0 由握手第一行回报；注册固定为 invite_only、OIDC 关闭（`secrets.go`）；`LoopbackGuard` 拒绝其他 Host/Origin（`loopback.go`）；`instance.lock` 保证一个 state dir 一个实例（`lock_unix.go`）；宿主持有的 lifeline 管道读到 EOF 就优雅退出（`lifeline.go`）；数据库与本地存储固定在 state dir，不加载任何 dotenv（`env.go`、`cmd/server/dotenv.go`）。上面「缺口」只剩非托管启动的默认值。
 - **证据**：`docs/agent24/probe-evidence/cc94ce1b/15-lite-listen.json`（标准栈，不能替代 Lite；v0.8.2 证据见 `4b363d15/`）。已测部分一致：容器内 `config.yaml` 默认监听 `0.0.0.0:8080`，`/proc/net/tcp` 里确实监听通配地址；宿主侧只发布到 `127.0.0.1:8080`（受测栈约束）。未测：无头 Lite 二进制、端口 0、`SERVER_HOST` 覆盖、`--version`。
 
 ### 16. auto-setup 的范围
@@ -235,6 +236,7 @@
   - 默认用户不存在时，用固定的默认邮箱常量和随机口令注册（空间由 Register 流程建立）；已存在时不再注册。两种情况最后都签发 access/refresh token（`auth.go:914-971`，判断在 `:916-917`，签发在 `:948`），所以重复调用就会重复签发。
 - **缺口**：不建默认 KB，不配置模型和配置档；无头托管没有可用的引导入口；引导凭据和日常凭据没有分开。
 - **任务**：KB-LITE-01a（握手通道）、KB-C4-02a（可信 bootstrap）、KB-C4-02b（幂等建库）。
+- **托管档现状（KB-LITE-02a 之后，2026-11-26）**：托管档强制 `AGENT24_KNOWLEDGE_MODE=integration`，auto-setup 不在白名单，返回 404；也不再生成 setup token。进程启动时在进程内建默认用户与空间、按内置 embedding 建默认 KB（复用 KB-C4-02b 的幂等建库），签发一把只限该 KB、retrieve+ingest 的租户 key 并吊销旧 key（`internal/agent24managed/provision.go`），经握手第一行（协议 2，`credential` 字段）交给宿主；宿主用 `X-API-Key` 调 integration 路由。
 - **证据**：`docs/agent24/probe-evidence/cc94ce1b/16-auto-setup.json`（标准栈；v0.8.2 证据见 `4b363d15/`）。与本表一致：标准版返回 403，带任意桌面 token 仍 403。（证据脚本按源码预期 403，所以记为一致；本表旧稿“无头 `cmd/server` 一律 401”据此改正。）未测：无头 Lite 返回 401、桌面版的签发行为。
 
 ## 与 iDoris-ai/Agent24#989 的差异（待回写）

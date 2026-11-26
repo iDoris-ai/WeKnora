@@ -17,10 +17,12 @@ import (
 
 const agent24DefaultKBName = "默认知识库"
 
-// Agent24DefaultKBTemplate names the source KB and the created default KB.
+// Agent24DefaultKBTemplate names the source KB and the created default KB. With no TemplateKBID
+// (the Lite managed host, A24-KB-61) the default KB is a fresh one on EmbeddingModelID.
 type Agent24DefaultKBTemplate struct {
-	TemplateKBID string
-	Name         string
+	TemplateKBID     string
+	Name             string
+	EmbeddingModelID string
 }
 
 type agent24DefaultKBProvisioner struct {
@@ -75,16 +77,19 @@ func (p *agent24DefaultKBProvisioner) Create(ctx context.Context, tenantID uint6
 		}
 		return errors.New("agent24 default kb: knowledge base belongs to another tenant")
 	}
-	tmpl, err := p.kbs.GetKnowledgeBaseByID(ctx, p.template.TemplateKBID)
-	missing, err = agent24KBMissing(tmpl, err)
-	if err != nil {
-		return err
-	}
-	if missing {
-		return errors.New("agent24 default kb: template knowledge base not found")
-	}
-	if tmpl.TenantID != tenantID {
-		return errors.New("agent24 default kb: template knowledge base belongs to another tenant")
+	tmpl := &types.KnowledgeBase{TenantID: tenantID, EmbeddingModelID: p.template.EmbeddingModelID}
+	if p.template.TemplateKBID != "" {
+		tmpl, err = p.kbs.GetKnowledgeBaseByID(ctx, p.template.TemplateKBID)
+		missing, err = agent24KBMissing(tmpl, err)
+		if err != nil {
+			return err
+		}
+		if missing {
+			return errors.New("agent24 default kb: template knowledge base not found")
+		}
+		if tmpl.TenantID != tenantID {
+			return errors.New("agent24 default kb: template knowledge base belongs to another tenant")
+		}
 	}
 	name := p.template.Name
 	if name == "" {
