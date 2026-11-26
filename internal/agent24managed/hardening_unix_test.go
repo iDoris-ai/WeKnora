@@ -280,3 +280,57 @@ func TestHostCloseFreesInstance(t *testing.T) {
 	}
 	_ = l.Release()
 }
+
+// #181 B2: the host dying during startup (before Serving) exits the process at once; after Serving it only
+// closes Gone, and the caller shuts down gracefully.
+func TestWatchHostExitsBeforeServingOnly(t *testing.T) {
+	t.Run("before serving", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = r.Close() }()
+		exited := make(chan int, 1)
+		h := WatchHost(r, func(code int) { exited <- code })
+		_ = w.Close()
+		select {
+		case code := <-exited:
+			if code != 0 {
+				t.Fatalf("exit code %d", code)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("host gone during startup did not exit")
+		}
+		select {
+		case <-h.Gone():
+		default:
+			t.Fatal("Gone not closed")
+		}
+	})
+	t.Run("after serving", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = r.Close() }()
+		exited := make(chan int, 1)
+		h := WatchHost(r, func(code int) { exited <- code })
+		h.Serving()
+		_ = w.Close()
+		select {
+		case <-h.Gone():
+		case <-time.After(5 * time.Second):
+			t.Fatal("Gone not closed after the host left")
+		}
+		select {
+		case <-exited:
+			t.Fatal("exited while serving; the caller must shut down gracefully")
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+	var nilWatch *HostWatch
+	if nilWatch.Gone() != nil {
+		t.Fatal("nil watch must return a nil channel")
+	}
+	nilWatch.Serving()
+}

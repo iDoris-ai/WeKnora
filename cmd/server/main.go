@@ -115,7 +115,7 @@ func main() {
 
 	var hs *agent24managed.Handshake
 	var setupToken string
-	var lifeline *os.File
+	var host *agent24managed.HostWatch
 	if opts.Managed {
 		var hsErr error
 		hs, hsErr = agent24managed.OpenHandshake(opts.HandshakeFD)
@@ -123,11 +123,17 @@ func main() {
 			fmt.Fprintf(os.Stderr, "managed handshake: %v\n", hsErr)
 			os.Exit(1)
 		}
-		lifeline, hsErr = agent24managed.OpenLifeline(opts.LifelineFD)
-		if hsErr != nil {
-			fmt.Fprintf(os.Stderr, "managed lifeline: %v\n", hsErr)
+		lifeline, lErr := agent24managed.OpenLifeline(opts.LifelineFD)
+		if lErr != nil {
+			fmt.Fprintf(os.Stderr, "managed lifeline: %v\n", lErr)
 			os.Exit(1)
 		}
+		// Watch from now on (PR-Daemon #181 B2): a host that dies while the container is still being built
+		// ends this process at once, so a stuck start cannot hold instance.lock against the next launch.
+		host = agent24managed.WatchHost(lifeline, os.Exit)
+		// A host that died also closed our stdout/stderr pipes; a log write must not kill the process with
+		// SIGPIPE before the graceful shutdown (#181 F1).
+		signal.Ignore(syscall.SIGPIPE)
 		setupToken, hsErr = agent24managed.NewSetupToken()
 		if hsErr != nil {
 			fmt.Fprintf(os.Stderr, "managed setup token: %v\n", hsErr)
@@ -190,18 +196,15 @@ func main() {
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)
-		if opts.Managed {
-			go agent24managed.WatchLifeline(lifeline, func() {
-				logger.Info(context.Background(), "managed host lifeline closed, shutting down")
-				select {
-				case signals <- syscall.SIGTERM:
-				default: // a signal is already queued; shutdown starts either way
-				}
-			})
-		}
 		go func() {
-			sig := <-signals
-			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
+			// The lifeline has its own channel (#181 F3): reusing signals would let the second-signal goroutine
+			// below read our injected SIGTERM and force-close in-flight requests.
+			select {
+			case sig := <-signals:
+				logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
+			case <-host.Gone():
+				logger.Info(context.Background(), "managed host lifeline closed, starting server shutdown...")
+			}
 
 			drainBudget, cleanupBudget := runtime.ShutdownBudgets(cfg.Server.ShutdownTimeout)
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), drainBudget)
@@ -237,6 +240,9 @@ func main() {
 			logger.Info(context.Background(), "Server has exited")
 			done()
 		}()
+
+		// From here a departed host goes through the shutdown goroutine above instead of exiting at once.
+		host.Serving()
 
 		runtime.LogGinRouteCount(context.Background())
 		logger.Infof(context.Background(), "Server is running at %s", addr)
