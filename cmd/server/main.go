@@ -24,11 +24,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,7 +40,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
-	"github.com/Tencent/WeKnora/internal/envfile"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
@@ -62,15 +63,34 @@ func main() {
 		fmt.Fprintf(os.Stderr, "managed mode requires the lite edition\n")
 		os.Exit(2)
 	}
+	// Agent24 A24-KB-62 (G2): one managed instance per state dir. The OS drops the lock when this process
+	// exits, crash included; the lifeline below makes the process exit when its host goes away.
+	if opts.Managed {
+		lock, lerr := agent24managed.AcquireInstanceLock(opts.StateDir)
+		if errors.Is(lerr, agent24managed.ErrInstanceLocked) {
+			fmt.Fprintf(os.Stderr, "managed mode: state directory is in use by another instance\n")
+			os.Exit(3)
+		}
+		if lerr != nil {
+			fmt.Fprintf(os.Stderr, "managed mode: %v\n", lerr)
+			os.Exit(1)
+		}
+		defer func() { _ = lock.Release() }()
+	}
 	// Load dotenv configuration before any container provider reads it.
 	// Explicit ENV_FILE is honored on every build; automatic .env.lite
 	// discovery is scoped to Lite builds (internal/handler.Edition is
 	// injected at build time), so a standard binary built in the repo root
 	// never picks up Lite defaults. Process variables remain authoritative.
-	if err := envfile.Load(handler.Edition == "lite"); err != nil {
+	// A managed host loads no dotenv file at all (A24-KB-62, G3).
+	if err := loadDotenv(opts.Managed, handler.Edition == "lite"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 	if opts.Managed {
+		if err := agent24managed.ApplyManagedEnv(opts.StateDir); err != nil {
+			fmt.Fprintf(os.Stderr, "managed env: %v\n", err)
+			os.Exit(1)
+		}
 		if err := agent24managed.PrepareSecrets(opts.StateDir); err != nil {
 			fmt.Fprintf(os.Stderr, "managed secrets: %v\n", err)
 			os.Exit(1)
@@ -95,11 +115,17 @@ func main() {
 
 	var hs *agent24managed.Handshake
 	var setupToken string
+	var lifeline *os.File
 	if opts.Managed {
 		var hsErr error
 		hs, hsErr = agent24managed.OpenHandshake(opts.HandshakeFD)
 		if hsErr != nil {
 			fmt.Fprintf(os.Stderr, "managed handshake: %v\n", hsErr)
+			os.Exit(1)
+		}
+		lifeline, hsErr = agent24managed.OpenLifeline(opts.LifelineFD)
+		if hsErr != nil {
+			fmt.Fprintf(os.Stderr, "managed lifeline: %v\n", hsErr)
 			os.Exit(1)
 		}
 		setupToken, hsErr = agent24managed.NewSetupToken()
@@ -146,6 +172,8 @@ func main() {
 		}
 		if opts.Managed {
 			addr = listener.Addr().String()
+			// G5: only Host/Origin 127.0.0.1:<port> or localhost:<port> reach the router (DNS rebinding).
+			server.Handler = agent24managed.LoopbackGuard(router, listener.Addr().(*net.TCPAddr).Port)
 		}
 
 		ctx, done := context.WithCancel(context.Background())
@@ -162,6 +190,15 @@ func main() {
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)
+		if opts.Managed {
+			go agent24managed.WatchLifeline(lifeline, func() {
+				logger.Info(context.Background(), "managed host lifeline closed, shutting down")
+				select {
+				case signals <- syscall.SIGTERM:
+				default: // a signal is already queued; shutdown starts either way
+				}
+			})
+		}
 		go func() {
 			sig := <-signals
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
@@ -206,7 +243,7 @@ func main() {
 		if opts.Managed {
 			if err := hs.WriteProcess(agent24managed.ProcessReady{
 				Type:       "ready",
-				Protocol:   1,
+				Protocol:   agent24managed.HandshakeProtocol,
 				Phase:      "process",
 				Origin:     "http://" + listener.Addr().String(),
 				PID:        os.Getpid(),

@@ -1,4 +1,4 @@
-// Agent24 fork product patch A24-KB-60 (KB-LITE-01a): persist managed-host JWT and AES secrets.
+// Agent24 fork product patch A24-KB-60 (KB-LITE-01a), A24-KB-62 (KB-LITE-02a, G2): persist managed-host secrets.
 
 package agent24managed
 
@@ -6,12 +6,17 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-const managedSecretsFilename = "managed-secrets.json"
+const (
+	managedSecretsFilename = "managed-secrets.json"
+	managedSecretsTempGlob = managedSecretsFilename + ".tmp-"
+)
 
 type managedSecretsFile struct {
 	Version      int    `json:"version"`
@@ -20,9 +25,14 @@ type managedSecretsFile struct {
 }
 
 // PrepareSecrets creates or reads <stateDir>/managed-secrets.json and copies
-// those values into JWT_SECRET and SYSTEM_AES_KEY. An existing file is never
-// rewritten. A non-empty environment value that differs from the file is an
-// error, and the error text does not include either secret.
+// those values into JWT_SECRET and SYSTEM_AES_KEY.
+// An existing file is never rewritten. A non-empty environment value that
+// differs from the file is an error, and the error text does not include
+// any secret. The caller holds the instance lock (AcquireInstanceLock).
+//
+// A new file is checked against the environment first, then written to a
+// temp file, fsynced and linked into place, so a crash leaves either no file
+// or a complete one, never a partial one.
 func PrepareSecrets(stateDir string) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("create managed state dir: %w", err)
@@ -32,31 +42,85 @@ func PrepareSecrets(stateDir string) error {
 	if err := os.Chmod(stateDir, 0o700); err != nil {
 		return fmt.Errorf("create managed state dir: %w", err)
 	}
+	removeStaleSecretTemps(stateDir)
 	path := filepath.Join(stateDir, managedSecretsFilename)
+	if _, err := os.Lstat(path); err == nil {
+		return useExistingSecrets(path)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read managed secrets: %w", err)
+	}
 	generated, err := newManagedSecrets()
 	if err != nil {
+		return err
+	}
+	if err := checkManagedEnv(generated); err != nil {
 		return err
 	}
 	payload, err := json.Marshal(generated)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
+	if err := writeSecretsAtomically(stateDir, path, payload); err != nil {
+		if errors.Is(err, os.ErrExist) {
 			return useExistingSecrets(path)
 		}
+		return err
+	}
+	return applyManagedEnv(generated)
+}
+
+// removeStaleSecretTemps drops temp files a killed start left behind. Safe because the caller holds
+// the instance lock, so no other start is writing one.
+func removeStaleSecretTemps(stateDir string) {
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), managedSecretsTempGlob) {
+			_ = os.Remove(filepath.Join(stateDir, e.Name()))
+		}
+	}
+}
+
+func writeSecretsAtomically(stateDir, path string, payload []byte) error {
+	tmp, err := os.CreateTemp(stateDir, managedSecretsTempGlob)
+	if err != nil {
 		return fmt.Errorf("create managed secrets: %w", err)
 	}
-	_, werr := f.Write(payload)
-	cerr := f.Close()
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	werr := tmp.Chmod(0o600)
+	if werr == nil {
+		_, werr = tmp.Write(payload)
+	}
+	if werr == nil {
+		werr = tmp.Sync()
+	}
+	cerr := tmp.Close()
 	if werr != nil {
 		return fmt.Errorf("write managed secrets: %w", werr)
 	}
 	if cerr != nil {
 		return fmt.Errorf("write managed secrets: %w", cerr)
 	}
-	return applyManagedEnv(generated)
+	// Link, not rename: it never replaces a file that already exists.
+	if err := os.Link(tmpPath, path); err != nil {
+		if os.IsExist(err) {
+			return os.ErrExist
+		}
+		return fmt.Errorf("write managed secrets: %w", err)
+	}
+	dir, err := os.Open(stateDir)
+	if err != nil {
+		return fmt.Errorf("sync managed state dir: %w", err)
+	}
+	serr := dir.Sync()
+	_ = dir.Close()
+	if serr != nil {
+		return fmt.Errorf("sync managed state dir: %w", serr)
+	}
+	return nil
 }
 
 func newManagedSecrets() (managedSecretsFile, error) {
@@ -111,18 +175,23 @@ func loadManagedSecrets(path string) (managedSecretsFile, error) {
 	return parsed, nil
 }
 
-func applyManagedEnv(s managedSecretsFile) error {
+func checkManagedEnv(s managedSecretsFile) error {
 	if err := ensureEnvMatches("JWT_SECRET", s.JWTSecret); err != nil {
 		return err
 	}
-	if err := ensureEnvMatches("SYSTEM_AES_KEY", s.SystemAESKey); err != nil {
+	return ensureEnvMatches("SYSTEM_AES_KEY", s.SystemAESKey)
+}
+
+func applyManagedEnv(s managedSecretsFile) error {
+	if err := checkManagedEnv(s); err != nil {
 		return err
 	}
-	if err := os.Setenv("JWT_SECRET", s.JWTSecret); err != nil {
-		return err
-	}
-	if err := os.Setenv("SYSTEM_AES_KEY", s.SystemAESKey); err != nil {
-		return err
+	for _, kv := range [][2]string{
+		{"JWT_SECRET", s.JWTSecret}, {"SYSTEM_AES_KEY", s.SystemAESKey},
+	} {
+		if err := os.Setenv(kv[0], kv[1]); err != nil {
+			return err
+		}
 	}
 	if err := os.Setenv("DISABLE_REGISTRATION", "true"); err != nil {
 		return err
