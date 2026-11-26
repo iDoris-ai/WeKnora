@@ -137,6 +137,7 @@ func main() {
 		// handshake only. SetManagedMode must precede BuildContainer: it keeps background work and the
 		// inline ingest executor on in integration mode.
 		handler.SetManagedMode(true)
+		service.EnableAgent24LiteIngestFormats()
 	}
 
 	// Build dependency injection container

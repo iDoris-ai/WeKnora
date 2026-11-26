@@ -17,3 +17,22 @@ func TestAgent24IngestFormatAndSize(t *testing.T) {
 	require.False(t, Agent24IngestTooLarge(Agent24IngestMaxBytes))
 	require.True(t, Agent24IngestTooLarge(Agent24IngestMaxBytes+1))
 }
+
+// A24-KB-62: csv and json only on the Lite managed host.
+func TestAgent24IngestFormatLiteExtras(t *testing.T) {
+	t.Cleanup(func() { agent24LiteFormatsOn.Store(false) })
+	for _, name := range []string{"rows.csv", "data.JSON"} {
+		if Agent24IngestFormatAllowed(name) {
+			t.Fatalf("%s allowed outside the managed host", name)
+		}
+	}
+	EnableAgent24LiteIngestFormats()
+	for _, name := range []string{"rows.csv", "data.JSON", "note.md"} {
+		if !Agent24IngestFormatAllowed(name) {
+			t.Fatalf("%s refused on the managed host", name)
+		}
+	}
+	if Agent24IngestFormatAllowed("doc.pdf") {
+		t.Fatal("pdf allowed on the managed host")
+	}
+}
